@@ -39,9 +39,9 @@ INSERT INTO medication_protocol
     (id, farm_id, name, anchor, start_offset_days, doses, interval_days, dose_note)
 VALUES
  ('c0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111',
-  'Hosto (pre-delivery)',  'expected_kindling', -5, 5, 1, 'daily, last dose the day before expected kindling'),
+  'Ostovet (pre-delivery)',  'expected_kindling', -5, 5, 1, 'daily, last dose the day before expected kindling'),
  ('c0000000-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111',
-  'Hosto (post-delivery)', 'kindling',           1, 5, 1, 'daily, starting the day after kindling');
+  'Ostovet (post-delivery)', 'kindling',           1, 5, 1, 'daily, starting the day after kindling');
 
 -- One buck for everything.
 INSERT INTO rabbit (id, farm_id, tag, sex, role, breed_id, date_of_birth)
@@ -86,7 +86,7 @@ VALUES ('b0000000-0000-0000-0000-00000000000b', '11111111-1111-1111-1111-1111111
 
 -- ---------------------------------------------------------------------------
 -- Case C: mated 30 days ago, positive           -> NEST_BOX (day 28+)
---         Her pre-delivery Hosto course is mid-flight: expected kindling is
+--         Her pre-delivery Ostovet course is mid-flight: expected kindling is
 --         tomorrow, so dose 5 of 5 falls today.
 -- ---------------------------------------------------------------------------
 INSERT INTO mating (id, farm_id, doe_id, buck_id, mated_at, outcome)
@@ -179,7 +179,7 @@ VALUES ('11111111-1111-1111-1111-111111111111', 'b0000000-0000-0000-0000-0000000
         current_date, 8);
 
 -- ---------------------------------------------------------------------------
--- Case M: kindled 2 days ago, post-delivery Hosto course running.
+-- Case M: kindled 2 days ago, post-delivery Ostovet course running.
 --         Dose 1 (yesterday) has been given and recorded. Dose 2 falls today.
 --         Dose 1 must have dropped off the list; dose 2 must be on it.
 -- ---------------------------------------------------------------------------
@@ -193,7 +193,7 @@ VALUES ('11111111-1111-1111-1111-111111111111', 'b0000000-0000-0000-0000-0000000
 INSERT INTO health_event (farm_id, rabbit_id, occurred_on, category, medicine,
                           protocol_id, dose_number)
 VALUES ('11111111-1111-1111-1111-111111111111', 'a0000000-0000-0000-0000-000000000016',
-        current_date - 1, 'medication', 'Hosto',
+        current_date - 1, 'medication', 'Ostovet',
         'c0000000-0000-0000-0000-000000000002', 1);
 
 -- ============================================================================
@@ -270,7 +270,7 @@ BEGIN
     RAISE NOTICE 'ok  D-A expected kindling %  (day 31 from service)', d;
 END $$;
 
--- --- Hosto: pre-delivery course ---------------------------------------------
+-- --- Ostovet: pre-delivery course ---------------------------------------------
 DO $$
 DECLARE
     n int; last_due date;
@@ -278,14 +278,14 @@ BEGIN
     SELECT count(*), max(due_on) INTO n, last_due
     FROM v_medication_schedule
     WHERE rabbit_id = 'a0000000-0000-0000-0000-00000000000c'
-      AND protocol_name = 'Hosto (pre-delivery)';
+      AND protocol_name = 'Ostovet (pre-delivery)';
 
     -- 5 doses, the last on the day before expected kindling (service + 30).
     IF n <> 5 OR last_due IS DISTINCT FROM current_date THEN
         RAISE EXCEPTION 'PRE-COURSE FAIL: expected 5 doses ending %, got % ending %',
             current_date, n, last_due;
     END IF;
-    RAISE NOTICE 'ok  D-C pre-delivery Hosto: % doses, last dose % (day before kindling)',
+    RAISE NOTICE 'ok  D-C pre-delivery Ostovet: % doses, last dose % (day before kindling)',
         n, last_due;
 END $$;
 
@@ -297,7 +297,7 @@ BEGIN
     SELECT count(*) INTO n
     FROM v_medication_schedule
     WHERE rabbit_id = 'a0000000-0000-0000-0000-00000000000e'
-      AND protocol_name = 'Hosto (pre-delivery)';
+      AND protocol_name = 'Ostovet (pre-delivery)';
 
     IF n <> 0 THEN
         RAISE EXCEPTION 'PRE-COURSE FAIL: failed pregnancy scheduled % doses', n;
@@ -313,7 +313,7 @@ BEGIN
     SELECT count(*) INTO n
     FROM v_medication_schedule
     WHERE rabbit_id = 'a0000000-0000-0000-0000-000000000016'
-      AND protocol_name = 'Hosto (pre-delivery)';
+      AND protocol_name = 'Ostovet (pre-delivery)';
 
     IF n <> 0 THEN
         RAISE EXCEPTION 'CANCEL FAIL: kindled doe still has % pre-delivery doses', n;
@@ -321,7 +321,7 @@ BEGIN
     RAISE NOTICE 'ok  D-M pre-delivery course closed on kindling';
 END $$;
 
--- --- Hosto: post-delivery course --------------------------------------------
+-- --- Ostovet: post-delivery course --------------------------------------------
 DO $$
 DECLARE
     doses int[]; due_now int[];
@@ -329,7 +329,7 @@ BEGIN
     SELECT array_agg(dose_number ORDER BY dose_number) INTO doses
     FROM v_medication_schedule
     WHERE rabbit_id = 'a0000000-0000-0000-0000-000000000016'
-      AND protocol_name = 'Hosto (post-delivery)';
+      AND protocol_name = 'Ostovet (post-delivery)';
 
     IF doses IS DISTINCT FROM ARRAY[1,2,3,4,5] THEN
         RAISE EXCEPTION 'POST-COURSE FAIL: expected 5 doses, got %', doses;
@@ -339,13 +339,13 @@ BEGIN
     SELECT array_agg(dose_number ORDER BY dose_number) INTO due_now
     FROM v_medication_due
     WHERE rabbit_id = 'a0000000-0000-0000-0000-000000000016'
-      AND protocol_name = 'Hosto (post-delivery)'
+      AND protocol_name = 'Ostovet (post-delivery)'
       AND due_on <= current_date;
 
     IF due_now IS DISTINCT FROM ARRAY[2] THEN
         RAISE EXCEPTION 'DUE FAIL: expected only dose 2 outstanding, got %', due_now;
     END IF;
-    RAISE NOTICE 'ok  D-M post-delivery Hosto: 5 doses scheduled, dose 1 marked done, dose 2 due today';
+    RAISE NOTICE 'ok  D-M post-delivery Ostovet: 5 doses scheduled, dose 1 marked done, dose 2 due today';
 END $$;
 
 -- --- The daily list ----------------------------------------------------------
@@ -357,7 +357,7 @@ BEGIN
     FROM v_daily_list
     WHERE tag = 'D-M' AND source = 'medication';
 
-    IF t IS DISTINCT FROM 'Hosto (post-delivery) — dose 2 of 5' THEN
+    IF t IS DISTINCT FROM 'Ostovet (post-delivery) — dose 2 of 5' THEN
         RAISE EXCEPTION 'DAILY LIST FAIL: got %', COALESCE(t, 'NULL');
     END IF;
     RAISE NOTICE 'ok  daily list shows "%" for D-M', t;

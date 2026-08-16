@@ -135,7 +135,7 @@ the anchor event.
 
 | Field | Purpose |
 |---|---|
-| `name` | e.g. "Hosto (pre-delivery)". Farm-defined; no medicine is hard-coded |
+| `name` | e.g. "Ostovet (pre-delivery)". Farm-defined; no medicine is hard-coded |
 | `anchor` | `mating` / `expected_kindling` / `kindling` / `weaning` |
 | `start_offset_days` | Negative counts backwards — `-5` from expected kindling |
 | `doses`, `interval_days` | 5 doses, 1 day apart |

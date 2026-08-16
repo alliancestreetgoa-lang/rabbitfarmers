@@ -30,21 +30,37 @@ currently in use are marked so the plan stays buildable either way.
 7. **How are rabbits identified** — ear tattoo, ear tag, or nothing yet? If
    nothing, adopting a tagging scheme is prerequisite work before any app helps.
 
-## Medication — Hosto
+## Medication — Ostovet
 
 These do not block anything structural; the protocol mechanism is built and the
 courses are seeded. But the details need confirming before the app is dosing
 real animals off them.
 
-21. **What exactly is Hosto — spelling, and is it an antibiotic, a supplement or
-    a calcium/energy tonic?** I have set it up as a farm-defined medicine, so the
-    app works either way. But if it is an antibiotic, its **withdrawal period**
-    must go in the settings, and the app will then block meat sales from a
-    treated animal until that period has elapsed. Ask your supplier or vet for
-    the withdrawal figure.
+21. ~~**What exactly is Ostovet?**~~ **Answered:** Ostovet (Virbac) — a liquid
+    feed supplement of calcium, phosphorus, vitamin D3 and B12. Not a drug, so
+    **no meat withdrawal period applies** and nothing blocks a sale. The
+    `withdrawal_days` field stays empty and remains available for medicines that
+    do need it.
 
-22. **Dose and route** — how much, and given how (in drinking water, in feed, by
-    injection)? This becomes the reminder text a farm hand reads at the cage.
+    The timing makes physiological sense: a doe's calcium demand spikes at
+    kindling and again at the onset of lactation, faster than she can mobilise it
+    from her own skeleton. Five days either side covers that window.
+
+22. **What dose, for a rabbit?** Ostovet's label covers cattle, buffalo, goats,
+    sheep, pigs and horses — **rabbits are not on it**, so the rabbit dose is an
+    extrapolation from a large-animal label. Whatever figure the farm uses goes
+    into the protocol's dose note and appears on the caretaker's screen, so
+    everyone gives the same amount instead of each person guessing. Worth
+    confirming once with a vet.
+
+    Also worth confirming: which Ostovet — the standard liquid, Forte, or
+    Chelated Forte? Forte is roughly double the calcium concentration, which
+    matters a great deal when scaling a cattle dose down to a 3 kg doe.
+
+    Route is presumably oral, in feed or drinking water. If it goes in shared
+    drinking water rather than to an individual doe, say so — dosing a whole row
+    is a different task from dosing one animal, and the daily list should say
+    which.
 
 23. **Does the post-delivery course start on the day she kindles, or the day
     after?** *Assumed: the day after, so doses land on days 1–5.* Changing it to

@@ -61,12 +61,12 @@ banding:
 
 # Medication courses. Farm-defined; nothing is hard-coded to a medicine name.
 medication_protocols:
-  - name: Hosto (pre-delivery)
+  - name: Ostovet (pre-delivery)
     anchor: expected_kindling   # service date + 31
     start_offset_days: -5       # begins 5 days before expected kindling
     doses: 5
     interval_days: 1            # daily
-  - name: Hosto (post-delivery)
+  - name: Ostovet (post-delivery)
     anchor: kindling            # the actual kindling date
     start_offset_days: 1        # begins the day after she kindles
     doses: 5
@@ -294,10 +294,30 @@ anchor ∈ { mating, expected_kindling, kindling, weaning }
 
 ### The two courses this farm runs
 
+**Ostovet** (Virbac) is a liquid feed supplement — calcium, phosphorus, vitamin
+D3 and B12 — not a drug.
+
 | Course | Anchor | Offset | Doses | Falls on |
 |---|---|---|---|---|
-| **Hosto (pre-delivery)** | expected kindling | −5 | 5 daily | Service days 26, 27, 28, 29, 30 |
-| **Hosto (post-delivery)** | actual kindling | +1 | 5 daily | The 5 days after she kindles |
+| **Ostovet (pre-delivery)** | expected kindling | −5 | 5 daily | Service days 26, 27, 28, 29, 30 |
+| **Ostovet (post-delivery)** | actual kindling | +1 | 5 daily | The 5 days after she kindles |
+
+The timing targets a real physiological event. A doe's calcium demand spikes
+sharply at parturition and again as milk production starts, and she cannot
+mobilise it fast enough from her skeleton alone. Supplementing across the five
+days either side of kindling covers exactly that window.
+
+Two consequences for the app:
+
+- **No meat withdrawal period.** It is a nutritional supplement, so the
+  `withdrawal_days` field stays empty and nothing blocks a sale. The field
+  remains in the schema for medicines that do need it — an antibiotic added
+  later will use it.
+- **The post-delivery course is worth revisiting once there is data.** Peak
+  lactation in a rabbit doe is around days 17–21, well after this course ends.
+  If pre-weaning mortality or doe condition turns out poor, extending the
+  post-delivery course is a one-field change — no code, no migration. Not a
+  recommendation, just the obvious first thing to try if the numbers ask for it.
 
 ### Why the two courses anchor differently
 
@@ -335,10 +355,11 @@ A dose given a day early or late still counts, so a caretaker who does the round
 at 06:00 on Tuesday instead of 18:00 on Monday does not leave a phantom overdue
 dose on the list forever.
 
-> **If Hosto is an antibiotic**, set its `withdrawal_days` and the app will block
-> the sale of that animal for meat until the period has elapsed. Worth confirming
-> with whoever supplies it — the field exists either way, and leaving it empty is
-> a decision, not a default.
+> **Dose note:** Ostovet's label covers cattle, buffalo, goats, sheep, pigs and
+> horses — rabbits are not on it, so the rabbit dose is an extrapolation. Whatever
+> quantity the farm settles on goes in the protocol's `dose_note` and shows up on
+> the caretaker's screen at the cage, so everyone gives the same amount. Worth
+> confirming that figure with a vet once rather than having each person guess.
 
 ---
 

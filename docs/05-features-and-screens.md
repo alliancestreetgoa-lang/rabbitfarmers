@@ -28,20 +28,20 @@ you see: everything due today, in one list, with nothing else to navigate to.
 │  TUESDAY 16 AUGUST                8 to do    │
 ├──────────────────────────────────────────────┤
 │  OVERDUE                                  1  │
-│  ○  Hosto dose 3 of 5 → Lakshmi   yesterday  │
+│  ○  Ostovet dose 3 of 5 → Lakshmi   yesterday  │
 ├──────────────────────────────────────────────┤
 │  TODAY                                    7  │
-│  ○  Hosto dose 5 of 5 → Rani                 │
+│  ○  Ostovet dose 5 of 5 → Rani                 │
 │     last dose before delivery                │
-│  ○  Hosto dose 2 of 5 → Chandni              │
-│  ○  Hosto dose 2 of 5 → Ganga                │
+│  ○  Ostovet dose 2 of 5 → Chandni              │
+│  ○  Ostovet dose 2 of 5 → Ganga                │
 │  ○  Nest box → Rani           day 28         │
 │  ○  Separate kits → Meera     30 days        │
 │  ○  Rebreed → Sita            3 days after   │
 │     separating · suggested buck: Raja        │
 │  ○  Palpate → Kaveri          day 12         │
 ├──────────────────────────────────────────────┤
-│  ✓  Hosto dose 2 of 5 → Lakshmi    06:14     │
+│  ✓  Ostovet dose 2 of 5 → Lakshmi    06:14     │
 │  ✓  Nest box → Gauri               06:20     │
 └──────────────────────────────────────────────┘
 ```
@@ -61,7 +61,7 @@ The "done" list at the bottom matters more than it looks. Without it, a farm han
 who marks something done by accident has no way to see or undo it, and an owner
 cannot tell "nothing due" apart from "nobody opened the app today".
 
-Nothing on this screen is a separate to-do list. Marking a Hosto dose done writes
+Nothing on this screen is a separate to-do list. Marking a Ostovet dose done writes
 a health record against that doe; marking a palpation done opens the result form.
 The list is a *view* of outstanding work, which is why an item cannot be ticked
 off without the underlying record actually existing.
@@ -175,7 +175,7 @@ nest box task for day 28, and shows the computed due window as confirmation.
 Litter size born alive / born dead → nest condition → doe condition → notes →
 photo (optional). Auto-creates the litter, closes the mating, and schedules
 day-10 and day-18 checks, the day-30 separation, and the five post-delivery
-Hosto doses. It also closes any remaining pre-delivery doses.
+Ostovet doses. It also closes any remaining pre-delivery doses.
 
 ### 8. Record separating the kits
 
@@ -193,15 +193,15 @@ Define a course once and it applies to every doe automatically from then on:
 **Name → what it counts from → how many days before or after → how many doses →
 how often.**
 
-Your two Hosto courses are the first entries. Adding a dewormer or a vaccine
+Your two Ostovet courses are the first entries. Adding a dewormer or a vaccine
 later is the same form, no code change.
 
 The "counts from" choice is the only part that needs thought:
 
 | Counts from | Use when | Example |
 |---|---|---|
-| Expected delivery | The course must start *before* she kindles | Hosto, 5 days before |
-| Actual delivery | The course starts after she kindles | Hosto, 5 days after |
+| Expected delivery | The course must start *before* she kindles | Ostovet, 5 days before |
+| Actual delivery | The course starts after she kindles | Ostovet, 5 days after |
 | Mating | Tied to service, not birth | — |
 | Separating the kits | Tied to weaning | — |
 
@@ -245,8 +245,8 @@ The settings that matter most on this farm, and their current values:
 | Rebreed | 3 days after separating |
 | Nest box in | day 28 |
 | Palpate | day 12 |
-| Hosto, before delivery | 5 daily doses, ending the day before expected delivery |
-| Hosto, after delivery | 5 daily doses, starting the day after delivery |
+| Ostovet, before delivery | 5 daily doses, ending the day before expected delivery |
+| Ostovet, after delivery | 5 daily doses, starting the day after delivery |
 
 ---
 

@@ -327,9 +327,14 @@ CREATE TABLE weight_record (
 -- automatically to every doe who reaches the anchor event. The farm defines
 -- these; nothing here is hard-coded to a particular medicine.
 --
--- The two courses this farm runs today (see the seed block at the end):
---   "Hosto" pre-delivery   anchor expected_kindling, offset -5, 5 daily doses
---   "Hosto" post-delivery  anchor kindling,          offset +1, 5 daily doses
+-- The two courses this farm runs today:
+--   "Ostovet" pre-delivery   anchor expected_kindling, offset -5, 5 daily doses
+--   "Ostovet" post-delivery  anchor kindling,          offset +1, 5 daily doses
+--
+-- Ostovet (Virbac) is a calcium / phosphorus / vitamin D3 / B12 liquid feed
+-- supplement, not a drug, so it carries no meat withdrawal period. It is dosed
+-- either side of kindling because a doe's calcium demand spikes at parturition
+-- and at the onset of lactation.
 -- ----------------------------------------------------------------------------
 CREATE TABLE medication_protocol (
     id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -341,8 +346,9 @@ CREATE TABLE medication_protocol (
     interval_days     int NOT NULL DEFAULT 1,
     dose_note         text,                  -- "1 ml in drinking water", etc.
     applies_to        text NOT NULL DEFAULT 'doe',   -- doe | litter
-    -- If this is an antibiotic, meat from the animal must not be sold until
-    -- the withdrawal period has elapsed. The sale screen enforces it.
+    -- Left NULL for feed supplements such as Ostovet. Set it for antibiotics:
+    -- meat from a treated animal must not be sold until the period has elapsed,
+    -- and the sale screen enforces that.
     withdrawal_days   int,
     notify            boolean NOT NULL DEFAULT true,
     is_active         boolean NOT NULL DEFAULT true,
