@@ -123,6 +123,152 @@ farmRoutes.get('/animals/:id/history', async (c) => {
 });
 
 /**
+ * PATCH /animals/:id — fix what was written down, or fill in what was not.
+ *
+ * The case that forced this: kits are created unsexed, because guessing at
+ * thirty days is how a buck ends up in the ready-to-mate queue. That is only
+ * defensible if there is a way to say "she is a doe" at eight weeks, and there
+ * was not. Renaming, moving cage and correcting a birth date come along with
+ * it — the same fields the add form offers, editable afterwards.
+ *
+ * Audited exactly like a kindling correction: the old and new values go to
+ * audit_log and the change appears on the animal's own timeline.
+ *
+ * Not editable here: status, which has its own endpoint because it means
+ * something different, and parents, which can be filled in when blank but never
+ * rewritten — changing a dam is not a typo fix, it is a different pedigree, and
+ * every inbreeding decision made since would silently have been made on the
+ * wrong family.
+ */
+const ANIMAL_EDITABLE = ['name', 'tag', 'sex', 'role', 'date_of_birth', 'notes'];
+
+farmRoutes.patch('/animals/:id', write, async (c) => {
+  const id = c.req.param('id');
+  const b = await c.req.json();
+  const session = c.get('session');
+
+  if ('sex' in b && !['doe', 'buck', 'unknown'].includes(b.sex)) {
+    throw new HttpError(400, 'Sex must be doe, buck or unknown', { field: 'sex' });
+  }
+  if ('status' in b) {
+    throw new HttpError(400,
+      'Sold, culled and died go through their own screen so the reason is kept',
+      { field: 'status' });
+  }
+
+  const result = await c.get('db')(async (client) => {
+    const { rows: before } = await client.query(`
+      SELECT r.${ANIMAL_EDITABLE.join(', r.')}, r.breed_id, r.cage_id,
+             r.dam_id, r.sire_id,
+             bd.name AS breed, cg.code AS cage
+      FROM rabbit r
+      LEFT JOIN breed bd ON bd.id = r.breed_id
+      LEFT JOIN cage cg  ON cg.id = r.cage_id
+      WHERE r.id = $1`, [id]);
+    if (!before.length) throw new HttpError(404, 'No such rabbit');
+    const was = before[0];
+
+    const sets = [];
+    const values = [];
+    const push = (col, val) => { values.push(val); sets.push(`${col} = $${values.length + 1}`); };
+
+    for (const k of ANIMAL_EDITABLE) {
+      if (!(k in b)) continue;
+      const v = typeof b[k] === 'string' ? b[k].trim() : b[k];
+      if (k === 'name' && !v) throw new HttpError(400, 'A rabbit needs a name', { field: 'name' });
+      push(k, v === '' ? null : v);
+    }
+
+    // Breed and cage by id or by name, resolving-or-creating the same way the
+    // add form does, so the two screens cannot drift apart.
+    if ('breed_id' in b || 'breed_name' in b) {
+      push('breed_id', await resolveBreed(client, { id: b.breed_id, name: b.breed_name }));
+    }
+    let movedTo = null;
+    if ('cage_id' in b || 'cage_code' in b) {
+      movedTo = await resolveCage(client, { id: b.cage_id, code: b.cage_code });
+      push('cage_id', movedTo);
+    }
+
+    // Parents may be filled in, never overwritten. Learning who the mother was
+    // is new information; changing her is a different animal's pedigree.
+    for (const [k, existing] of [['dam_id', was.dam_id], ['sire_id', was.sire_id]]) {
+      if (!(k in b)) continue;
+      if (existing) {
+        throw new HttpError(409,
+          `${k === 'dam_id' ? 'Mother' : 'Father'} is already recorded and cannot be `
+          + 'changed — every mating decision since was made on it.', { field: k });
+      }
+      if (b[k]) push(k, b[k]);
+    }
+
+    if (!sets.length) throw new HttpError(400, 'Nothing to change');
+
+    let row;
+    try {
+      const { rows } = await client.query(
+        `UPDATE rabbit SET ${sets.join(', ')} WHERE id = $1
+         RETURNING id, tag, name, sex, role, status, date_of_birth, notes,
+                   breed_id, cage_id`,
+        [id, ...values]);
+      row = rows[0];
+    } catch (err) {
+      if (err.code === '23505') {
+        throw new HttpError(409, `There is already a rabbit called ${b.tag ?? b.name}`,
+          { field: 'tag' });
+      }
+      throw err;
+    }
+
+    // Names for the audit entry and the response, not ids — "breed_id:
+    // 8f3c… → 91a2…" is unreadable six months later, which is exactly when it
+    // gets read.
+    const { rows: named } = await client.query(`
+      SELECT bd.name AS breed, cg.code AS cage
+      FROM rabbit r
+      LEFT JOIN breed bd ON bd.id = r.breed_id
+      LEFT JOIN cage cg  ON cg.id = r.cage_id
+      WHERE r.id = $1`, [id]);
+    const now = { ...row, ...named[0] };
+
+    const changed = {};
+    const prev = {};
+    for (const k of [...ANIMAL_EDITABLE, 'breed', 'cage']) {
+      if (String(was[k] ?? '') !== String(now[k] ?? '')) {
+        prev[k] = was[k];
+        changed[k] = now[k];
+      }
+    }
+
+    if (Object.keys(changed).length) {
+      await client.query(`
+        INSERT INTO audit_log (farm_id, table_name, record_id, action, changed_by,
+                               old_values, new_values)
+        VALUES (current_farm_id(), 'rabbit', $1, 'update', $2, $3, $4)`,
+        [id, session.employeeId, JSON.stringify(prev), JSON.stringify(changed)]);
+    }
+
+    // A cage change is a move, and a move is a thing that happened rather than
+    // a field that differs. The movement table is what the timeline reads.
+    if (movedTo && movedTo !== was.cage_id) {
+      await client.query(`
+        INSERT INTO movement (rabbit_id, from_cage_id, to_cage_id, reason, recorded_by)
+        VALUES ($1, $2, $3, $4, $5)`,
+        [id, was.cage_id, movedTo, b.move_reason ?? null, session.employeeId]);
+    }
+
+    return { ...now, changed: Object.keys(changed) };
+  });
+
+  return c.json({
+    animal: result,
+    message: result.changed.length
+      ? `Updated. The previous ${result.changed.length === 1 ? 'value is' : 'values are'} kept on the record.`
+      : 'Nothing changed.',
+  });
+});
+
+/**
  * POST /animals/:id/status — sold, culled, died, quarantined, or back in.
  *
  * The only way an animal leaves the herd. There is deliberately no endpoint
@@ -881,6 +1027,94 @@ farmRoutes.post('/conditions/:id/check', write, async (c) => {
       ? 'Marked stopped. The reminder and the colour mark are gone.'
       : 'Logged. Next reminder in 2 hours.',
   });
+});
+
+/* ----------------------------------------------------------- medication -- */
+
+/**
+ * GET /medication — every dose outstanding, soonest first.
+ *
+ * `days_until_due` is negative for one that is late. A missed calcium dose
+ * around kindling is not catastrophic on its own, but a farm that has stopped
+ * giving them has usually stopped doing several things.
+ */
+farmRoutes.get('/medication', async (c) => {
+  // Lapsed doses are excluded by default, the same way they are on Today.
+  // A dose past its grace period cannot be recorded any more, so listing it as
+  // outstanding invites a tap that will not work. `?include=lapsed` is there
+  // for the question "what did we miss", which is a different question.
+  const includeLapsed = c.req.query('include') === 'lapsed';
+
+  const rows = await c.get('db')(async (client) => (await client.query(`
+    SELECT md.protocol_id, md.protocol_name, md.rabbit_id, md.dose_number,
+           md.total_doses, md.due_on, md.days_until_due, md.dose_note, md.lapsed,
+           r.name AS rabbit_name, r.tag
+    FROM v_medication_due md
+    JOIN rabbit r ON r.id = md.rabbit_id
+    WHERE md.due_on <= current_date + 2
+      AND r.status NOT IN ('sold', 'culled', 'dead')
+      AND ($1 OR NOT md.lapsed)
+    ORDER BY md.due_on, r.tag`, [includeLapsed])).rows);
+
+  return c.json({
+    due: rows.filter((r) => !r.lapsed),
+    missed: rows.filter((r) => r.lapsed),
+  });
+});
+
+/**
+ * POST /medication — a dose was given.
+ *
+ * Recording it is what takes it off the list: v_medication_due is the schedule
+ * minus whatever has been recorded, so there is no done-flag to drift out of
+ * step with reality. Without this endpoint the whole medication feature could
+ * only ever accumulate — the reminders had no way to be answered, which is why
+ * they were never turned on for a real farm.
+ *
+ * A dose given a day early or late still counts; the view allows ±2 days,
+ * because a farm hand doing the round at six in the morning is not going to
+ * care which side of midnight it fell.
+ */
+farmRoutes.post('/medication', write, async (c) => {
+  const b = await c.req.json();
+  const session = c.get('session');
+
+  if (!b.rabbit_id) throw new HttpError(400, 'Which rabbit?', { field: 'rabbit_id' });
+  if (!b.protocol_id) throw new HttpError(400, 'Which course?', { field: 'protocol_id' });
+  const doseNumber = Number(b.dose_number);
+  if (!Number.isInteger(doseNumber) || doseNumber < 1) {
+    throw new HttpError(400, 'Which dose?', { field: 'dose_number' });
+  }
+
+  const row = await c.get('db')(async (client) => {
+    const { rows: p } = await client.query(
+      'SELECT name, doses, withdrawal_days FROM medication_protocol WHERE id = $1',
+      [b.protocol_id]);
+    if (!p.length) throw new HttpError(404, 'No such course');
+    if (doseNumber > p[0].doses) {
+      throw new HttpError(400, `${p[0].name} is ${p[0].doses} doses`, { field: 'dose_number' });
+    }
+
+    const { rows } = await client.query(`
+      INSERT INTO health_event (id, farm_id, rabbit_id, occurred_on, category,
+                                medicine, dose, protocol_id, dose_number,
+                                withdrawal_until, recorded_by)
+      VALUES (COALESCE($8::uuid, gen_random_uuid()), current_farm_id(), $1,
+              COALESCE($2::date, current_date), 'medication', $3, $4, $5, $6,
+              CASE WHEN $7::int IS NOT NULL
+                   THEN COALESCE($2::date, current_date) + $7::int END,
+              $9)
+      RETURNING id, occurred_on, medicine, dose_number`,
+      [b.rabbit_id, b.given_on ?? null, p[0].name, b.dose ?? null, b.protocol_id,
+       doseNumber, p[0].withdrawal_days, b.id ?? null, session.employeeId]);
+
+    return rows[0];
+  });
+
+  return c.json({
+    dose: row,
+    message: `${row.medicine}, dose ${row.dose_number} recorded.`,
+  }, 201);
 });
 
 /* ---------------------------------------------------------- notifications -- */

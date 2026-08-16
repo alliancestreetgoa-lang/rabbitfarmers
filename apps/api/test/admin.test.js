@@ -296,6 +296,37 @@ describe('admin CRM', () => {
       assert.equal((await api('GET', '/auth/me', { token: f.token })).status, 200);
     });
 
+    test('a farm that has actually been used can still be deleted', async () => {
+      // Regression. Every child table that referenced a cage, an employee or a
+      // protocol with no ON DELETE action quietly made the farm undeletable
+      // once a row existed — and none of them had rows until cage moves and
+      // Ostovet doses started being recorded. An erasure request that cannot be
+      // honoured is not an inconvenience, it is a legal problem.
+      const f = await signupFarm();
+      const doe = (await api('POST', '/animals', {
+        token: f.token, body: { name: 'Lakshmi', sex: 'doe', date_of_birth: '2024-01-01',
+                                cage_code: 'A-1' } })).body.animal.id;
+      await api('PATCH', `/animals/${doe}`, {
+        token: f.token, body: { cage_code: 'B-2', move_reason: 'nest box' } });
+      await api('POST', '/matings', { token: f.token, body: { doe_id: doe } });
+      const dose = (await api('GET', '/medication', { token: f.token })).body.due[0];
+      if (dose) {
+        await api('POST', '/medication', {
+          token: f.token,
+          body: { rabbit_id: dose.rabbit_id, protocol_id: dose.protocol_id,
+                  dose_number: dose.dose_number } });
+      }
+      await api('POST', '/conditions', { token: f.token, body: { rabbit_id: doe } });
+
+      const admin = await makeAdmin('superadmin');
+      const res = await api('POST', `/admin/farms/${f.farm.id}/delete`, {
+        token: admin.token,
+        body: { reason: 'Owner asked for erasure', confirm_name: f.farm.name },
+      });
+      assert.equal(res.status, 200, res.text);
+      assert.equal((await api('GET', '/auth/me', { token: f.token })).status, 401);
+    });
+
     test('removes the farm but keeps the audit entry that says why', async () => {
       const f = await signupFarm();
       await api('POST', '/animals', { token: f.token, body: { name: 'Gauri', sex: 'doe' } });

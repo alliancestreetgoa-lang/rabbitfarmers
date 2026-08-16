@@ -2,7 +2,8 @@ import type { Storage } from './storage.ts';
 import { MemoryStorage } from './storage.ts';
 import type {
   Animal, Breed, BuckSuggestion, Cage, DailyItem, HistoryEvent, Litter, MatingSchedule,
-  OpenCondition, PregnancySummary, PregnantDoe, RabbitLifetime, ReadyDoe,
+  MedicationDose, OpenCondition, PregnancySummary, PregnantDoe, RabbitLifetime,
+  ReadyDoe,
   Session, Subscription,
 } from './types.ts';
 
@@ -334,6 +335,22 @@ export class ApiClient {
   }
 
   /**
+   * Fix what was written down, or fill in what was not — most often sexing a
+   * kit at eight weeks. Audited: the previous values stay on her record.
+   */
+  editAnimal(id: string, input: {
+    name?: string; tag?: string; sex?: 'doe' | 'buck' | 'unknown'; role?: string;
+    date_of_birth?: string; notes?: string;
+    breed_id?: string; breed_name?: string;
+    cage_id?: string; cage_code?: string; move_reason?: string;
+    /** Only accepted when currently blank — a parent is never rewritten. */
+    dam_id?: string; sire_id?: string;
+  }) {
+    return this.request<{ animal: Animal & { changed: string[] }; message: string }>(
+      'PATCH', `/animals/${id}`, input);
+  }
+
+  /**
    * The only way a rabbit leaves the herd. There is no delete — her matings,
    * litters and line stay on the farm's record.
    */
@@ -343,6 +360,23 @@ export class ApiClient {
   }) {
     return this.request<{ change: unknown; message: string }>(
       'POST', `/animals/${id}/status`, input);
+  }
+
+  /**
+   * A dose was given. Recording it is what takes it off Today — the outstanding
+   * list is the schedule minus what has been recorded, so there is no done-flag
+   * to fall out of step.
+   */
+  recordDose(input: {
+    id?: string; rabbit_id: string; protocol_id: string; dose_number: number;
+    given_on?: string; dose?: string;
+  }) {
+    return this.request<{ dose: { id: string; medicine: string }; message: string }>(
+      'POST', '/medication', input);
+  }
+
+  medicationDue() {
+    return this.request<{ due: MedicationDose[] }>('GET', '/medication');
   }
 
   markNotificationsRead(id?: string) {

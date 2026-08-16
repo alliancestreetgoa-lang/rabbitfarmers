@@ -30,6 +30,8 @@ export default function RootLayout() {
         <Stack.Screen name="record/animal" options={{ title: 'Add a rabbit' }} />
         <Stack.Screen name="record/status" options={{ title: 'Leaving the herd' }} />
         <Stack.Screen name="record/kits" options={{ title: 'Add the kits' }} />
+        <Stack.Screen name="record/edit-animal" options={{ title: 'Edit' }} />
+        <Stack.Screen name="record/weaning" options={{ title: 'Separate the kits' }} />
       </Stack>
     </AppProvider>
   );

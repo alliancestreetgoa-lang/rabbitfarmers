@@ -790,3 +790,205 @@ describe('kits as individuals', () => {
     assert.equal((await api('GET', `/litters/${a.litter}/kits`, { token: b.token })).status, 404);
   });
 });
+
+describe('editing a rabbit', () => {
+  test('a kit can be sexed once somebody has actually looked', async () => {
+    const f = await signupFarm();
+    const kit = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Chotu', sex: 'unknown', role: 'grower' } })).body.animal.id;
+
+    // Unsexed: out of every breeding queue, which is the point of allowing it.
+    assert.ok(!(await api('GET', '/ready-to-mate', { token: f.token }))
+      .body.ready.some((r) => r.rabbit_id === kit));
+
+    const res = await api('PATCH', `/animals/${kit}`, {
+      token: f.token, body: { sex: 'doe', role: 'breeder' } });
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.body.animal.sex, 'doe');
+    assert.deepEqual(res.body.animal.changed.sort(), ['role', 'sex']);
+
+    const history = await api('GET', `/animals/${kit}/history`, { token: f.token });
+    const fix = history.body.events.find((e) => e.kind === 'correction');
+    assert.ok(fix, 'the change must be on her record');
+    assert.equal(fix.detail.before.sex, 'unknown');
+    assert.equal(fix.detail.after.sex, 'doe');
+  });
+
+  test('moving her cage is recorded as a move, not just a different value', async () => {
+    const f = await signupFarm();
+    const r = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Gauri', sex: 'doe', cage_code: 'A-1' } })).body.animal.id;
+
+    await api('PATCH', `/animals/${r}`, {
+      token: f.token, body: { cage_code: 'B-3', move_reason: 'Making room for a nest box' } });
+
+    const history = await api('GET', `/animals/${r}/history`, { token: f.token });
+    const moved = history.body.events.find((e) => e.kind === 'moved');
+    assert.ok(moved, 'a cage change is a thing that happened');
+    assert.equal(moved.detail.from, 'A-1');
+    assert.equal(moved.detail.to, 'B-3');
+    assert.equal(moved.detail.reason, 'Making room for a nest box');
+  });
+
+  test('a parent can be filled in when blank but never rewritten', async () => {
+    const f = await signupFarm();
+    const mk = async (b) => (await api('POST', '/animals', { token: f.token, body: b })).body.animal.id;
+    const dam = await mk({ name: 'Radha', sex: 'doe' });
+    const other = await mk({ name: 'Meera', sex: 'doe' });
+    const kid = await mk({ name: 'Ganga', sex: 'unknown' });
+
+    assert.equal((await api('PATCH', `/animals/${kid}`, {
+      token: f.token, body: { dam_id: dam } })).status, 200, 'blank may be filled in');
+
+    const rewrite = await api('PATCH', `/animals/${kid}`, {
+      token: f.token, body: { dam_id: other } });
+    assert.equal(rewrite.status, 409);
+    assert.match(rewrite.body.error, /already recorded/);
+
+    const h = await api('GET', `/animals/${kid}/history`, { token: f.token });
+    assert.equal(h.body.animal.dam, 'Radha');
+  });
+
+  test('status cannot be smuggled through the edit', async () => {
+    const f = await signupFarm();
+    const r = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Sita', sex: 'doe' } })).body.animal.id;
+    const res = await api('PATCH', `/animals/${r}`, {
+      token: f.token, body: { status: 'dead' } });
+    assert.equal(res.status, 400, 'that path exists so the reason is kept');
+  });
+
+  test('one farm cannot edit another farm\'s rabbit', async () => {
+    const a = await signupFarm();
+    const b = await signupFarm();
+    const r = (await api('POST', '/animals', {
+      token: a.token, body: { name: 'Gauri', sex: 'doe' } })).body.animal.id;
+    assert.equal((await api('PATCH', `/animals/${r}`, {
+      token: b.token, body: { name: 'Mine now' } })).status, 404);
+  });
+});
+
+describe('Ostovet', () => {
+  test('a brand-new farm has both courses without setting anything up', async () => {
+    const f = await signupFarm();
+    const { rows } = await adminQuery(
+      `SELECT name, anchor::text, start_offset_days, doses, withdrawal_days
+       FROM medication_protocol WHERE farm_id = $1 ORDER BY name`, [f.farm.id]);
+    assert.equal(rows.length, 2,
+      'the whole feature was dead on arrival for every farm without this');
+    assert.deepEqual(rows[0], { name: 'Ostovet (post-delivery)', anchor: 'kindling',
+      start_offset_days: 1, doses: 5, withdrawal_days: null });
+    assert.deepEqual(rows[1], { name: 'Ostovet (pre-delivery)', anchor: 'expected_kindling',
+      start_offset_days: -5, doses: 5, withdrawal_days: null });
+  });
+
+  test('the five pre-delivery doses land on days 26 to 30', async () => {
+    const f = await signupFarm();
+    const mk = async (b) => (await api('POST', '/animals', { token: f.token, body: b })).body.animal.id;
+    const doe = await mk({ name: 'Lakshmi', sex: 'doe', date_of_birth: dateAgo(400) });
+    const buck = await mk({ name: 'Bhim', sex: 'buck', date_of_birth: dateAgo(400) });
+    await api('POST', '/matings', {
+      token: f.token, body: { doe_id: doe, buck_id: buck, mated_at: daysAgo(28) } });
+
+    const due = await api('GET', '/medication', { token: f.token });
+    const pre = due.body.due.filter((d) => d.protocol_name.includes('pre-delivery'));
+    assert.equal(pre.length, 5);
+    // Mated 28 days ago, expected kindling is day 31, so the course runs from
+    // gestation day 26 — three days ago — to day 30.
+    assert.equal(pre[0].days_until_due, -2);
+    assert.equal(pre[4].days_until_due, 2);
+    assert.ok(pre.every((d) => d.rabbit_name === 'Lakshmi'));
+  });
+
+  test('giving a dose takes it off the list and puts it on her record', async () => {
+    const f = await signupFarm();
+    const mk = async (b) => (await api('POST', '/animals', { token: f.token, body: b })).body.animal.id;
+    const doe = await mk({ name: 'Lakshmi', sex: 'doe', date_of_birth: dateAgo(400) });
+    await api('POST', '/matings', { token: f.token, body: { doe_id: doe, mated_at: daysAgo(28) } });
+
+    const before = (await api('GET', '/medication', { token: f.token })).body.due;
+    const dose = before.find((d) => d.days_until_due === 0);
+    assert.ok(dose, 'one dose should be due today');
+
+    const given = await api('POST', '/medication', {
+      token: f.token,
+      body: { rabbit_id: dose.rabbit_id, protocol_id: dose.protocol_id,
+              dose_number: dose.dose_number },
+    });
+    assert.equal(given.status, 201, given.text);
+
+    const after = (await api('GET', '/medication', { token: f.token })).body.due;
+    assert.equal(after.length, before.length - 1, 'recording it is what clears it');
+    assert.ok(!after.some((d) => d.dose_number === dose.dose_number
+      && d.protocol_id === dose.protocol_id));
+
+    const h = await api('GET', `/animals/${doe}/history`, { token: f.token });
+    const ev = h.body.events.find((e) => e.kind === 'health_event');
+    assert.match(ev.title, /Ostovet.*dose/);
+  });
+
+  test('the daily list names the doe and identifies the dose', async () => {
+    const f = await signupFarm();
+    const doe = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Lakshmi', sex: 'doe', date_of_birth: dateAgo(400) },
+    })).body.animal.id;
+    await api('POST', '/matings', { token: f.token, body: { doe_id: doe, mated_at: daysAgo(28) } });
+
+    const daily = await api('GET', '/daily', { token: f.token });
+    const meds = daily.body.items.filter((i) => i.source === 'medication');
+    assert.ok(meds.length > 0);
+    assert.match(meds[0].title, /for Lakshmi$/, 'a dose with no name is not a task');
+
+    // protocol:rabbit:dose — a generated schedule has no row to point at.
+    const ids = new Set(meds.map((m) => m.ref_id));
+    assert.equal(ids.size, meds.length, 'every dose must be its own item');
+    for (const m of meds) {
+      const [protocol, rabbit, n] = m.ref_id.split(':');
+      assert.match(protocol, /^[0-9a-f-]{36}$/);
+      assert.equal(rabbit, doe);
+      assert.ok(Number(n) >= 1);
+    }
+  });
+
+  test('a dose too old to record stops being asked for', async () => {
+    const f = await signupFarm();
+    const doe = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Meera', sex: 'doe', date_of_birth: dateAgo(400) },
+    })).body.animal.id;
+    // Kindled sixty days ago: the whole post-delivery course is long past.
+    await api('POST', '/litters', {
+      token: f.token, body: { doe_id: doe, kindled_on: dateAgo(60), born_alive: 7 } });
+
+    const daily = await api('GET', '/daily', { token: f.token });
+    assert.equal(daily.body.items.filter((i) => i.source === 'medication').length, 0,
+      'a dose that can no longer be recorded must not sit on the list for ever');
+
+    // Still visible as outstanding for reporting, marked lapsed.
+    const { rows } = await adminQuery(
+      `SELECT count(*)::int AS n FROM v_medication_due
+       WHERE farm_id = $1 AND lapsed`, [f.farm.id]);
+    assert.ok(rows[0].n > 0, 'it is a miss, and a miss is worth knowing about');
+  });
+
+  test('an early kindling cancels the rest of the pre-delivery course', async () => {
+    const f = await signupFarm();
+    const doe = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Radha', sex: 'doe', date_of_birth: dateAgo(400) },
+    })).body.animal.id;
+    const m = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: doe, mated_at: daysAgo(28) } });
+    assert.ok((await api('GET', '/medication', { token: f.token }))
+      .body.due.some((d) => d.protocol_name.includes('pre-delivery')));
+
+    await api('POST', '/litters', {
+      token: f.token,
+      body: { doe_id: doe, mating_id: m.body.mating.id, kindled_on: dateAgo(0),
+              born_alive: 8 } });
+
+    const due = (await api('GET', '/medication', { token: f.token })).body.due;
+    assert.ok(!due.some((d) => d.protocol_name.includes('pre-delivery')),
+      'she has kindled — the run-up doses are not owed any more');
+    assert.ok(due.some((d) => d.protocol_name.includes('post-delivery')),
+      'and the five after start');
+  });
+});

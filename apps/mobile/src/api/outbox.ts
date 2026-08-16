@@ -5,7 +5,7 @@ const OUTBOX_KEY = 'rb.outbox';
 
 export type OutboxKind =
   | 'animal' | 'mating' | 'pregnancy_check' | 'kindling' | 'weaning'
-  | 'condition' | 'condition_check';
+  | 'condition' | 'condition_check' | 'dose';
 
 export interface OutboxEntry {
   /** Client-generated. Sent as the record's id, which is what makes replay safe. */
@@ -172,6 +172,7 @@ export class Outbox {
       case 'kindling':        return this.client.recordKindling(p);
       case 'weaning':         return this.client.recordWeaning(entry.target!, p);
       case 'condition':       return this.client.reportCondition(p);
+      case 'dose':            return this.client.recordDose(p);
       case 'condition_check':
         return this.client.checkCondition(entry.target!, p.status, p.note);
     }

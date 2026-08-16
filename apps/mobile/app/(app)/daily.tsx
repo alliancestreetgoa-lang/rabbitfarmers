@@ -37,9 +37,34 @@ export default function Daily() {
   // "Needs a look now" AND "Overdue", and the farmer sees the same sick rabbit
   // twice and cannot tell whether that means two rabbits.
   const conditions = items.filter((i) => i.source === 'condition');
-  const others = items.filter((i) => i.source !== 'condition');
+  // Doses get their own section and their own tick, because they are the one
+  // kind of item that is answered by doing a thing rather than by opening a
+  // screen — and the round is done standing at the cages.
+  const doses = items.filter((i) => i.source === 'medication');
+  const others = items.filter(
+    (i) => i.source !== 'condition' && i.source !== 'medication');
   const overdue = others.filter((i) => i.urgency === 'critical');
   const rest = others.filter((i) => i.urgency !== 'critical');
+
+  /**
+   * The dose's ref_id is `protocol:rabbit:dose` — a schedule is generated, not
+   * stored, so there is no dose row to name and those three things are what pin
+   * one down. See migration 0017.
+   */
+  const giveDose = async (item: DailyItem) => {
+    const [protocol_id, rabbit_id, dose_number] = item.ref_id.split(':');
+    setBusyId(item.ref_id);
+    try {
+      await outbox.enqueue('dose', {
+        protocol_id, rabbit_id, dose_number: Number(dose_number),
+      });
+      setDone((d) => ({
+        ...d, [item.ref_id]: { at: new Date().toISOString(), title: item.title },
+      }));
+      await refreshOutbox();
+      reload();
+    } finally { setBusyId(null); }
+  };
 
   const answerCondition = async (item: DailyItem, status: 'ongoing' | 'stopped') => {
     setBusyId(item.ref_id);
@@ -93,6 +118,16 @@ export default function Daily() {
                 onStillGoing={() => answerCondition(i, 'ongoing')}
                 onStopped={() => answerCondition(i, 'stopped')}
               />
+            ))}
+          </>
+        )}
+
+        {!!doses.length && (
+          <>
+            <SectionTitle text="Medicine round" count={doses.length} />
+            {doses.map((i) => (
+              <DoseRow key={i.ref_id} item={i} busy={busyId === i.ref_id}
+                       onGiven={() => giveDose(i)} />
             ))}
           </>
         )}
@@ -156,6 +191,34 @@ function TaskRow({ item }: { item: DailyItem }) {
       </View>
       {item.urgency === 'critical' && <Pill text="now" urgency="critical" />}
     </Pressable>
+  );
+}
+
+/**
+ * A dose is given, not navigated to. One tap, and it leaves the list — which is
+ * the whole reminder loop: five days before she kindles, five days after, and
+ * nothing to remember.
+ */
+function DoseRow({ item, busy, onGiven }: {
+  item: DailyItem; busy: boolean; onGiven: () => void;
+}) {
+  return (
+    <View style={[s.row, { alignItems: 'center' }]} testID={`dose-${item.ref_id}`}>
+      <View style={{ flex: 1 }}>
+        <Text style={s.rowTitle}>{item.title}</Text>
+        {!!item.tag && <Text style={s.rowMeta}>{item.tag}</Text>}
+      </View>
+      <Pressable
+        testID={`given-${item.ref_id}`}
+        style={[s.smallBtn, { backgroundColor: colors.accent, borderColor: colors.accent }]}
+        onPress={onGiven}
+        disabled={busy}
+      >
+        <Text style={[s.smallBtnText, { color: colors.white }]}>
+          {busy ? 'Saving…' : 'Given'}
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 

@@ -26,6 +26,10 @@ export default function AnimalScreen() {
 
   const { animal: a, lifetime: lt, events, offspring } = data;
   const gone = GONE.includes(a.status);
+  // A kindling whose litter has no weaning line yet is one where the kits are
+  // still on her. That is the row that should offer to separate them.
+  const weaned = new Set(events.filter((e) => e.kind === 'weaning')
+    .map((e) => e.detail?.litter_id as string));
 
   return (
     <Screen>
@@ -106,9 +110,29 @@ export default function AnimalScreen() {
           </>
         )}
 
+        {/* An unsexed rabbit is out of every breeding queue until somebody
+            looks. Say so where it will be seen, not only in the herd list. */}
+        {!gone && a.sex === 'unknown' && (
+          <View style={{ marginTop: space.lg }}>
+            <Card>
+              <Text style={s.rowTitle}>Not sexed yet</Text>
+              <Muted>
+                She stays out of the mating queue and the buck list until you
+                say which she is.
+              </Muted>
+            </Card>
+          </View>
+        )}
+
         {!gone && (
           <>
             <View style={{ height: space.lg }} />
+            <Pressable style={s.action} testID="a-edit"
+                       onPress={() => router.push(`/record/edit-animal?id=${a.id}`)}>
+              <Text style={s.actionText}>
+                {a.sex === 'unknown' ? 'Sex her, or edit details' : 'Edit details'}
+              </Text>
+            </Pressable>
             {a.sex === 'doe' && (
               <>
                 <Pressable style={s.action} testID="a-mate"
@@ -153,7 +177,11 @@ export default function AnimalScreen() {
         <SectionTitle text="History" />
         {events.length === 0
           ? <Muted>Nothing recorded yet.</Muted>
-          : events.map((e, i) => <Event key={`${e.kind}-${e.on_date}-${i}`} e={e} />)}
+          : events.map((e, i) => (
+              <Event key={`${e.kind}-${e.on_date}-${i}`} e={e}
+                     needsWeaning={e.kind === 'kindling'
+                       && !weaned.has(e.detail?.litter_id as string)} />
+            ))}
       </ScrollView>
     </Screen>
   );
@@ -166,7 +194,8 @@ export default function AnimalScreen() {
  * adds something a farmer would act on or ask about. Printing the whole detail
  * blob would bury the three lines that matter under twenty that do not.
  */
-function Event({ e }: { e: HistoryEvent }) {
+function Event({ e, needsWeaning = false }:
+  { e: HistoryEvent; needsWeaning?: boolean }) {
   const d = e.detail ?? {};
   const notes: string[] = [];
 
@@ -223,7 +252,13 @@ function Event({ e }: { e: HistoryEvent }) {
       </View>
       {!!litterId && (
         <View style={{ gap: space.sm }}>
-          {unrecorded > 0 && (
+          {needsWeaning && (
+            <Pressable testID={`wean-${litterId}`} style={[s.edit, s.editPrimary]}
+                       onPress={() => router.push(`/record/weaning?litter=${litterId}`)}>
+              <Text style={[s.editText, { color: colors.white }]}>Separate</Text>
+            </Pressable>
+          )}
+          {!needsWeaning && unrecorded > 0 && (
             <Pressable testID={`kits-${litterId}`} style={[s.edit, s.editPrimary]}
                        onPress={() => router.push(`/record/kits?litter=${litterId}`)}>
               <Text style={[s.editText, { color: colors.white }]}>

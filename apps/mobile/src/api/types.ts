@@ -1,6 +1,7 @@
 /** Shapes returned by the API. Kept in one place so the screens stay honest. */
 
-export type Sex = 'doe' | 'buck';
+/** 'unknown' is a real state — a kit nobody has sexed yet. See migration 0014. */
+export type Sex = 'doe' | 'buck' | 'unknown';
 export type Urgency = 'critical' | 'high' | 'medium' | 'low';
 
 export type ReproductiveState =
@@ -166,6 +167,20 @@ export interface DailyItem {
   title: string;
   urgency: Urgency;
   colour: string | null;
+}
+
+export interface MedicationDose {
+  protocol_id: string;
+  protocol_name: string;
+  rabbit_id: string;
+  rabbit_name: string | null;
+  tag: string;
+  dose_number: number;
+  total_doses: number;
+  due_on: string;
+  /** Negative when the dose is late. */
+  days_until_due: number;
+  dose_note: string | null;
 }
 
 export interface OpenCondition {

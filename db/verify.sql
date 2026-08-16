@@ -417,7 +417,10 @@ BEGIN
     FROM v_daily_list
     WHERE tag = 'D-M' AND source = 'medication';
 
-    IF t IS DISTINCT FROM 'Ostovet (post-delivery) — dose 2 of 5' THEN
+    -- The doe's name is part of the title since migration 0017. On a farm with
+    -- nine does in milk, "dose 2 of 5" on its own is not a task — it does not
+    -- say which cage to walk to.
+    IF t IS DISTINCT FROM 'Ostovet (post-delivery) — dose 2 of 5 for D-M' THEN
         RAISE EXCEPTION 'DAILY LIST FAIL: got %', COALESCE(t, 'NULL');
     END IF;
     RAISE NOTICE 'ok  daily list shows "%" for D-M', t;

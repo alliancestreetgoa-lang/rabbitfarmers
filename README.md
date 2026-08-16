@@ -29,8 +29,10 @@ with grandfathering enforced in the schema.
 |---|---|
 | Database migrations, RLS, tenant isolation | Built, 9 isolation tests |
 | Signup / sign in / sign out | Built, 10 tests |
-| Breeding cycle, daily list, ready-to-mate, conditions | Built, 29 tests |
+| Breeding cycle, daily list, ready-to-mate, weaning, conditions | Built, 29 tests |
 | Kits as individuals, with both parents linked | Built, 9 tests |
+| Editing a rabbit — sexing a kit, renaming, cage moves | Built, 5 tests |
+| Ostovet medicine rounds, 5 doses either side of kindling | Built, 6 tests |
 | Rabbit history, corrections, animals leaving the herd | Built, 12 tests |
 | Subscriptions, trial, grace, entitlements | Built, 4 tests |
 | Super-admin CRM with audit trail | Built, 16 tests |
@@ -46,7 +48,7 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 102 API tests, then boots the server and hits real endpoints over HTTP —
+the 114 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.
@@ -70,6 +72,10 @@ a deploy would answer with.
 Deploying is [docs/11-deploying-to-netlify.md](docs/11-deploying-to-netlify.md).
 
 ### The next thing to build
+
+**Employees.** The tables are there — staff, sections, attendance — and nothing
+is exposed. Every farm is a single owner account, so a farm hand cannot be given
+a login or be assigned a shed.
 
 **Push delivery.** The scheduler raises notifications and the API serves them,
 but nothing pushes them to a phone yet. Until then a farmer sees them by opening
