@@ -15,8 +15,12 @@ Cheap work that prevents expensive mistakes.
 4. **Trial an existing app** (Everbreed or similar) for a month. Either it solves
    enough of the problem and you save months of work, or you finish the month
    with a precise list of what is missing. Both are wins.
-5. **Freeze the MVP scope in writing.** Everything else goes on a Phase 2 list
-   that nobody is allowed to touch until the MVP is in daily use.
+5. **Freeze the MVP scope in writing.** Everything else goes on a later-phase
+   list that nobody is allowed to touch until the MVP is in daily use.
+6. **Decide the two structural questions** in
+   [09-saas-model.md](09-saas-model.md): rabbit-only or species-agnostic, and
+   hobbyist or commercial buyer. Both are cheap now and expensive after a
+   thousand farms are live.
 
 ---
 
@@ -27,7 +31,7 @@ retired, and both headline questions are answered on the phone.
 
 | Sprint | Deliverable |
 |---|---|
-| 1–2 | Data model, Supabase schema, RLS, auth, farm/shed/cage setup |
+| 1–2 | Data model, Neon schema, RLS, auth, farm/shed/cage setup |
 | 3–4 | Animal registry: create, edit, tags, photos, pedigree links, cage assignment, QR scan |
 | 5–6 | Breeding cycle: record mating, palpation, kindling, weaning; state derivation engine |
 | 7 | Pregnant dashboard + ready-to-mate queue + buck suggestion with inbreeding checks |
@@ -42,7 +46,45 @@ asking for help, and the owner can answer "how many are pregnant" in one tap.
 
 ---
 
-## Phase 2 — Operations (6–8 weeks)
+## Phase 1.5 — Your own farm, for a full season
+
+**Before selling to anyone.** Run the MVP on your own farm through at least one
+complete breeding cycle — service to kindling to separation to rebreed, about
+nine weeks, ideally two cycles.
+
+This is not caution, it is the fastest route to a sellable product:
+
+- You get the one asset no competitor can copy: *"here is what my
+  kits-weaned-per-doe-per-year was before, and after."* That sentence sells more
+  subscriptions than any feature list.
+- The twenty things wrong with the workflow get found while the only person
+  inconvenienced is you — not a paying customer whose litter you cost him.
+- Your staff become the first usability test, in the real conditions the app has
+  to survive.
+
+Ship the SaaS layer during this season, not before it.
+
+---
+
+## Phase 2 — SaaS layer (4–6 weeks, overlapping the season above)
+
+See [09-saas-model.md](09-saas-model.md).
+
+| Sprint | Deliverable |
+|---|---|
+| 1 | Self-serve signup, phone OTP, farm creation, onboarding templates |
+| 2 | Plans, Razorpay subscriptions (UPI Autopay + e-NACH), invoices with GST |
+| 3 | Entitlements, plan limits, upgrade and downgrade flows, dunning |
+| 4 | **RLS hardening + automated cross-tenant test suite in CI** |
+| 5 | Admin console, support tooling, backup restore drill |
+| 6 | Landing page, pricing page, terms, privacy policy |
+
+**Definition of done:** a farmer you have never met signs up on their phone, adds
+ten rabbits, records a mating, pays, and never contacts you.
+
+---
+
+## Phase 3 — Operations (6–8 weeks)
 
 - Health module: treatments, vaccination schedules, **withdrawal periods that
   block sales**, mortality with causes, quarantine
@@ -54,7 +96,7 @@ asking for help, and the owner can answer "how many are pregnant" in one tap.
 
 ---
 
-## Phase 3 — Business (6–8 weeks)
+## Phase 4 — Business (6–8 weeks)
 
 - Sales: fryers, breeding stock, manure; customer records; invoices
 - Expenses and profit-and-loss, including per-doe profitability
@@ -64,12 +106,14 @@ asking for help, and the owner can answer "how many are pregnant" in one tap.
 
 ---
 
-## Phase 4 — Optional extensions
+## Phase 5 — Optional extensions
 
 Only if the earlier phases are in genuine daily use.
 
 - Buyer-facing catalogue of available stock
-- Sell the app to other rabbit farmers (multi-tenancy is already built in)
+- **Other species** — goats and sheep are the same engine with different
+  constants, and a far larger market than rabbits. See the structural decision in
+  [09-saas-model.md](09-saas-model.md)
 - Sensors: shed temperature and humidity logging
 - Predictive culling suggestions from accumulated performance data
 
@@ -78,6 +122,8 @@ Only if the earlier phases are in genuine daily use.
 ## Success metrics for the project itself
 
 Measure the app, not just the rabbits.
+
+### On your own farm
 
 | Metric | Target | Why it matters |
 |---|---|---|
@@ -89,6 +135,19 @@ Measure the app, not just the rabbits.
 | Daily active staff | 100% of caretakers | Adoption |
 | Kits weaned per doe per year | Baseline first, then improve | The point of the whole exercise |
 
-Record the **current** values of the last metric before launch. Without a
-baseline you will never know whether the app helped, and that is the number that
-justifies the entire build.
+Record the **current** value of the last metric before launch. Without a
+baseline you will never know whether the app helped — and once you are selling,
+that number is your single best piece of marketing.
+
+### As a business
+
+| Metric | Target |
+|---|---|
+| Activation: 10 animals + 1 breeding event within 7 days | > 50% of signups |
+| Trial → paid conversion | > 20% |
+| Monthly churn | < 3% |
+| Share of revenue on annual plans | > 40% |
+| Farms with zero writes in 14 days | < 10% — this is silent churn, still paying |
+
+Watch activation hardest. It predicts conversion better than any other number,
+and it is the one you can actually fix.

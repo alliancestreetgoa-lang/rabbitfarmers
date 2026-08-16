@@ -1,14 +1,21 @@
 # Rabbit Farm Manager — Planning Repository
 
 Planning and design documents for a rabbit farm management application covering
-**breeding (mating, gestation, kindling, weaning)** and **staff management**.
+**breeding (mating, gestation, kindling, weaning)**, **medication rounds**,
+**health alerts** and **staff management** — built to be sold to farmers as a
+monthly or yearly subscription.
 
 The two questions this app exists to answer, instantly, from a phone in the shed:
 
 1. **How many does are pregnant right now?** (and which ones are due this week)
 2. **Which does are ready to mate today?** (and with which buck)
 
-Everything else — health, feed, growth, sales, staff — supports those two.
+Everything else — medication rounds, health alerts, feed, growth, sales, staff —
+supports those two.
+
+**Stack:** Expo (React Native) + Neon serverless PostgreSQL, Clerk for phone-OTP
+auth, Razorpay for subscriptions. See [docs/06-tech-stack.md](docs/06-tech-stack.md)
+— including the scheduling trap that would silently stop every reminder.
 
 ## Status
 
@@ -29,14 +36,17 @@ app succeeds or fails.
 | [docs/06-tech-stack.md](docs/06-tech-stack.md) | Recommended stack, offline-first strategy, cost estimate. |
 | [docs/07-roadmap.md](docs/07-roadmap.md) | Phased build plan and success metrics. |
 | [docs/08-open-questions.md](docs/08-open-questions.md) | Decisions needed from the farm owner before building. |
+| [docs/09-saas-model.md](docs/09-saas-model.md) | Pricing, plans, billing, tenant isolation, onboarding, go-to-market. |
 | [db/schema.sql](db/schema.sql) | Reference PostgreSQL schema for the MVP. |
 | [db/verify.sql](db/verify.sql) | Fixtures that prove the derived-state logic returns the right answers. |
 
 ## Verifying the schema
 
-The schema is not just a sketch — it runs, and the breeding logic is tested
-against eleven edge cases (overdue pregnancy, pseudopregnancy, nursing doe,
-under-age doe, doe under veterinary hold, and so on):
+The schema is not just a sketch — it runs, and the logic is tested against the
+cases that break naive implementations: overdue pregnancy, pseudopregnancy,
+nursing doe, under-age doe, doe under veterinary hold, a medication course
+cancelled by an early kindling, a loose-motion reminder cycle, and a suspended
+subscription that must still fire its reminders.
 
 ```bash
 createdb rabbitfarm
@@ -44,8 +54,9 @@ psql -d rabbitfarm -v ON_ERROR_STOP=1 -f db/schema.sql
 psql -d rabbitfarm -v ON_ERROR_STOP=1 -f db/verify.sql
 ```
 
-Expected output ends with `ALL CHECKS PASSED`. The fixtures roll back, so the
-database is left empty. Verified on PostgreSQL 16.
+Expected output ends with `ALL CHECKS PASSED` after 32 assertions. The fixtures
+roll back, so the database is left empty. Verified on PostgreSQL 16; Neon runs
+Postgres, so it applies unchanged.
 
 ## The one design rule
 

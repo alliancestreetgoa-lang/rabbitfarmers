@@ -511,6 +511,95 @@ BEGIN
     RAISE NOTICE 'ok  daily list carries all 3 open conditions continuously, not just at reminder time';
 END $$;
 
+-- --- SaaS entitlements -------------------------------------------------------
+INSERT INTO plan (id, code, name, max_breeding_does, max_staff_seats,
+                  price_monthly_paise, price_yearly_paise, sort_order)
+VALUES
+ ('f0000000-0000-0000-0000-000000000001', 'starter',    'Starter',     25,   1,  29900,  299000, 1),
+ ('f0000000-0000-0000-0000-000000000002', 'farm',       'Farm',        75,   3,  69900,  699000, 2),
+ ('f0000000-0000-0000-0000-000000000003', 'commercial', 'Commercial', 200,   8, 149900, 1499000, 3),
+ ('f0000000-0000-0000-0000-000000000004', 'estate',     'Estate',    NULL, NULL, 299900, 2999000, 4);
+
+-- The test farm has 14 breeding does and is on Starter (limit 25), in trial.
+INSERT INTO subscription (farm_id, plan_id, status, trial_ends_on)
+VALUES ('11111111-1111-1111-1111-111111111111',
+        'f0000000-0000-0000-0000-000000000001', 'trialing', current_date + 12);
+
+DO $$
+DECLARE
+    acc text; days int; used int; lim int; at_lim boolean;
+BEGIN
+    SELECT access, trial_days_left, breeding_does_used, max_breeding_does, at_doe_limit
+      INTO acc, days, used, lim, at_lim
+    FROM v_farm_entitlement;
+
+    IF acc <> 'full' OR days <> 12 THEN
+        RAISE EXCEPTION 'TRIAL FAIL: expected full access with 12 days left, got % / %', acc, days;
+    END IF;
+    IF at_lim THEN
+        RAISE EXCEPTION 'LIMIT FAIL: % does should be under the % limit', used, lim;
+    END IF;
+    RAISE NOTICE 'ok  trial: full access, % days left, % of % does used', days, used, lim;
+END $$;
+
+DO $$
+DECLARE
+    acc text; rem boolean;
+BEGIN
+    -- Payment failed and the grace period has expired.
+    UPDATE subscription
+       SET status = 'suspended', grace_until = current_date - 1
+     WHERE farm_id = '11111111-1111-1111-1111-111111111111';
+
+    SELECT access, reminders_active INTO acc, rem FROM v_farm_entitlement;
+
+    IF acc <> 'read_only' THEN
+        RAISE EXCEPTION 'SUSPEND FAIL: expected read_only, got %', acc;
+    END IF;
+    -- The point of the whole design: billing failure must never silence a
+    -- nest-box or loose-motion alert. Rabbits do not know about invoices.
+    IF NOT rem THEN
+        RAISE EXCEPTION 'SUSPEND FAIL: reminders must survive suspension';
+    END IF;
+    RAISE NOTICE 'ok  suspended: access %, reminders still active', acc;
+END $$;
+
+DO $$
+DECLARE
+    acc text;
+BEGIN
+    -- Grace period still running: full access, banner in the app, no degradation.
+    UPDATE subscription
+       SET status = 'grace', grace_until = current_date + 20
+     WHERE farm_id = '11111111-1111-1111-1111-111111111111';
+
+    SELECT access INTO acc FROM v_farm_entitlement;
+    IF acc <> 'full' THEN
+        RAISE EXCEPTION 'GRACE FAIL: expected full access during grace, got %', acc;
+    END IF;
+    RAISE NOTICE 'ok  grace period: full access retained';
+END $$;
+
+DO $$
+DECLARE
+    at_lim boolean; used int;
+BEGIN
+    -- Downgrade the plan below the current herd size: the farm is at its limit,
+    -- but every existing animal must remain visible and workable.
+    UPDATE subscription SET plan_id = (SELECT id FROM plan WHERE code = 'starter')
+     WHERE farm_id = '11111111-1111-1111-1111-111111111111';
+    UPDATE plan SET max_breeding_does = 5 WHERE code = 'starter';
+
+    SELECT at_doe_limit, breeding_does_used INTO at_lim, used FROM v_farm_entitlement;
+    IF NOT at_lim THEN
+        RAISE EXCEPTION 'LIMIT FAIL: % does should exceed a limit of 5', used;
+    END IF;
+    IF (SELECT count(*) FROM v_doe_reproductive_state) = 0 THEN
+        RAISE EXCEPTION 'LIMIT FAIL: over-limit farm must not have animals hidden';
+    END IF;
+    RAISE NOTICE 'ok  over limit at % does: blocks the next add, hides nothing', used;
+END $$;
+
 DO $$ BEGIN RAISE NOTICE 'ALL CHECKS PASSED'; END $$;
 
 ROLLBACK;
