@@ -38,6 +38,82 @@ farmRoutes.get('/animals', async (c) => {
   return c.json({ animals: rows });
 });
 
+/**
+ * GET /breeds and GET /cages — what the "add a rabbit" form offers.
+ *
+ * Two small calls rather than one bundled one: the herd screen wants cages
+ * without breeds soon enough, and a joined payload would have to be pulled
+ * apart again.
+ */
+farmRoutes.get('/breeds', async (c) => {
+  const rows = await c.get('db')(async (client) => (await client.query(`
+    SELECT b.id, b.name, b.size_class, b.doe_first_mating_days,
+           b.buck_first_mating_days,
+           count(r.id) FILTER (WHERE r.status <> 'dead') AS animals
+    FROM breed b LEFT JOIN rabbit r ON r.breed_id = b.id
+    GROUP BY b.id ORDER BY count(r.id) DESC, b.name`)).rows);
+  return c.json({ breeds: rows });
+});
+
+farmRoutes.get('/cages', async (c) => {
+  const rows = await c.get('db')(async (client) => (await client.query(`
+    SELECT cg.id, cg.code, cg.row_label, cg.capacity, s.name AS shed,
+           count(r.id) FILTER (WHERE r.status <> 'dead') AS occupants
+    FROM cage cg
+    JOIN shed s ON s.id = cg.shed_id
+    LEFT JOIN rabbit r ON r.cage_id = cg.id
+    WHERE cg.is_active
+    GROUP BY cg.id, s.name
+    ORDER BY cg.code`)).rows);
+  return c.json({ cages: rows });
+});
+
+/**
+ * A breed or a cage the farmer named but that does not exist yet.
+ *
+ * Created here, inside the same transaction as the rabbit, rather than making
+ * the app do it first. Two reasons. The obvious one is that a cage code is
+ * whatever is painted on the card — the farmer puts a rabbit in A-12 and A-12
+ * is now a cage, no setup screen involved. The one that actually forced it is
+ * the offline outbox: two dependent writes would have to be queued in order
+ * with the first one's id threaded into the second, and a partial replay would
+ * leave a rabbit pointing at a cage that never got created.
+ *
+ * ON CONFLICT ... DO UPDATE rather than DO NOTHING, because DO NOTHING returns
+ * no row on conflict and this needs the id either way.
+ */
+async function resolveBreed(client, { id, name }) {
+  if (id) return id;
+  const clean = (name ?? '').trim();
+  if (!clean) return null;
+  const { rows } = await client.query(`
+    INSERT INTO breed (farm_id, name) VALUES (current_farm_id(), $1)
+    ON CONFLICT (farm_id, name) DO UPDATE SET name = EXCLUDED.name
+    RETURNING id`, [clean]);
+  return rows[0].id;
+}
+
+async function resolveCage(client, { id, code }) {
+  if (id) return id;
+  const clean = (code ?? '').trim();
+  if (!clean) return null;
+
+  // A cage has to live in a shed. Use whichever the farm already has — signup
+  // seeds one — and only invent a shed if somebody deleted them all.
+  let shed = (await client.query('SELECT id FROM shed ORDER BY name LIMIT 1')).rows[0]?.id;
+  if (!shed) {
+    shed = (await client.query(
+      `INSERT INTO shed (farm_id, name) VALUES (current_farm_id(), 'Shed A')
+       RETURNING id`)).rows[0].id;
+  }
+
+  const { rows } = await client.query(`
+    INSERT INTO cage (farm_id, shed_id, code) VALUES (current_farm_id(), $1, $2)
+    ON CONFLICT (farm_id, code) DO UPDATE SET code = EXCLUDED.code
+    RETURNING id`, [shed, clean]);
+  return rows[0].id;
+}
+
 /** POST /animals — you add and name every rabbit yourself. */
 farmRoutes.post('/animals', write, async (c) => {
   const b = await c.req.json();
@@ -51,6 +127,9 @@ farmRoutes.post('/animals', write, async (c) => {
   const db = c.get('db');
   const session = c.get('session');
   const row = await db(async (client) => {
+    const breedId = await resolveBreed(client, { id: b.breed_id, name: b.breed_name });
+    const cageId = await resolveCage(client, { id: b.cage_id, code: b.cage_code });
+
     const { rows } = await client.query(`
       INSERT INTO rabbit (id, farm_id, tag, name, sex, role, breed_id, date_of_birth,
                           dam_id, sire_id, cage_id, origin, created_by)
@@ -58,10 +137,20 @@ farmRoutes.post('/animals', write, async (c) => {
               current_farm_id(), $1, $2, $3, COALESCE($4,'breeder')::rabbit_role_t,
               $5, $6, $7, $8, $9, COALESCE($10,'born_here')::origin_t, $11)
       RETURNING id, tag, name, sex, role`,
-      [(b.tag ?? name).trim(), name, sex, b.role ?? null, b.breed_id ?? null,
+      [(b.tag ?? name).trim(), name, sex, b.role ?? null, breedId,
        b.date_of_birth ?? null, b.dam_id ?? null, b.sire_id ?? null,
-       b.cage_id ?? null, b.origin ?? null, session.employeeId, b.id ?? null]);
-    return rows[0];
+       cageId, b.origin ?? null, session.employeeId, b.id ?? null]);
+
+    // Hand back the resolved names, not just ids — the app has just created a
+    // breed or a cage it did not know about and needs them for its next render.
+    const { rows: named } = await client.query(`
+      SELECT b.name AS breed, cg.code AS cage
+      FROM rabbit r
+      LEFT JOIN breed b ON b.id = r.breed_id
+      LEFT JOIN cage cg ON cg.id = r.cage_id
+      WHERE r.id = $1`, [rows[0].id]);
+
+    return { ...rows[0], ...named[0] };
   });
   return c.json({ animal: row }, 201);
 });

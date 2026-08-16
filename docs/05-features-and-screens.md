@@ -151,6 +151,20 @@ Two notes on this:
   queue and never kindles. The plain words lead; the pairing is taught here and
   repeated on the animal's own page.
 
+- **Breed is taps, cage is typed, and neither needs a setup screen first.**
+  Breeds are few and reused constantly, so they are buttons ordered by how many
+  of that breed the farm already has — with a text field for the breed this farm
+  actually keeps that the seeded list has never heard of. Cages are the
+  opposite: dozens of them, and the code is whatever is painted on the card, so
+  scrolling a list of sixty to find A-12 is slower than writing it. Recent cages
+  appear as taps because rabbits go into nearby cages in the same session.
+
+  Anything typed that does not exist yet is created with the rabbit, in one
+  transaction. That is not only convenience: the offline outbox queues a single
+  write per action, and splitting this into "create the cage, then create the
+  rabbit" would mean two dependent writes where a partial replay leaves a rabbit
+  pointing at a cage that was never made.
+
 - **An optional short tag alongside the name.** Names get duplicated on a farm
   (two does called Rani) and reused after an animal dies. A short unique tag —
   even just `D-01` — stops the app confusing them, while still displaying the

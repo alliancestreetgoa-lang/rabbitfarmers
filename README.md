@@ -29,7 +29,7 @@ with grandfathering enforced in the schema.
 |---|---|
 | Database migrations, RLS, tenant isolation | Built, 9 isolation tests |
 | Signup / sign in / sign out | Built, 10 tests |
-| Breeding cycle, daily list, ready-to-mate, conditions | Built, 12 tests |
+| Breeding cycle, daily list, ready-to-mate, conditions | Built, 16 tests |
 | Subscriptions, trial, grace, entitlements | Built, 4 tests |
 | Super-admin CRM with audit trail | Built, 16 tests |
 | Scheduler (task generation, 2-hourly reminders, heartbeat) | Built, 25 tests |
@@ -44,7 +44,7 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 74 API tests, then boots the server and hits real endpoints over HTTP —
+the 80 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.

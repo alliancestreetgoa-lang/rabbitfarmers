@@ -32,6 +32,26 @@ export interface Animal {
   conditions: string[] | null;
 }
 
+export interface Breed {
+  id: string;
+  name: string;
+  size_class: string;
+  doe_first_mating_days: number;
+  buck_first_mating_days: number;
+  /** How many living rabbits carry it — the list is ordered by this. */
+  animals: string;
+}
+
+export interface Cage {
+  id: string;
+  /** What is painted on the cage card. */
+  code: string;
+  row_label: string | null;
+  capacity: number;
+  shed: string;
+  occupants: string;
+}
+
 export interface PregnancySummary {
   total_pregnant: number;
   confirmed_pregnant: number;

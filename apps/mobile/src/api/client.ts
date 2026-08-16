@@ -1,7 +1,7 @@
 import type { Storage } from './storage.ts';
 import { MemoryStorage } from './storage.ts';
 import type {
-  Animal, BuckSuggestion, DailyItem, MatingSchedule, OpenCondition,
+  Animal, Breed, BuckSuggestion, Cage, DailyItem, MatingSchedule, OpenCondition,
   PregnancySummary, PregnantDoe, ReadyDoe, Session, Subscription,
 } from './types.ts';
 
@@ -209,6 +209,14 @@ export class ApiClient {
     return this.request<{ open: OpenCondition[]; clusters: unknown[] }>('GET', '/conditions');
   }
 
+  breeds() {
+    return this.request<{ breeds: Breed[] }>('GET', '/breeds');
+  }
+
+  cages() {
+    return this.request<{ cages: Cage[] }>('GET', '/cages');
+  }
+
   notifications(unreadOnly = false) {
     return this.request<{ notifications: any[]; unread: number }>(
       'GET', `/notifications${unreadOnly ? '?unread=1' : ''}`);
@@ -217,8 +225,12 @@ export class ApiClient {
   /* ----------------------------------------------------------------- write */
 
   addAnimal(input: {
-    id?: string; name: string; sex: string; role?: string; breed_id?: string;
+    id?: string; name: string; sex: string; role?: string;
     date_of_birth?: string; dam_id?: string; sire_id?: string; tag?: string;
+    /** Pick an existing breed, or name one and the server creates it. */
+    breed_id?: string; breed_name?: string;
+    /** Pick an existing cage, or write what is painted on it. */
+    cage_id?: string; cage_code?: string;
   }) {
     return this.request<{ animal: Animal }>('POST', '/animals', input);
   }

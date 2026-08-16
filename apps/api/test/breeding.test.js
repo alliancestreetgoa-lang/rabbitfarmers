@@ -274,3 +274,111 @@ describe('loose motion', () => {
     assert.match(res.body.error, /future/i);
   });
 });
+
+describe('breed and cage', () => {
+  test('a new farm can pick a breed and a shed without setting anything up', async () => {
+    const f = await signupFarm();
+
+    const breeds = await api('GET', '/breeds', { token: f.token });
+    assert.equal(breeds.status, 200);
+    assert.ok(breeds.body.breeds.length >= 3,
+      'signup seeds breeds so the first rabbit does not need a setup wizard');
+    assert.ok(breeds.body.breeds.some((b) => b.name === 'New Zealand White'));
+
+    // Cages are not seeded — nobody can guess what is painted on them.
+    const cages = await api('GET', '/cages', { token: f.token });
+    assert.equal(cages.status, 200);
+    assert.deepEqual(cages.body.cages, []);
+  });
+
+  test('naming a cage that does not exist creates it', async () => {
+    const f = await signupFarm();
+    const breeds = await api('GET', '/breeds', { token: f.token });
+    const nzw = breeds.body.breeds.find((b) => b.name === 'New Zealand White');
+
+    const res = await api('POST', '/animals', {
+      token: f.token,
+      body: { name: 'Gauri', sex: 'doe', breed_id: nzw.id, cage_code: 'A-12' },
+    });
+    assert.equal(res.status, 201, res.text);
+    // The response carries the names back, because the app has just invented a
+    // cage it had no id for.
+    assert.equal(res.body.animal.breed, 'New Zealand White');
+    assert.equal(res.body.animal.cage, 'A-12');
+
+    const cages = await api('GET', '/cages', { token: f.token });
+    assert.equal(cages.body.cages.length, 1);
+    assert.equal(cages.body.cages[0].code, 'A-12');
+    assert.equal(cages.body.cages[0].occupants, 1);
+    assert.equal(cages.body.cages[0].shed, 'Shed A', 'dropped into the seeded shed');
+
+    const herd = await api('GET', '/animals', { token: f.token });
+    assert.equal(herd.body.animals[0].cage, 'A-12');
+    assert.equal(herd.body.animals[0].breed, 'New Zealand White');
+  });
+
+  test('a second rabbit in the same cage reuses it rather than duplicating', async () => {
+    const f = await signupFarm();
+    await api('POST', '/animals', {
+      token: f.token, body: { name: 'Gauri', sex: 'doe', cage_code: 'B-3' } });
+    await api('POST', '/animals', {
+      token: f.token, body: { name: 'Sita', sex: 'doe', cage_code: 'B-3' } });
+
+    const cages = await api('GET', '/cages', { token: f.token });
+    assert.equal(cages.body.cages.length, 1, 'one cage, not two');
+    assert.equal(cages.body.cages[0].occupants, 2);
+  });
+
+  test('a breed the farm actually keeps can be typed in', async () => {
+    const f = await signupFarm();
+    const res = await api('POST', '/animals', {
+      token: f.token,
+      body: { name: 'Bhim', sex: 'buck', breed_name: 'Grey Giant', cage_code: 'A-1' },
+    });
+    assert.equal(res.status, 201, res.text);
+    assert.equal(res.body.animal.breed, 'Grey Giant');
+
+    // And it is offered from then on rather than being typed again every time.
+    const breeds = await api('GET', '/breeds', { token: f.token });
+    const grey = breeds.body.breeds.find((b) => b.name === 'Grey Giant');
+    assert.ok(grey, 'the new breed joins the list');
+    assert.equal(grey.animals, 1);
+    assert.equal(grey.size_class, 'medium', 'a sensible default, editable later');
+
+    const again = await api('POST', '/animals', {
+      token: f.token, body: { name: 'Arjun', sex: 'buck', breed_name: 'Grey Giant' } });
+    assert.equal(again.status, 201);
+    const after_ = await api('GET', '/breeds', { token: f.token });
+    assert.equal(after_.body.breeds.filter((b) => b.name === 'Grey Giant').length, 1);
+  });
+
+  test('blank breed and cage are simply left unset', async () => {
+    const f = await signupFarm();
+    const res = await api('POST', '/animals', {
+      token: f.token,
+      body: { name: 'Tulsi', sex: 'doe', breed_name: '  ', cage_code: '' },
+    });
+    assert.equal(res.status, 201, res.text);
+    assert.equal(res.body.animal.breed, null);
+    assert.equal(res.body.animal.cage, null);
+    assert.deepEqual((await api('GET', '/cages', { token: f.token })).body.cages, []);
+  });
+
+  test('one farm cannot see or reuse another farm\'s cages', async () => {
+    const a = await signupFarm();
+    const b = await signupFarm();
+    await api('POST', '/animals', {
+      token: a.token, body: { name: 'Gauri', sex: 'doe', cage_code: 'A-12' } });
+
+    assert.deepEqual((await api('GET', '/cages', { token: b.token })).body.cages, []);
+
+    // Same code, different farm: a second cage, not a shared one.
+    await api('POST', '/animals', {
+      token: b.token, body: { name: 'Meera', sex: 'doe', cage_code: 'A-12' } });
+    const bCages = (await api('GET', '/cages', { token: b.token })).body.cages;
+    assert.equal(bCages.length, 1);
+    const aCages = (await api('GET', '/cages', { token: a.token })).body.cages;
+    assert.equal(aCages.length, 1);
+    assert.notEqual(aCages[0].id, bCages[0].id);
+  });
+});
