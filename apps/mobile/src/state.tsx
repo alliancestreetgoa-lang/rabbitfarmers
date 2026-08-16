@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import { useFocusEffect } from 'expo-router';
 import { ApiClient, OfflineError } from './api/client';
 import { Outbox, type OutboxEntry } from './api/outbox';
 import type { Storage } from './api/storage';
@@ -147,7 +148,16 @@ export function useQuery<T>(key: string, fetcher: () => Promise<T>, deps: unknow
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, session, key, ...deps]);
 
-  useEffect(() => { run(); }, [run]);
+  /**
+   * Refetch whenever the screen comes back into view, not only on mount.
+   *
+   * Expo Router keeps a screen mounted while you push another on top of it, so
+   * a plain mount effect never runs again. Record a kindling and come back and
+   * the doe's page still shows what it loaded before you went. That looks
+   * exactly like a write that failed, which is the worst possible thing for an
+   * app that people have to trust more than a paper card.
+   */
+  useFocusEffect(useCallback(() => { run(); }, [run]));
 
   return { data, error, loading, stale, reload: run };
 }

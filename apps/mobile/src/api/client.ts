@@ -290,6 +290,28 @@ export class ApiClient {
       'PATCH', `/litters/${id}`, input);
   }
 
+  /**
+   * Turn a litter's counts into individual rabbits, each with its mother and
+   * father on the record. Sex defaults to unknown — see the endpoint.
+   */
+  addKits(litterId: string, input: {
+    count?: number; names?: string[]; prefix?: string;
+    sex?: 'doe' | 'buck' | 'unknown';
+  } = {}) {
+    return this.request<{
+      kits: Animal[];
+      litter: { expected: number; recorded: number; not_yet_recorded: number };
+      message: string;
+    }>('POST', `/litters/${litterId}/kits`, input);
+  }
+
+  kits(litterId: string) {
+    return this.request<{
+      litter: { expected: number; recorded: number; not_yet_recorded: number };
+      kits: Animal[];
+    }>('GET', `/litters/${litterId}/kits`);
+  }
+
   recordWeaning(litterId: string, input: {
     weaned_on?: string; weaned_count?: number; avg_weaning_weight_g?: number;
   }) {

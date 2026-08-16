@@ -101,6 +101,21 @@ farmRoutes.get('/animals/:id/history', async (c) => {
       WHERE r.dam_id = $1 OR r.sire_id = $1
       ORDER BY r.date_of_birth DESC NULLS LAST, r.tag`, [id]);
 
+    // How many of each litter exist as individuals, folded into the kindling
+    // line. One query for all her litters rather than one per event, and it
+    // saves changing the history view for what is really a presentation detail.
+    const { rows: kitCounts } = await client.query(
+      'SELECT * FROM v_litter_kits WHERE doe_id = $1', [id]);
+    const byLitter = new Map(kitCounts.map((k) => [k.litter_id, k]));
+    for (const e of events) {
+      const k = byLitter.get(e.detail?.litter_id);
+      if (k && (e.kind === 'kindling' || e.kind === 'weaning')) {
+        e.detail.kits_recorded = k.recorded;
+        e.detail.kits_expected = k.expected;
+        e.detail.kits_not_yet_recorded = k.not_yet_recorded;
+      }
+    }
+
     return { animal: animal[0], lifetime: lifetime[0] ?? null, events, offspring };
   });
 
@@ -252,7 +267,10 @@ farmRoutes.post('/animals', write, async (c) => {
   const name = (b.name ?? '').trim();
   const sex = b.sex;
   if (!name) throw new HttpError(400, 'Give the rabbit a name', { field: 'name' });
-  if (!['doe', 'buck'].includes(sex)) {
+  // 'unknown' is allowed and is the right answer for a young grower. Every view
+  // that picks breeding stock filters on 'doe' or 'buck', so an unsexed rabbit
+  // stays out of the mating queue until somebody says which it is.
+  if (!['doe', 'buck', 'unknown'].includes(sex)) {
     throw new HttpError(400, 'Is it a doe or a buck?', { field: 'sex' });
   }
 
@@ -519,7 +537,13 @@ farmRoutes.get('/litters/:id', async (c) => {
       WHERE al.table_name = 'litter' AND al.record_id = $1 AND al.action = 'update'
       ORDER BY al.changed_at DESC`, [id]);
 
-    return { ...rows[0], corrections: edits };
+    // How many of this litter exist as individual animals, and how many the
+    // farm still believes are out there unrecorded.
+    const { rows: kits } = await client.query(
+      'SELECT expected, recorded, not_yet_recorded FROM v_litter_kits WHERE litter_id = $1',
+      [id]);
+
+    return { ...rows[0], corrections: edits, kits: kits[0] };
   });
   return c.json({ litter: row });
 });
@@ -600,6 +624,139 @@ farmRoutes.patch('/litters/:id', write, async (c) => {
       ? `Corrected. The previous ${row.changed.length === 1 ? 'value is' : 'values are'} kept on her record.`
       : 'Nothing changed.',
   });
+});
+
+/**
+ * POST /litters/:id/kits — turn a litter's counts into individual rabbits.
+ *
+ * Up to this point a litter is a number. That is right for the first thirty
+ * days; it stops being right the moment one kit is kept back for breeding,
+ * because her mother is a count in a row and the inbreeding check has nothing
+ * to look at. Her pedigree would otherwise begin on whatever day somebody typed
+ * her name in by hand.
+ *
+ * Each kit is created with the doe as dam, the buck from the mating as sire,
+ * the litter's kindling date as its birthday, and the litter itself as a link —
+ * so the buck suggestion can see the whole family from the day they are
+ * separated.
+ *
+ * Sex defaults to unknown. At thirty days sexing is fiddly and often wrong, and
+ * a buck filed as a doe sits in the ready-to-mate queue for two months waiting
+ * to kindle. Better a blank the farmer fills in at eight weeks than a guess
+ * recorded as a fact.
+ */
+farmRoutes.post('/litters/:id/kits', write, async (c) => {
+  const id = c.req.param('id');
+  const b = await c.req.json();
+  const session = c.get('session');
+
+  const sex = b.sex ?? 'unknown';
+  if (!['doe', 'buck', 'unknown'].includes(sex)) {
+    throw new HttpError(400, 'Sex must be doe, buck or unknown', { field: 'sex' });
+  }
+
+  const result = await c.get('db')(async (client) => {
+    const { rows: lit } = await client.query(`
+      SELECT l.id, l.doe_id, l.kindled_on, l.mating_id,
+             k.expected, k.recorded, k.not_yet_recorded,
+             d.name AS doe_name, d.tag AS doe_tag,
+             m.buck_id
+      FROM litter l
+      JOIN v_litter_kits k ON k.litter_id = l.id
+      JOIN rabbit d        ON d.id = l.doe_id
+      LEFT JOIN mating m   ON m.id = l.mating_id
+      WHERE l.id = $1`, [id]);
+    if (!lit.length) throw new HttpError(404, 'No such kindling record');
+    const l = lit[0];
+
+    const names = Array.isArray(b.names)
+      ? b.names.map((n) => String(n).trim()).filter(Boolean) : null;
+    const want = names ? names.length : Number(b.count ?? l.not_yet_recorded);
+
+    if (!Number.isInteger(want) || want < 1) {
+      throw new HttpError(400, 'How many kits?', { field: 'count' });
+    }
+    // Deliberately capped at what the litter says it produced. Asking for nine
+    // when eight were recorded is a disagreement worth surfacing, not padding —
+    // and the kindling record is editable now, so fixing it is one screen away.
+    if (want > l.not_yet_recorded) {
+      throw new HttpError(400,
+        l.not_yet_recorded === 0
+          ? `All ${l.recorded} of this litter are already recorded.`
+          : `This litter has ${l.expected} kit(s) and ${l.recorded} already recorded, `
+            + `so there ${l.not_yet_recorded === 1 ? 'is' : 'are'} `
+            + `${l.not_yet_recorded} left. Correct the kindling if that is wrong.`,
+        { field: 'count', not_yet_recorded: l.not_yet_recorded });
+    }
+
+    // Names default to the mother's, numbered. Tags are unique per farm, so
+    // pick up after whatever already exists rather than colliding — a doe on her
+    // fourth litter should not fail because Lakshmi-1 was born last spring.
+    const base = String(b.prefix ?? l.doe_name ?? l.doe_tag).trim();
+    const { rows: taken } = await client.query(
+      // Both the numbered series and any names asked for by hand. Without the
+      // second half an explicit duplicate falls through to the unique index and
+      // comes back as a generic constraint error nobody can act on.
+      `SELECT tag FROM rabbit WHERE tag LIKE $1 || '-%' OR tag = ANY($2::text[])`,
+      [base, names ?? []]);
+    const used = new Set(taken.map((r) => r.tag));
+
+    const created = [];
+    let n = 0;
+    for (let i = 0; i < want; i++) {
+      let tag = names ? names[i] : null;
+      if (!tag) {
+        do { n += 1; tag = `${base}-${n}`; } while (used.has(tag));
+      }
+      if (used.has(tag)) {
+        throw new HttpError(409, `There is already a rabbit called ${tag}`,
+          { field: 'names' });
+      }
+      used.add(tag);
+
+      const { rows } = await client.query(`
+        INSERT INTO rabbit (farm_id, tag, name, sex, role, date_of_birth,
+                            dam_id, sire_id, litter_id, origin, created_by)
+        VALUES (current_farm_id(), $1, $1, $2::sex_t, 'grower', $3,
+                $4, $5, $6, 'born_here', $7)
+        RETURNING id, tag, name, sex, date_of_birth`,
+        [tag, sex, l.kindled_on, l.doe_id, l.buck_id ?? null, l.id,
+         session.employeeId]);
+      created.push(rows[0]);
+    }
+
+    const { rows: after } = await client.query(
+      'SELECT * FROM v_litter_kits WHERE litter_id = $1', [id]);
+
+    return { kits: created, litter: after[0] };
+  });
+
+  return c.json({
+    ...result,
+    message: `${result.kits.length} kit(s) added, `
+      + `with their mother and father on the record.`,
+  }, 201);
+});
+
+/** GET /litters/:id/kits — the individuals recorded from one litter. */
+farmRoutes.get('/litters/:id/kits', async (c) => {
+  const id = c.req.param('id');
+  const result = await c.get('db')(async (client) => {
+    const { rows: summary } = await client.query(
+      'SELECT * FROM v_litter_kits WHERE litter_id = $1', [id]);
+    if (!summary.length) throw new HttpError(404, 'No such kindling record');
+
+    const { rows: kits } = await client.query(`
+      SELECT r.id, r.tag, r.name, r.sex, r.role, r.status, r.date_of_birth,
+             cg.code AS cage
+      FROM rabbit r
+      LEFT JOIN cage cg ON cg.id = r.cage_id
+      WHERE r.litter_id = $1
+      ORDER BY r.tag`, [id]);
+
+    return { litter: summary[0], kits };
+  });
+  return c.json(result);
 });
 
 /** POST /litters/:id/wean — separating the kits. The KPI moment. */

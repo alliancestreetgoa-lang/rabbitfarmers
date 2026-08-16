@@ -30,6 +30,7 @@ with grandfathering enforced in the schema.
 | Database migrations, RLS, tenant isolation | Built, 9 isolation tests |
 | Signup / sign in / sign out | Built, 10 tests |
 | Breeding cycle, daily list, ready-to-mate, conditions | Built, 29 tests |
+| Kits as individuals, with both parents linked | Built, 9 tests |
 | Rabbit history, corrections, animals leaving the herd | Built, 12 tests |
 | Subscriptions, trial, grace, entitlements | Built, 4 tests |
 | Super-admin CRM with audit trail | Built, 16 tests |
@@ -45,7 +46,7 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 93 API tests, then boots the server and hits real endpoints over HTTP —
+the 102 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.
@@ -134,6 +135,9 @@ and outlive her. So:
   an overwrite.
 - **Status is a log, not a column.** Quarantined in March, back in service in
   April, sold in November — three facts, all kept.
+- **Kits become individuals, with both parents on the record.** A litter is a
+  count in the nest box and an animal each once they are separated. That link is
+  what lets the buck suggestion refuse a doe her own father four years later.
 
 `GET /animals/:id/history` returns the whole timeline, and it keeps working
 after she has gone. That is the point: her record is most useful exactly when

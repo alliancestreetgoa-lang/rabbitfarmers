@@ -637,3 +637,156 @@ describe('correcting a kindling record', () => {
     assert.equal(mine.body.litter.corrections.length, 1);
   });
 });
+
+describe('kits as individuals', () => {
+  async function farmWithWeanedLitter() {
+    const f = await signupFarm();
+    const mk = async (body) =>
+      (await api('POST', '/animals', { token: f.token, body })).body.animal.id;
+    const doe = await mk({ name: 'Lakshmi', sex: 'doe', date_of_birth: dateAgo(500) });
+    const buck = await mk({ name: 'Bhim', sex: 'buck', date_of_birth: dateAgo(600) });
+    const m = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: doe, buck_id: buck, mated_at: daysAgo(100) } });
+    const litter = await api('POST', '/litters', {
+      token: f.token,
+      body: { doe_id: doe, mating_id: m.body.mating.id, kindled_on: dateAgo(69),
+              born_alive: 8, born_dead: 1 } });
+    await api('POST', `/litters/${litter.body.litter.id}/wean`, {
+      token: f.token, body: { weaned_on: dateAgo(39), weaned_count: 7 } });
+    return { ...f, doe, buck, litter: litter.body.litter.id };
+  }
+
+  test('a litter starts as a count and says so', async () => {
+    const f = await farmWithWeanedLitter();
+    const res = await api('GET', `/litters/${f.litter}/kits`, { token: f.token });
+    assert.equal(res.status, 200, res.text);
+    assert.deepEqual(res.body.kits, []);
+    assert.equal(res.body.litter.expected, 7, 'the weaned count, not the birth count');
+    assert.equal(res.body.litter.not_yet_recorded, 7);
+  });
+
+  test('adding them links each one to both parents', async () => {
+    const f = await farmWithWeanedLitter();
+    const res = await api('POST', `/litters/${f.litter}/kits`, { token: f.token, body: {} });
+    assert.equal(res.status, 201, res.text);
+    assert.equal(res.body.kits.length, 7, 'defaults to however many are still a count');
+    assert.deepEqual(res.body.kits.map((k) => k.tag),
+      Array.from({ length: 7 }, (_, i) => `Lakshmi-${i + 1}`));
+
+    // Unsexed by default. A guess at 30 days is a guess recorded as a fact.
+    assert.ok(res.body.kits.every((k) => k.sex === 'unknown'));
+
+    const kid = await api('GET', `/animals/${res.body.kits[0].id}/history`,
+      { token: f.token });
+    assert.equal(kid.body.animal.dam, 'Lakshmi');
+    assert.equal(kid.body.animal.sire, 'Bhim');
+    assert.equal(kid.body.animal.date_of_birth, dateAgo(69), 'born when she kindled');
+
+    const born = kid.body.events.find((e) => e.kind === 'born');
+    assert.equal(born.detail.dam, 'Lakshmi');
+    assert.equal(born.detail.sire, 'Bhim');
+
+    // And they show up on the mother's page.
+    const mum = await api('GET', `/animals/${f.doe}/history`, { token: f.token });
+    assert.equal(mum.body.offspring.length, 7);
+  });
+
+  test('unsexed kits stay out of the breeding queues', async () => {
+    const f = await farmWithWeanedLitter();
+    await api('POST', `/litters/${f.litter}/kits`, { token: f.token, body: {} });
+
+    const ready = await api('GET', '/ready-to-mate', { token: f.token });
+    assert.ok(!ready.body.ready.some((r) => r.tag.startsWith('Lakshmi-')),
+      'a rabbit nobody has sexed must not be queued for mating');
+
+    const bucks = await api('GET', `/bucks/suggest?doe_id=${f.doe}`, { token: f.token });
+    assert.ok(!bucks.body.bucks.some((b) => b.tag.startsWith('Lakshmi-')));
+  });
+
+  test('this is what makes the inbreeding check work', async () => {
+    const f = await farmWithWeanedLitter();
+    // Sexed at eight weeks, as a farm actually does it.
+    const kits = await api('POST', `/litters/${f.litter}/kits`, {
+      token: f.token, body: { count: 2, sex: 'doe' } });
+    const daughter = kits.body.kits[0].id;
+
+    const suggestions = await api('GET', `/bucks/suggest?doe_id=${daughter}`,
+      { token: f.token });
+    const father = suggestions.body.bucks.find((b) => b.buck_id === f.buck);
+    assert.ok(father, 'her father should be listed');
+    assert.equal(father.blocked_related, true,
+      'a daughter must not be offered her own father — the whole point of '
+      + 'giving kits records rather than leaving the litter as a number');
+  });
+
+  test('it will not invent more kits than the litter had', async () => {
+    const f = await farmWithWeanedLitter();
+    const tooMany = await api('POST', `/litters/${f.litter}/kits`, {
+      token: f.token, body: { count: 9 } });
+    assert.equal(tooMany.status, 400);
+    assert.match(tooMany.body.error, /7 kit|left/i);
+    assert.match(tooMany.body.error, /Correct the kindling/);
+
+    await api('POST', `/litters/${f.litter}/kits`, { token: f.token, body: { count: 7 } });
+    const again = await api('POST', `/litters/${f.litter}/kits`, {
+      token: f.token, body: { count: 1 } });
+    assert.equal(again.status, 400);
+    assert.match(again.body.error, /already recorded/);
+  });
+
+  test('adding them in two goes numbers on rather than colliding', async () => {
+    const f = await farmWithWeanedLitter();
+    const first = await api('POST', `/litters/${f.litter}/kits`, {
+      token: f.token, body: { count: 3 } });
+    const second = await api('POST', `/litters/${f.litter}/kits`, {
+      token: f.token, body: { count: 4 } });
+
+    assert.deepEqual(first.body.kits.map((k) => k.tag),
+      ['Lakshmi-1', 'Lakshmi-2', 'Lakshmi-3']);
+    assert.deepEqual(second.body.kits.map((k) => k.tag),
+      ['Lakshmi-4', 'Lakshmi-5', 'Lakshmi-6', 'Lakshmi-7']);
+
+    const all = await api('GET', `/litters/${f.litter}/kits`, { token: f.token });
+    assert.equal(all.body.kits.length, 7);
+    assert.equal(all.body.litter.not_yet_recorded, 0);
+  });
+
+  test('names can be given instead of numbers', async () => {
+    const f = await farmWithWeanedLitter();
+    const res = await api('POST', `/litters/${f.litter}/kits`, {
+      token: f.token, body: { names: ['Chotu', 'Kali'], sex: 'buck' } });
+    assert.equal(res.status, 201, res.text);
+    assert.deepEqual(res.body.kits.map((k) => k.name), ['Chotu', 'Kali']);
+    assert.ok(res.body.kits.every((k) => k.sex === 'buck'));
+
+    const clash = await api('POST', `/litters/${f.litter}/kits`, {
+      token: f.token, body: { names: ['Chotu'] } });
+    assert.equal(clash.status, 409);
+    assert.match(clash.body.error, /already a rabbit called Chotu/);
+  });
+
+  test('a second litter from the same doe carries on the numbering', async () => {
+    const f = await farmWithWeanedLitter();
+    await api('POST', `/litters/${f.litter}/kits`, { token: f.token, body: { count: 7 } });
+
+    const m2 = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: f.doe, buck_id: f.buck, mated_at: daysAgo(35) } });
+    const l2 = await api('POST', '/litters', {
+      token: f.token,
+      body: { doe_id: f.doe, mating_id: m2.body.mating.id, kindled_on: dateAgo(4),
+              born_alive: 6 } });
+
+    const res = await api('POST', `/litters/${l2.body.litter.id}/kits`, {
+      token: f.token, body: { count: 2 } });
+    assert.deepEqual(res.body.kits.map((k) => k.tag), ['Lakshmi-8', 'Lakshmi-9'],
+      'her spring litter must not collide with her autumn one');
+  });
+
+  test('one farm cannot add kits to another farm\'s litter', async () => {
+    const a = await farmWithWeanedLitter();
+    const b = await signupFarm();
+    assert.equal((await api('POST', `/litters/${a.litter}/kits`, {
+      token: b.token, body: {} })).status, 404);
+    assert.equal((await api('GET', `/litters/${a.litter}/kits`, { token: b.token })).status, 404);
+  });
+});

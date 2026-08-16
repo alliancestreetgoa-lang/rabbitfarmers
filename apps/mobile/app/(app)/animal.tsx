@@ -190,6 +190,13 @@ function Event({ e }: { e: HistoryEvent }) {
   // wants to fix: eight in the nest at dawn, a ninth found under the fur later.
   const litterId = e.kind === 'kindling' ? (e.detail?.litter_id as string) : null;
 
+  // And it is where the litter stops being a number. Offer that first while any
+  // kit is still only a count — it is the more useful of the two actions, and
+  // the one nobody would guess is hiding behind "Edit".
+  const unrecorded = Number(e.detail?.kits_not_yet_recorded ?? 0);
+  const recorded = Number(e.detail?.kits_recorded ?? 0);
+  if (litterId && recorded > 0) notes.push(`${recorded} recorded individually`);
+
   return (
     <View style={s.event} testID={`event-${e.kind}`}>
       <View style={[
@@ -215,10 +222,20 @@ function Event({ e }: { e: HistoryEvent }) {
         )}
       </View>
       {!!litterId && (
-        <Pressable testID={`edit-${litterId}`} style={s.edit}
-                   onPress={() => router.push(`/record/kindling?litter=${litterId}`)}>
-          <Text style={s.editText}>Edit</Text>
-        </Pressable>
+        <View style={{ gap: space.sm }}>
+          {unrecorded > 0 && (
+            <Pressable testID={`kits-${litterId}`} style={[s.edit, s.editPrimary]}
+                       onPress={() => router.push(`/record/kits?litter=${litterId}`)}>
+              <Text style={[s.editText, { color: colors.white }]}>
+                + {unrecorded} kits
+              </Text>
+            </Pressable>
+          )}
+          <Pressable testID={`edit-${litterId}`} style={s.edit}
+                     onPress={() => router.push(`/record/kindling?litter=${litterId}`)}>
+            <Text style={s.editText}>Edit</Text>
+          </Pressable>
+        </View>
       )}
     </View>
   );
@@ -273,8 +290,10 @@ const s = StyleSheet.create({
   eventTitle: { ...t.body, color: colors.ink, fontWeight: '600' },
   eventMeta: { ...t.small, color: colors.muted, marginTop: 2 },
   edit: {
-    minHeight: 44, minWidth: 56, alignItems: 'center', justifyContent: 'center',
+    minHeight: 44, minWidth: 72, paddingHorizontal: space.sm,
+    alignItems: 'center', justifyContent: 'center',
     borderRadius: radius.sm, borderWidth: 1, borderColor: colors.rule,
   },
+  editPrimary: { backgroundColor: colors.accent, borderColor: colors.accent },
   editText: { ...t.small, color: colors.accent, fontWeight: '700' },
 });

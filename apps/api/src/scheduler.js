@@ -24,6 +24,29 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
     // One transaction: the temp tables inside generate_due_tasks() are declared
     // ON COMMIT DROP, and a half-generated task list is worse than none.
     await client.query('BEGIN');
+
+    /*
+     * Hold the farms still for the length of the pass.
+     *
+     * Generation is INSERT ... SELECT across every farm. Under READ COMMITTED
+     * each statement reads a snapshot taken when it starts, but the foreign key
+     * is checked against the state at insert time — so a farm deleted after the
+     * snapshot and before the insert makes the whole statement fail with
+     * `task_farm_id_fkey`, and the entire run dies for every farm rather than
+     * skipping the one that went.
+     *
+     * That is not hypothetical: a superadmin deleting a farm is a supported
+     * action, and the scheduler fires every fifteen minutes. It surfaced first
+     * as an intermittent test failure, which is exactly what it would look like
+     * in production — a red run every few weeks with no obvious cause.
+     *
+     * FOR KEY SHARE blocks DELETE without blocking ordinary updates to a farm
+     * row, so a deletion issued mid-pass waits for the pass to finish. The pass
+     * is sub-second; the delete is rare. Nothing here holds a lock across a
+     * round trip to anywhere else.
+     */
+    await client.query('SELECT id FROM farm ORDER BY id FOR KEY SHARE');
+
     const tasks = await client.query('SELECT generate_due_tasks() AS n');
     const notes = await client.query('SELECT generate_notifications() AS n');
     await client.query('COMMIT');
