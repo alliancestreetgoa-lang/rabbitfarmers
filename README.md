@@ -1,6 +1,6 @@
-# Rabbit Farm Manager — Planning Repository
+# Rabbit Farm Manager
 
-Planning and design documents for a rabbit farm management application covering
+A rabbit farm management application covering
 **breeding (mating, gestation, kindling, weaning)**, **medication rounds**,
 **health alerts** and **staff management** — built to be sold to farmers as a
 monthly or yearly subscription.
@@ -22,10 +22,32 @@ with grandfathering enforced in the schema.
 
 ## Status
 
-This repository currently contains **planning documents only**. No application
-code has been written yet. The intent is to settle the domain model and the
-rules before writing software, because the breeding rules are where a rabbit
-app succeeds or fails.
+**Backend and admin CRM are built and tested.** The mobile app is not started.
+
+| Part | State |
+|---|---|
+| Database migrations, RLS, tenant isolation | Built, 8 isolation tests |
+| Signup / sign in / sign out | Built, 10 tests |
+| Breeding cycle, daily list, ready-to-mate, conditions | Built, 8 tests |
+| Subscriptions, trial, grace, entitlements | Built, 4 tests |
+| Super-admin CRM with audit trail | Built, 12 tests |
+| Scheduler (task generation, 2-hourly reminders) | **Not built** — see the note below |
+| Expo mobile app | **Not built** |
+
+```bash
+cd apps/api && npm install && npm run migrate && npm test   # 42 passing
+npm start                                                    # api + /admin/login
+```
+
+The domain fixtures in `db/verify.sql` add a further 41 assertions against the
+breeding rules themselves.
+
+### The next thing to build
+
+The **scheduler**. Nothing yet generates the day-28 nest box task or fires the
+2-hourly loose-motion reminder. It must run from an external scheduler rather
+than `pg_cron` — Neon suspends idle computes and cron jobs then stop firing with
+no error anywhere. See [docs/06-tech-stack.md](docs/06-tech-stack.md).
 
 ## Documents
 
@@ -41,7 +63,8 @@ app succeeds or fails.
 | [docs/08-open-questions.md](docs/08-open-questions.md) | Decisions needed from the farm owner before building. |
 | [docs/09-saas-model.md](docs/09-saas-model.md) | Pricing, plans, billing, tenant isolation, onboarding, go-to-market. |
 | [docs/10-admin-console.md](docs/10-admin-console.md) | Signup and sign-in, and the super-admin CRM for running every farm and subscription. |
-| [db/schema.sql](db/schema.sql) | Reference PostgreSQL schema for the MVP. |
+| [apps/api](apps/api) | The backend and admin CRM, with its own README. |
+| [db/migrations](db/migrations) | Ordered, immutable migrations — the source of truth for the schema. |
 | [db/verify.sql](db/verify.sql) | Fixtures that prove the derived-state logic returns the right answers. |
 
 ## Verifying the schema
@@ -54,14 +77,14 @@ subscription that must still fire its reminders, and a price rise that must not
 touch a single existing customer.
 
 ```bash
-createdb rabbitfarm
-psql -d rabbitfarm -v ON_ERROR_STOP=1 -f db/schema.sql
-psql -d rabbitfarm -v ON_ERROR_STOP=1 -f db/verify.sql
+createdb rabbitry
+cd apps/api && npm run migrate
+psql -d rabbitry -v ON_ERROR_STOP=1 -f ../../db/verify.sql
 ```
 
-Expected output ends with `ALL CHECKS PASSED` after 40 assertions. The fixtures
-roll back, so the database is left empty. Verified on PostgreSQL 16; Neon runs
-Postgres, so it applies unchanged.
+Expected output ends with `ALL CHECKS PASSED` after 41 assertions. The fixtures
+roll back, so the database is left as it was. Verified on PostgreSQL 16; Neon
+runs Postgres, so it applies unchanged.
 
 ## The one design rule
 

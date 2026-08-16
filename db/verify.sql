@@ -13,6 +13,12 @@
 
 BEGIN;
 
+-- Start from a clean slate: db/seed.sql has already inserted the live plan, and
+-- these fixtures assert on exactly one plan being on sale. Everything here
+-- rolls back, so the seeded row survives the run.
+DELETE FROM subscription;
+DELETE FROM plan;
+
 -- Signup collects exactly four things plus the farm name: email, phone,
 -- address, password. No verification step — the account is usable immediately.
 INSERT INTO farm (id, name, timezone, address_line, city, state, pincode, country)
