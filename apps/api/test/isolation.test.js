@@ -61,9 +61,12 @@ describe('tenant isolation', () => {
         -- reachable by the farmer-facing role at all (see migration 0006), so
         -- RLS would be belt on top of a wall. Adding a table here is a decision
         -- to make on purpose, which is the point of the list.
+        -- audit_log is NOT on this list any more. It was, and it was only safe
+        -- because nothing ever wrote to it; migration 0013 started writing farm
+        -- corrections there and gave it a policy at the same time.
         AND c.relname NOT IN ('schema_migration','plan','platform_admin',
                               'admin_audit_log','admin_impersonation',
-                              'admin_session','scheduler_run','audit_log')
+                              'admin_session','scheduler_run')
       ORDER BY 1`);
     assert.deepEqual(rows.map((r) => r.relname), [],
       `these tables have no row-level security: ${rows.map((r) => r.relname).join(', ')}`);

@@ -382,3 +382,258 @@ describe('breed and cage', () => {
     assert.notEqual(aCages[0].id, bCages[0].id);
   });
 });
+
+describe('a rabbit keeps her history', () => {
+  /** A doe with a full working life behind her. */
+  async function doeWithAPast() {
+    const f = await signupFarm();
+    const mk = async (body) =>
+      (await api('POST', '/animals', { token: f.token, body })).body.animal.id;
+
+    const buck = await mk({ name: 'Bhim', sex: 'buck', date_of_birth: dateAgo(700) });
+    const doe = await mk({ name: 'Lakshmi', sex: 'doe', date_of_birth: dateAgo(600),
+                           cage_code: 'A-1' });
+
+    const m = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: doe, buck_id: buck, mated_at: daysAgo(100) } });
+    await api('POST', '/pregnancy-checks', {
+      token: f.token,
+      body: { mating_id: m.body.mating.id, result: 'positive', checked_on: dateAgo(88) } });
+    const litter = await api('POST', '/litters', {
+      token: f.token,
+      body: { doe_id: doe, mating_id: m.body.mating.id, kindled_on: dateAgo(69),
+              born_alive: 8, born_dead: 1 } });
+    await api('POST', `/litters/${litter.body.litter.id}/wean`, {
+      token: f.token, body: { weaned_on: dateAgo(39), weaned_count: 7 } });
+    await api('POST', '/conditions', {
+      token: f.token, body: { rabbit_id: doe, severity: 'moderate' } });
+
+    return { ...f, doe, buck };
+  }
+
+  test('every event she went through is readable afterwards', async () => {
+    const f = await doeWithAPast();
+    const res = await api('GET', `/animals/${f.doe}/history`, { token: f.token });
+    assert.equal(res.status, 200, res.text);
+
+    const kinds = res.body.events.map((e) => e.kind);
+    for (const k of ['born', 'mating', 'pregnancy_check', 'kindling', 'weaning',
+                     'condition']) {
+      assert.ok(kinds.includes(k), `${k} is missing from her history`);
+    }
+
+    // Newest first — the usual question is what has been happening lately.
+    const dates = res.body.events.map((e) => e.on_date);
+    assert.deepEqual(dates, [...dates].sort().reverse());
+
+    const kindling = res.body.events.find((e) => e.kind === 'kindling');
+    assert.match(kindling.title, /8 alive, 1 dead/);
+    assert.equal(kindling.detail.born_alive, 8);
+
+    assert.equal(res.body.lifetime.litters, 1);
+    assert.equal(res.body.lifetime.born_alive, 8);
+    assert.equal(res.body.lifetime.weaned, 7);
+  });
+
+  test("a buck's record is the does he served", async () => {
+    const f = await doeWithAPast();
+    const res = await api('GET', `/animals/${f.buck}/history`, { token: f.token });
+    const service = res.body.events.find((e) => e.kind === 'service');
+    assert.ok(service, 'a buck with no history of his own is a blank page');
+    assert.match(service.title, /Served Lakshmi/);
+    assert.equal(res.body.lifetime.services, 1);
+  });
+
+  test('selling her takes her out of the herd and nothing else', async () => {
+    const f = await doeWithAPast();
+
+    const before = await api('GET', `/animals/${f.doe}/history`, { token: f.token });
+    const sold = await api('POST', `/animals/${f.doe}/status`, {
+      token: f.token,
+      body: { status: 'sold', reason: 'Sold to Prakash', sale_price_paise: 45000 },
+    });
+    assert.equal(sold.status, 201, sold.text);
+
+    // Out of the working herd...
+    const herd = await api('GET', '/animals', { token: f.token });
+    assert.ok(!herd.body.animals.some((a) => a.id === f.doe));
+
+    // ...but still there, and still complete.
+    const past = await api('GET', '/animals?include=past', { token: f.token });
+    assert.equal(past.body.animals.find((a) => a.id === f.doe).status, 'sold');
+    assert.ok((await api('GET', '/animals?include=all', { token: f.token }))
+      .body.animals.some((a) => a.id === f.doe));
+
+    const after = await api('GET', `/animals/${f.doe}/history`, { token: f.token });
+    assert.equal(after.status, 200, 'her page must still open after she is gone');
+    for (const e of before.body.events) {
+      assert.ok(after.body.events.some((x) => x.kind === e.kind && x.on_date === e.on_date),
+        `${e.kind} disappeared when she was sold`);
+    }
+    const status = after.body.events.find((e) => e.kind === 'status');
+    assert.equal(status.title, 'Sold');
+    assert.equal(status.detail.reason, 'Sold to Prakash');
+    assert.equal(status.detail.sale_price_paise, 45000);
+  });
+
+  test('every status change is kept, not overwritten', async () => {
+    const f = await doeWithAPast();
+    const at = async (status, reason) => api('POST', `/animals/${f.doe}/status`, {
+      token: f.token, body: { status, reason } });
+
+    await at('quarantine', 'Off feed, keeping her apart');
+    await at('active', 'Eating again');
+    await at('culled', 'Three failed services');
+
+    const res = await api('GET', `/animals/${f.doe}/history`, { token: f.token });
+    const changes = res.body.events.filter((e) => e.kind === 'status');
+    assert.equal(changes.length, 3, 'a status column holds one fact; a farm has three');
+    assert.deepEqual(changes.map((e) => e.detail.to).sort(),
+      ['active', 'culled', 'quarantine']);
+  });
+
+  test('a reason is required for the changes you cannot undo', async () => {
+    const f = await doeWithAPast();
+    for (const status of ['sold', 'culled', 'dead']) {
+      const res = await api('POST', `/animals/${f.doe}/status`, {
+        token: f.token, body: { status } });
+      assert.equal(res.status, 400, `${status} should need a reason`);
+      assert.equal(res.body.detail.field, 'reason');
+    }
+    // Still active — three refusals changed nothing.
+    const herd = await api('GET', '/animals', { token: f.token });
+    assert.equal(herd.body.animals.find((a) => a.id === f.doe).status, 'active');
+  });
+
+  test('the database itself refuses to delete a doe who has bred', async () => {
+    const f = await doeWithAPast();
+    // Straight at the table as the admin role, bypassing RLS and the API — the
+    // guarantee has to hold against a hand at the console, not just against a
+    // missing endpoint.
+    await assert.rejects(
+      () => adminQuery('DELETE FROM rabbit WHERE id = $1', [f.doe]),
+      /foreign key|violates/i,
+      'a doe with matings and litters must not be deletable');
+  });
+
+  test('one farm cannot read another farm\'s history', async () => {
+    const a = await doeWithAPast();
+    const b = await signupFarm();
+
+    const res = await api('GET', `/animals/${a.doe}/history`, { token: b.token });
+    assert.equal(res.status, 404, 'not even the existence of the id leaks');
+
+    const push = await api('POST', `/animals/${a.doe}/status`, {
+      token: b.token, body: { status: 'dead', reason: 'not mine to say' } });
+    assert.equal(push.status, 404);
+  });
+});
+
+describe('correcting a kindling record', () => {
+  async function farmWithLitter() {
+    const f = await signupFarm();
+    const mk = async (body) =>
+      (await api('POST', '/animals', { token: f.token, body })).body.animal.id;
+    const doe = await mk({ name: 'Lakshmi', sex: 'doe', date_of_birth: dateAgo(500) });
+    const buck = await mk({ name: 'Bhim', sex: 'buck', date_of_birth: dateAgo(600) });
+    const m = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: doe, buck_id: buck, mated_at: daysAgo(35) } });
+    const litter = await api('POST', '/litters', {
+      token: f.token,
+      body: { doe_id: doe, mating_id: m.body.mating.id, kindled_on: dateAgo(4),
+              born_alive: 8, born_dead: 1, notes: 'Good nest, all covered.' } });
+    return { ...f, doe, litter: litter.body.litter.id };
+  }
+
+  test('the count and the note are saved and read back', async () => {
+    const f = await farmWithLitter();
+    const res = await api('GET', `/litters/${f.litter}`, { token: f.token });
+    assert.equal(res.status, 200, res.text);
+    assert.equal(res.body.litter.born_alive, 8);
+    assert.equal(res.body.litter.born_dead, 1);
+    assert.equal(res.body.litter.notes, 'Good nest, all covered.');
+    assert.equal(res.body.litter.doe_name, 'Lakshmi');
+    assert.deepEqual(res.body.litter.corrections, []);
+  });
+
+  test('a correction keeps what it said before', async () => {
+    const f = await farmWithLitter();
+
+    const patched = await api('PATCH', `/litters/${f.litter}`, {
+      token: f.token,
+      body: { born_alive: 9, notes: 'Found a ninth under the fur an hour later.' },
+    });
+    assert.equal(patched.status, 200, patched.text);
+    assert.deepEqual(patched.body.litter.changed.sort(), ['born_alive', 'notes']);
+
+    const now = await api('GET', `/litters/${f.litter}`, { token: f.token });
+    assert.equal(now.body.litter.born_alive, 9);
+    assert.equal(now.body.litter.corrections.length, 1);
+    assert.equal(now.body.litter.corrections[0].old_values.born_alive, 8);
+    assert.equal(now.body.litter.corrections[0].new_values.born_alive, 9);
+    assert.equal(now.body.litter.corrections[0].changed_by, 'Farm Owner');
+
+    // And it shows on the doe's timeline as its own event, above the kindling.
+    const history = await api('GET', `/animals/${f.doe}/history`, { token: f.token });
+    const fix = history.body.events.find((e) => e.kind === 'correction');
+    assert.ok(fix, 'a correction must be visible, not silent');
+    assert.equal(fix.detail.before.born_alive, 8);
+    assert.equal(fix.detail.after.born_alive, 9);
+
+    const kindling = history.body.events.find((e) => e.kind === 'kindling');
+    assert.match(kindling.title, /9 alive/);
+  });
+
+  test('re-saving the same values records nothing', async () => {
+    const f = await farmWithLitter();
+    const res = await api('PATCH', `/litters/${f.litter}`, {
+      token: f.token, body: { born_alive: 8, born_dead: 1 } });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.litter.changed, []);
+    assert.match(res.body.message, /Nothing changed/);
+
+    const now = await api('GET', `/litters/${f.litter}`, { token: f.token });
+    assert.equal(now.body.litter.corrections.length, 0,
+      'an untouched form must not litter the timeline');
+  });
+
+  test('the doe cannot be moved to another rabbit by editing', async () => {
+    const f = await farmWithLitter();
+    const other = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Rani', sex: 'doe' } })).body.animal.id;
+
+    const res = await api('PATCH', `/litters/${f.litter}`, {
+      token: f.token, body: { doe_id: other } });
+    assert.equal(res.status, 400, 'reassigning a litter is a new record, not a correction');
+
+    const now = await api('GET', `/litters/${f.litter}`, { token: f.token });
+    assert.equal(now.body.litter.doe_id, f.doe);
+  });
+
+  test('nonsense counts are refused', async () => {
+    const f = await farmWithLitter();
+    for (const body of [{ born_alive: -1 }, { born_dead: 2.5 }, { born_alive: 'lots' }]) {
+      const res = await api('PATCH', `/litters/${f.litter}`, { token: f.token, body });
+      assert.equal(res.status, 400, `${JSON.stringify(body)} should be refused`);
+    }
+    assert.equal((await api('GET', `/litters/${f.litter}`, { token: f.token }))
+      .body.litter.born_alive, 8);
+  });
+
+  test('one farm cannot read or correct another farm\'s record', async () => {
+    const a = await farmWithLitter();
+    const b = await signupFarm();
+
+    assert.equal((await api('GET', `/litters/${a.litter}`, { token: b.token })).status, 404);
+    assert.equal((await api('PATCH', `/litters/${a.litter}`, {
+      token: b.token, body: { born_alive: 99 } })).status, 404);
+
+    // The correction trail is tenant-scoped too. audit_log had no row-level
+    // security until migration 0013 — it was only safe because nothing wrote to
+    // it, and this is what makes sure it stays safe now that something does.
+    await api('PATCH', `/litters/${a.litter}`, {
+      token: a.token, body: { born_alive: 9 } });
+    const mine = await api('GET', `/litters/${a.litter}`, { token: a.token });
+    assert.equal(mine.body.litter.corrections.length, 1);
+  });
+});

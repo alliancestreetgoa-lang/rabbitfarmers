@@ -9,16 +9,28 @@ const write = requireWriteAccess;
 
 /* ---------------------------------------------------------------- animals -- */
 
-/** GET /animals — the herd, with any open health condition's colour mark. */
+/**
+ * GET /animals — the herd, with any open health condition's colour mark.
+ *
+ * Defaults to the living herd, because that is what a farmer is standing in
+ * front of. `?include=past` returns the animals that have left it and
+ * `?include=all` returns both — nothing is ever dropped from the database, so
+ * anything hidden here is still one query away.
+ */
 farmRoutes.get('/animals', async (c) => {
   const db = c.get('db');
   const sex = c.req.query('sex');
   const role = c.req.query('role');
   const q = c.req.query('q');
+  const include = c.req.query('include') ?? 'herd';
+  if (!['herd', 'past', 'all'].includes(include)) {
+    throw new HttpError(400, 'include must be herd, past or all');
+  }
 
   const rows = await db(async (client) => {
     const { rows } = await client.query(`
       SELECT r.id, r.tag, r.name, r.sex, r.role, r.status, r.date_of_birth,
+             r.status_changed_on,
              b.name AS breed, cg.code AS cage,
              st.state AS reproductive_state, st.confidence,
              st.expected_kindling_on,
@@ -28,14 +40,134 @@ farmRoutes.get('/animals', async (c) => {
       LEFT JOIN cage cg   ON cg.id = r.cage_id
       LEFT JOIN v_doe_reproductive_state st ON st.rabbit_id = r.id
       LEFT JOIN v_rabbit_flags fl ON fl.rabbit_id = r.id
-      WHERE r.status <> 'dead'
+      WHERE CASE $4
+              WHEN 'herd' THEN r.status NOT IN ('sold','culled','dead')
+              WHEN 'past' THEN r.status IN ('sold','culled','dead')
+              ELSE true
+            END
         AND ($1::text IS NULL OR r.sex::text = $1)
         AND ($2::text IS NULL OR r.role::text = $2)
         AND ($3::text IS NULL OR r.tag ILIKE '%'||$3||'%' OR r.name ILIKE '%'||$3||'%')
-      ORDER BY r.tag`, [sex ?? null, role ?? null, q ?? null]);
+      ORDER BY r.tag`, [sex ?? null, role ?? null, q ?? null, include]);
     return rows;
   });
   return c.json({ animals: rows });
+});
+
+/**
+ * GET /animals/:id/history — everything ever recorded about one rabbit.
+ *
+ * The farm has been storing all of this from the first day: matings,
+ * palpations, kindlings, weanings, weights, treatments, illnesses, cage moves.
+ * None of it was readable, which from a farmer's side is the same as not
+ * keeping it. This is the endpoint that makes the record a record.
+ *
+ * Works for an animal that has been sold, culled or died — especially then,
+ * because that is when someone wants to know what her line produced.
+ */
+farmRoutes.get('/animals/:id/history', async (c) => {
+  const id = c.req.param('id');
+
+  const result = await c.get('db')(async (client) => {
+    const { rows: animal } = await client.query(`
+      SELECT r.id, r.tag, r.name, r.sex, r.role, r.status, r.date_of_birth,
+             r.origin, r.notes,
+             b.name AS breed, cg.code AS cage,
+             dam.name AS dam, dam.id AS dam_id,
+             sire.name AS sire, sire.id AS sire_id
+      FROM rabbit r
+      LEFT JOIN breed b    ON b.id = r.breed_id
+      LEFT JOIN cage cg    ON cg.id = r.cage_id
+      LEFT JOIN rabbit dam  ON dam.id = r.dam_id
+      LEFT JOIN rabbit sire ON sire.id = r.sire_id
+      WHERE r.id = $1`, [id]);
+    if (!animal.length) throw new HttpError(404, 'No such rabbit');
+
+    const { rows: lifetime } = await client.query(
+      'SELECT * FROM v_rabbit_lifetime WHERE rabbit_id = $1', [id]);
+
+    // Newest first: the question is nearly always "what has been happening to
+    // her lately", not "what happened the day she was born".
+    const { rows: events } = await client.query(`
+      SELECT on_date, kind, title, detail
+      FROM v_rabbit_history
+      WHERE rabbit_id = $1 AND on_date IS NOT NULL
+      ORDER BY on_date DESC, ord DESC`, [id]);
+
+    // Her offspring, which is the other half of what a breeding record is for.
+    const { rows: offspring } = await client.query(`
+      SELECT r.id, r.tag, r.name, r.sex, r.status, r.date_of_birth
+      FROM rabbit r
+      WHERE r.dam_id = $1 OR r.sire_id = $1
+      ORDER BY r.date_of_birth DESC NULLS LAST, r.tag`, [id]);
+
+    return { animal: animal[0], lifetime: lifetime[0] ?? null, events, offspring };
+  });
+
+  return c.json(result);
+});
+
+/**
+ * POST /animals/:id/status — sold, culled, died, quarantined, or back in.
+ *
+ * The only way an animal leaves the herd. There is deliberately no endpoint
+ * that deletes one: her matings, her litters and her line are part of the
+ * farm's record and outlive her. Postgres agrees — mating.doe_id and
+ * litter.doe_id are not ON DELETE CASCADE, so a doe who has ever bred cannot be
+ * removed even by hand.
+ *
+ * Every change is appended, so a doe quarantined in March, returned to service
+ * in April and sold in November keeps all three facts.
+ */
+const STATUSES = ['active', 'quarantine', 'sold', 'culled', 'dead'];
+
+farmRoutes.post('/animals/:id/status', write, async (c) => {
+  const id = c.req.param('id');
+  const b = await c.req.json();
+  const to = b.status;
+
+  if (!STATUSES.includes(to)) {
+    throw new HttpError(400, `Status must be one of ${STATUSES.join(', ')}`,
+      { field: 'status' });
+  }
+  // A reason is required for the three that are permanent. "Culled" with no
+  // reason six months later tells nobody whether she was barren or sick.
+  const reason = String(b.reason ?? '').trim();
+  if (!reason && ['sold', 'culled', 'dead'].includes(to)) {
+    throw new HttpError(400, 'Say why — it is the part you will want later',
+      { field: 'reason' });
+  }
+  if (b.sale_price_paise != null && to !== 'sold') {
+    throw new HttpError(400, 'A price only makes sense on a sale',
+      { field: 'sale_price_paise' });
+  }
+
+  const session = c.get('session');
+  const row = await c.get('db')(async (client) => {
+    const { rows: current } = await client.query(
+      'SELECT status, name, tag FROM rabbit WHERE id = $1', [id]);
+    if (!current.length) throw new HttpError(404, 'No such rabbit');
+    if (current[0].status === to) {
+      throw new HttpError(409, `Already marked ${to}`);
+    }
+
+    const { rows } = await client.query(`
+      INSERT INTO rabbit_status_change
+        (id, farm_id, rabbit_id, from_status, to_status, changed_on, reason,
+         sale_price_paise, recorded_by)
+      VALUES (COALESCE($7::uuid, gen_random_uuid()), current_farm_id(), $1, $2, $3,
+              COALESCE($4::date, current_date), $5, $6, $8)
+      RETURNING id, from_status, to_status, changed_on`,
+      [id, current[0].status, to, b.changed_on ?? null, reason || null,
+       b.sale_price_paise ?? null, b.id ?? null, session.employeeId]);
+
+    return { ...rows[0], name: current[0].name ?? current[0].tag };
+  });
+
+  return c.json({
+    change: row,
+    message: `${row.name} marked ${to}. Her record stays.`,
+  }, 201);
 });
 
 /**
@@ -363,6 +495,111 @@ farmRoutes.post('/litters', write, async (c) => {
     return { ...rows[0], schedule: sched[0] };
   });
   return c.json({ litter: row }, 201);
+});
+
+/** GET /litters/:id — one kindling record, for reading it back or editing it. */
+farmRoutes.get('/litters/:id', async (c) => {
+  const id = c.req.param('id');
+  const row = await c.get('db')(async (client) => {
+    const { rows } = await client.query(`
+      SELECT l.*, r.name AS doe_name, r.tag AS doe_tag,
+             l.kindled_on + fs.wean_at_days AS separate_kits_on,
+             l.kindled_on + fs.wean_at_days + fs.rebreed_after_weaning_days AS rebreed_on
+      FROM litter l
+      JOIN rabbit r ON r.id = l.doe_id
+      CROSS JOIN farm_settings fs
+      WHERE l.id = $1`, [id]);
+    if (!rows.length) throw new HttpError(404, 'No such kindling record');
+
+    // What it said before, if it has been corrected.
+    const { rows: edits } = await client.query(`
+      SELECT al.changed_at, al.old_values, al.new_values, e.full_name AS changed_by
+      FROM audit_log al
+      LEFT JOIN employee e ON e.id = al.changed_by
+      WHERE al.table_name = 'litter' AND al.record_id = $1 AND al.action = 'update'
+      ORDER BY al.changed_at DESC`, [id]);
+
+    return { ...rows[0], corrections: edits };
+  });
+  return c.json({ litter: row });
+});
+
+/**
+ * PATCH /litters/:id — correcting what was written down.
+ *
+ * A farmer counts eight kits at six in the morning and finds a ninth under the
+ * fur an hour later. A record that cannot be corrected stops being trusted, and
+ * an untrusted record sends everyone back to the paper card.
+ *
+ * The correction is not an overwrite. The old and new values go into audit_log
+ * and the doe's timeline gains a line saying what changed and who changed it,
+ * so "she had eight, no wait, nine" survives as a fact about the record rather
+ * than quietly replacing one.
+ *
+ * Only the fields a person could get wrong in a shed are editable. doe_id and
+ * mating_id are not: pointing a litter at a different doe is not a correction,
+ * it is a different record.
+ */
+const LITTER_EDITABLE = ['kindled_on', 'born_alive', 'born_dead', 'notes',
+                         'nest_box_placed_on', 'fostered_in', 'fostered_out'];
+
+farmRoutes.patch('/litters/:id', write, async (c) => {
+  const id = c.req.param('id');
+  const b = await c.req.json();
+  const session = c.get('session');
+
+  const fields = LITTER_EDITABLE.filter((k) => k in b);
+  if (!fields.length) {
+    throw new HttpError(400, `Nothing to change. Editable: ${LITTER_EDITABLE.join(', ')}`);
+  }
+  for (const k of ['born_alive', 'born_dead', 'fostered_in', 'fostered_out']) {
+    if (k in b && (!Number.isInteger(Number(b[k])) || Number(b[k]) < 0)) {
+      throw new HttpError(400, `${k.replace(/_/g, ' ')} must be a whole number`,
+        { field: k });
+    }
+  }
+
+  const row = await c.get('db')(async (client) => {
+    const { rows: before } = await client.query(
+      `SELECT ${LITTER_EDITABLE.join(', ')}, doe_id FROM litter WHERE id = $1`, [id]);
+    if (!before.length) throw new HttpError(404, 'No such kindling record');
+
+    const sets = fields.map((k, i) => `${k} = $${i + 2}`).join(', ');
+    const values = fields.map((k) => (b[k] === '' ? null : b[k]));
+    const { rows } = await client.query(
+      `UPDATE litter SET ${sets} WHERE id = $1
+       RETURNING id, kindled_on, born_alive, born_dead, notes,
+                 nest_box_placed_on, fostered_in, fostered_out`,
+      [id, ...values]);
+
+    // Only what actually moved. Re-saving a form untouched should not litter
+    // the timeline with corrections that corrected nothing.
+    const changed = {};
+    const was = {};
+    for (const k of fields) {
+      if (String(before[0][k] ?? '') !== String(rows[0][k] ?? '')) {
+        was[k] = before[0][k];
+        changed[k] = rows[0][k];
+      }
+    }
+
+    if (Object.keys(changed).length) {
+      await client.query(`
+        INSERT INTO audit_log (farm_id, table_name, record_id, action, changed_by,
+                               old_values, new_values)
+        VALUES (current_farm_id(), 'litter', $1, 'update', $2, $3, $4)`,
+        [id, session.employeeId, JSON.stringify(was), JSON.stringify(changed)]);
+    }
+
+    return { ...rows[0], changed: Object.keys(changed) };
+  });
+
+  return c.json({
+    litter: row,
+    message: row.changed.length
+      ? `Corrected. The previous ${row.changed.length === 1 ? 'value is' : 'values are'} kept on her record.`
+      : 'Nothing changed.',
+  });
 });
 
 /** POST /litters/:id/wean — separating the kits. The KPI moment. */

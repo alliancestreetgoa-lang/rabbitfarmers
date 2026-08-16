@@ -29,7 +29,8 @@ with grandfathering enforced in the schema.
 |---|---|
 | Database migrations, RLS, tenant isolation | Built, 9 isolation tests |
 | Signup / sign in / sign out | Built, 10 tests |
-| Breeding cycle, daily list, ready-to-mate, conditions | Built, 16 tests |
+| Breeding cycle, daily list, ready-to-mate, conditions | Built, 29 tests |
+| Rabbit history, corrections, animals leaving the herd | Built, 12 tests |
 | Subscriptions, trial, grace, entitlements | Built, 4 tests |
 | Super-admin CRM with audit trail | Built, 16 tests |
 | Scheduler (task generation, 2-hourly reminders, heartbeat) | Built, 25 tests |
@@ -44,7 +45,7 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 80 API tests, then boots the server and hits real endpoints over HTTP —
+the 93 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.
@@ -115,6 +116,28 @@ psql -d rabbitry -v ON_ERROR_STOP=1 -f ../../db/verify.sql
 Expected output ends with `ALL CHECKS PASSED` after 41 assertions. The fixtures
 roll back, so the database is left as it was. Verified on PostgreSQL 16; Neon
 runs Postgres, so it applies unchanged.
+
+## Nothing about a rabbit is ever deleted
+
+A doe's matings, her litters, her illnesses and her line are the farm's record
+and outlive her. So:
+
+- **There is no endpoint that deletes an animal.** She is marked sold, culled or
+  died, with a reason, and that becomes another line in her history.
+- **Postgres enforces it too.** `mating.doe_id`, `litter.doe_id` and
+  `rabbit.dam_id` are deliberately not `ON DELETE CASCADE`, so a rabbit who has
+  ever bred cannot be removed even from a psql prompt. There is a test that
+  tries.
+- **Corrections keep both values.** Editing a kindling record writes the old and
+  new values into `audit_log`, and the doe's timeline gains a line saying what
+  changed and who changed it. "Eight — no, nine" is a fact about the record, not
+  an overwrite.
+- **Status is a log, not a column.** Quarantined in March, back in service in
+  April, sold in November — three facts, all kept.
+
+`GET /animals/:id/history` returns the whole timeline, and it keeps working
+after she has gone. That is the point: her record is most useful exactly when
+she is no longer in front of you.
 
 ## The one design rule
 

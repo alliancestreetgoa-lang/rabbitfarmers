@@ -19,7 +19,10 @@ export interface Animal {
   name: string | null;
   sex: Sex;
   role: string;
+  /** active | quarantine | sold | culled | dead. Never deleted. */
   status: string;
+  /** When she left the herd, for the three statuses that mean she has. */
+  status_changed_on?: string | null;
   date_of_birth: string | null;
   breed: string | null;
   cage: string | null;
@@ -39,7 +42,7 @@ export interface Breed {
   doe_first_mating_days: number;
   buck_first_mating_days: number;
   /** How many living rabbits carry it — the list is ordered by this. */
-  animals: string;
+  animals: number;
 }
 
 export interface Cage {
@@ -49,7 +52,64 @@ export interface Cage {
   row_label: string | null;
   capacity: number;
   shed: string;
-  occupants: string;
+  occupants: number;
+}
+
+export interface LitterCorrection {
+  changed_at: string;
+  changed_by: string | null;
+  old_values: Record<string, unknown> | null;
+  new_values: Record<string, unknown> | null;
+}
+
+export interface Litter {
+  id: string;
+  doe_id: string;
+  doe_name: string | null;
+  doe_tag: string;
+  mating_id: string | null;
+  kindled_on: string;
+  nest_box_placed_on: string | null;
+  born_alive: number;
+  born_dead: number;
+  fostered_in: number;
+  fostered_out: number;
+  weaned_on: string | null;
+  weaned_count: number | null;
+  avg_weaning_weight_g: number | null;
+  notes: string | null;
+  separate_kits_on: string;
+  rebreed_on: string;
+  /** Every time this record has been corrected, newest first. */
+  corrections: LitterCorrection[];
+}
+
+/** One line of a rabbit's timeline. `detail` varies by kind. */
+export interface HistoryEvent {
+  on_date: string;
+  kind: 'born' | 'mating' | 'service' | 'pregnancy_check' | 'kindling'
+      | 'weaning' | 'weight' | 'health_event' | 'condition' | 'moved' | 'status'
+      /** A record that was edited. Carries `before` and `after`. */
+      | 'correction';
+  title: string;
+  detail: Record<string, unknown>;
+}
+
+export interface RabbitLifetime {
+  status: string;
+  date_of_birth: string | null;
+  age_days: number | null;
+  left_herd_on: string | null;
+  matings: number;
+  services: number;
+  litters: number;
+  born_alive: number;
+  weaned: number;
+  /** NULL until she has been in service 180 days — see migration 0012. */
+  weaned_per_year: number | null;
+  days_in_service: number | null;
+  illnesses: number;
+  treatments: number;
 }
 
 export interface PregnancySummary {

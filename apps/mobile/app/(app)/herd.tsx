@@ -7,10 +7,18 @@ import { ConditionMark, Empty, H1, Loading, Screen } from '../../src/ui/componen
 import { sexLabel } from '../../src/ui/labels';
 import { STATE_LABEL, colors, radius, space, type as t } from '../../src/ui/theme';
 
+const GONE = ['sold', 'culled', 'dead'];
+
 export default function Herd() {
   const { client } = useApp();
   const [q, setQ] = useState('');
-  const { data, loading, reload } = useQuery('animals', () => client.animals());
+  // The herd you are standing in front of, or the ones who have left it.
+  // Nothing is ever deleted, so "past" is a filter, not an archive.
+  const [past, setPast] = useState(false);
+  const { data, loading, reload } = useQuery(
+    past ? 'animals:past' : 'animals',
+    () => client.animals(past ? { include: 'past' } : {}),
+    [past]);
 
   const animals = (data?.animals ?? []).filter((a) =>
     !q || (a.name ?? '').toLowerCase().includes(q.toLowerCase())
@@ -32,9 +40,24 @@ export default function Herd() {
           style={s.search}
         />
 
+        <View style={s.tabs}>
+          {[false, true].map((v) => (
+            <Pressable key={String(v)} testID={v ? 'tab-past' : 'tab-herd'}
+                       onPress={() => setPast(v)}
+                       accessibilityState={{ selected: past === v }}
+                       style={[s.tab, past === v && s.tabOn]}>
+              <Text style={[s.tabText, past === v && s.tabTextOn]}>
+                {v ? 'Sold, culled, died' : 'In the herd'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
         {loading && !data && <Loading />}
         {!loading && animals.length === 0 && (
-          <Empty text={'No rabbits yet.\nAdd your first one below.'} />
+          <Empty text={past
+            ? 'No rabbits have left the herd yet.'
+            : 'No rabbits yet.\nAdd your first one below.'} />
         )}
 
         {animals.map((a) => (
@@ -48,8 +71,11 @@ export default function Herd() {
               <Text style={s.name}>{a.name ?? a.tag}</Text>
               <Text style={s.meta}>
                 {sexLabel(a.sex)}
-                {a.reproductive_state ? ` · ${STATE_LABEL[a.reproductive_state] ?? a.reproductive_state}` : ''}
-                {a.cage ? ` · ${a.cage}` : ''}
+                {GONE.includes(a.status)
+                  ? ` · ${a.status}${a.status_changed_on ? ` ${a.status_changed_on}` : ''}`
+                  : a.reproductive_state
+                    ? ` · ${STATE_LABEL[a.reproductive_state] ?? a.reproductive_state}` : ''}
+                {a.cage && !GONE.includes(a.status) ? ` · ${a.cage}` : ''}
               </Text>
               {!!a.primary_colour && !!a.primary_condition && (
                 <View style={{ marginTop: space.sm }}>
@@ -60,11 +86,15 @@ export default function Herd() {
           </Pressable>
         ))}
 
-        <View style={{ height: space.lg }} />
-        <Pressable style={s.action} onPress={() => router.push('/record/animal')}
-                   testID="add-animal">
-          <Text style={s.actionText}>Add a rabbit</Text>
-        </Pressable>
+        {!past && (
+          <>
+            <View style={{ height: space.lg }} />
+            <Pressable style={s.action} onPress={() => router.push('/record/animal')}
+                       testID="add-animal">
+              <Text style={s.actionText}>Add a rabbit</Text>
+            </Pressable>
+          </>
+        )}
       </ScrollView>
       <TabBar />
     </Screen>
@@ -82,7 +112,16 @@ const s = StyleSheet.create({
     borderRadius: radius.md, padding: space.lg, marginBottom: space.sm, minHeight: 64,
   },
   name: { ...t.body, color: colors.ink, fontWeight: '600' },
-  meta: { ...t.small, color: colors.muted, marginTop: 2 },
+  meta: { ...t.small, color: colors.muted, marginTop: 2, textTransform: 'capitalize' },
+  tabs: { flexDirection: 'row', gap: space.sm, marginBottom: space.lg },
+  tab: {
+    flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center',
+    borderRadius: radius.sm, borderWidth: 1, borderColor: colors.rule,
+    backgroundColor: colors.surface,
+  },
+  tabOn: { borderColor: colors.accent, backgroundColor: colors.accentSoft, borderWidth: 2 },
+  tabText: { ...t.small, color: colors.muted, fontWeight: '600' },
+  tabTextOn: { color: colors.accent },
   action: {
     minHeight: 52, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.accent,
     alignItems: 'center', justifyContent: 'center',

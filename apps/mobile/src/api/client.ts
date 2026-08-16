@@ -1,8 +1,9 @@
 import type { Storage } from './storage.ts';
 import { MemoryStorage } from './storage.ts';
 import type {
-  Animal, Breed, BuckSuggestion, Cage, DailyItem, MatingSchedule, OpenCondition,
-  PregnancySummary, PregnantDoe, ReadyDoe, Session, Subscription,
+  Animal, Breed, BuckSuggestion, Cage, DailyItem, HistoryEvent, Litter, MatingSchedule,
+  OpenCondition, PregnancySummary, PregnantDoe, RabbitLifetime, ReadyDoe,
+  Session, Subscription,
 } from './types.ts';
 
 const TOKEN_KEY = 'rb.token';
@@ -194,10 +195,24 @@ export class ApiClient {
     return this.request<{ ready: ReadyDoe[] }>('GET', '/ready-to-mate');
   }
 
-  animals(params: { sex?: string; role?: string; q?: string } = {}) {
+  animals(params: {
+    sex?: string; role?: string; q?: string;
+    /** 'herd' (default) is the living herd; 'past' the ones that have left it. */
+    include?: 'herd' | 'past' | 'all';
+  } = {}) {
     const qs = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
     return this.request<{ animals: Animal[] }>('GET', `/animals${qs ? `?${qs}` : ''}`);
+  }
+
+  /** Everything ever recorded about one rabbit. Works after she has gone. */
+  history(id: string) {
+    return this.request<{
+      animal: Animal & { origin: string; dam: string | null; sire: string | null };
+      lifetime: RabbitLifetime | null;
+      events: HistoryEvent[];
+      offspring: Animal[];
+    }>('GET', `/animals/${id}/history`);
   }
 
   suggestBucks(doeId: string) {
@@ -259,6 +274,22 @@ export class ApiClient {
       'POST', '/litters', input);
   }
 
+  litter(id: string) {
+    return this.request<{ litter: Litter }>('GET', `/litters/${id}`);
+  }
+
+  /**
+   * Correct a kindling record. The previous values are kept — the server
+   * writes both sides into the doe's history rather than overwriting.
+   */
+  editLitter(id: string, input: {
+    kindled_on?: string; born_alive?: number; born_dead?: number; notes?: string;
+    nest_box_placed_on?: string; fostered_in?: number; fostered_out?: number;
+  }) {
+    return this.request<{ litter: Litter & { changed: string[] }; message: string }>(
+      'PATCH', `/litters/${id}`, input);
+  }
+
   recordWeaning(litterId: string, input: {
     weaned_on?: string; weaned_count?: number; avg_weaning_weight_g?: number;
   }) {
@@ -278,6 +309,18 @@ export class ApiClient {
                  note?: string) {
     return this.request<{ resolved: boolean; message: string }>(
       'POST', `/conditions/${conditionId}/check`, { status, note });
+  }
+
+  /**
+   * The only way a rabbit leaves the herd. There is no delete — her matings,
+   * litters and line stay on the farm's record.
+   */
+  setAnimalStatus(id: string, input: {
+    status: 'active' | 'quarantine' | 'sold' | 'culled' | 'dead';
+    reason?: string; changed_on?: string; sale_price_paise?: number;
+  }) {
+    return this.request<{ change: unknown; message: string }>(
+      'POST', `/animals/${id}/status`, input);
   }
 
   markNotificationsRead(id?: string) {
