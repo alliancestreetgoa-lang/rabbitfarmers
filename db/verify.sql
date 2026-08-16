@@ -64,7 +64,8 @@ VALUES
  ('a0000000-0000-0000-0000-000000000013', '11111111-1111-1111-1111-111111111111', 'D-J', 'doe', 'breeder', '22222222-2222-2222-2222-222222222222', current_date - 400),
  ('a0000000-0000-0000-0000-000000000014', '11111111-1111-1111-1111-111111111111', 'D-K', 'doe', 'breeder', '22222222-2222-2222-2222-222222222222', current_date - 400),
  ('a0000000-0000-0000-0000-000000000015', '11111111-1111-1111-1111-111111111111', 'D-L', 'doe', 'breeder', '22222222-2222-2222-2222-222222222222', current_date - 400),
- ('a0000000-0000-0000-0000-000000000016', '11111111-1111-1111-1111-111111111111', 'D-M', 'doe', 'breeder', '22222222-2222-2222-2222-222222222222', current_date - 400);
+ ('a0000000-0000-0000-0000-000000000016', '11111111-1111-1111-1111-111111111111', 'D-M', 'doe', 'breeder', '22222222-2222-2222-2222-222222222222', current_date - 400),
+ ('a0000000-0000-0000-0000-000000000017', '11111111-1111-1111-1111-111111111111', 'D-N', 'doe', 'breeder', '22222222-2222-2222-2222-222222222222', current_date - 400);
 
 -- ---------------------------------------------------------------------------
 -- Case A: mated 12 days ago, palpated positive  -> PREGNANT / confirmed
@@ -196,6 +197,42 @@ VALUES ('11111111-1111-1111-1111-111111111111', 'a0000000-0000-0000-0000-0000000
         current_date - 1, 'medication', 'Ostovet',
         'c0000000-0000-0000-0000-000000000002', 1);
 
+-- ---------------------------------------------------------------------------
+-- Loose motion: the 2-hourly reminder cycle.
+--
+--   D-A  reported 5 hours ago, last looked at 3 hours ago  -> reminder DUE
+--   D-B  reported 4 hours ago, looked at 30 minutes ago    -> NOT due yet
+--   D-N  otherwise ready to breed, but loose                -> out of the queue
+--   D-I  had it, marked stopped                             -> gone, breeds again
+-- ---------------------------------------------------------------------------
+INSERT INTO condition_type
+    (id, farm_id, code, name, colour, reminder_interval_hours,
+     blocks_breeding, is_contagious, escalate_after_hours)
+VALUES
+ ('d0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111',
+  'loose_motion', 'Loose motion', '#EA580C', 2, true, true, 24);
+
+INSERT INTO health_condition
+    (id, farm_id, condition_type_id, rabbit_id, started_at, last_checked_at, severity)
+VALUES
+ ('e0000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111',
+  'd0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a',
+  now() - interval '5 hours', now() - interval '3 hours', 'moderate'),
+ ('e0000000-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111',
+  'd0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000b',
+  now() - interval '4 hours', now() - interval '30 minutes', 'mild'),
+ -- Would otherwise be top of the breeding queue; the open condition holds her out.
+ ('e0000000-0000-0000-0000-000000000004', '11111111-1111-1111-1111-111111111111',
+  'd0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000017',
+  now() - interval '30 hours', now() - interval '1 hour', 'severe'),
+ -- Resolved: must vanish from every open-condition view.
+ ('e0000000-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111111',
+  'd0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000012',
+  now() - interval '3 days', now() - interval '2 days', 'mild');
+UPDATE health_condition
+   SET resolved_at = now() - interval '2 days'
+ WHERE id = 'e0000000-0000-0000-0000-000000000003';
+
 -- ============================================================================
 -- Assertions
 -- ============================================================================
@@ -209,7 +246,7 @@ DECLARE
         ['D-G', 'LACTATING'],      ['D-H', 'GROWING'],
         ['D-I', 'READY'],          ['D-J', 'PSEUDOPREGNANT'],
         ['D-K', 'READY'],          ['D-L', 'RESTING'],
-        ['D-M', 'LACTATING']
+        ['D-M', 'LACTATING'],      ['D-N', 'READY']
     ];
     i int;
     actual text;
@@ -247,14 +284,14 @@ DECLARE
 BEGIN
     SELECT array_agg(tag ORDER BY tag) INTO got FROM v_ready_to_mate;
 
-    -- F (weaned 5 days ago) and I (never mated) qualify.
+    -- F (weaned 5 days ago) and I (had loose motion, now stopped) qualify.
     -- L is blocked by the 3-day post-weaning gap, E by the failed-service rest,
     -- G and M by still nursing, H by age, J by pseudopregnancy, K by the
-    -- veterinary hold.
+    -- veterinary hold, N by open loose motion.
     IF got IS DISTINCT FROM ARRAY['D-F', 'D-I'] THEN
         RAISE EXCEPTION 'READY FAIL: expected {D-F,D-I}, got %', got;
     END IF;
-    RAISE NOTICE 'ok  ready to mate: %', got;
+    RAISE NOTICE 'ok  ready to mate: %  (D-N held out by loose motion, D-I released once stopped)', got;
 END $$;
 
 DO $$
@@ -394,6 +431,84 @@ BEGIN
         RAISE EXCEPTION 'KPI FAIL: expected 0.111 pre-weaning mortality, got %', m;
     END IF;
     RAISE NOTICE 'ok  D-F pre-weaning mortality %', m;
+END $$;
+
+-- --- Loose motion: reminders, colour marks, resolution -----------------------
+DO $$
+DECLARE
+    open_tags text[]; due_tags text[];
+BEGIN
+    SELECT array_agg(tag ORDER BY tag) INTO open_tags
+    FROM v_open_conditions WHERE condition_code = 'loose_motion';
+
+    -- D-I was marked stopped, so she must not appear at all.
+    IF open_tags IS DISTINCT FROM ARRAY['D-A', 'D-B', 'D-N'] THEN
+        RAISE EXCEPTION 'OPEN CONDITION FAIL: expected {D-A,D-B,D-N}, got %', open_tags;
+    END IF;
+
+    -- Reminder is due only where the last look was more than 2 hours ago.
+    SELECT array_agg(tag ORDER BY tag) INTO due_tags
+    FROM v_open_conditions
+    WHERE condition_code = 'loose_motion' AND reminder_due;
+
+    IF due_tags IS DISTINCT FROM ARRAY['D-A'] THEN
+        RAISE EXCEPTION 'REMINDER FAIL: expected only D-A due, got %', due_tags;
+    END IF;
+    RAISE NOTICE 'ok  loose motion open on %, reminder due for % (2h since last check)',
+        open_tags, due_tags;
+END $$;
+
+DO $$
+DECLARE
+    nxt timestamptz; last_seen timestamptz;
+BEGIN
+    SELECT next_reminder_at, last_checked_at INTO nxt, last_seen
+    FROM v_open_conditions WHERE tag = 'D-B';
+
+    -- Counted from the last observation, not from onset: checked 30 min ago,
+    -- so the next nag is 90 minutes out, not overdue from a 4-hour-old start.
+    IF nxt IS DISTINCT FROM last_seen + interval '2 hours' THEN
+        RAISE EXCEPTION 'INTERVAL FAIL: expected % got %', last_seen + interval '2 hours', nxt;
+    END IF;
+    IF nxt <= now() THEN
+        RAISE EXCEPTION 'INTERVAL FAIL: D-B should not be due yet, next was %', nxt;
+    END IF;
+    RAISE NOTICE 'ok  D-B next reminder % — clock restarted by the last check, no backlog', nxt;
+END $$;
+
+DO $$
+DECLARE
+    col text; esc boolean;
+BEGIN
+    SELECT primary_colour INTO col FROM v_rabbit_flags
+    WHERE rabbit_id = 'a0000000-0000-0000-0000-00000000000a';
+    IF col IS DISTINCT FROM '#EA580C' THEN
+        RAISE EXCEPTION 'FLAG FAIL: expected colour mark on D-A, got %', COALESCE(col,'none');
+    END IF;
+
+    -- D-I resolved, so she carries no mark.
+    IF EXISTS (SELECT 1 FROM v_rabbit_flags
+               WHERE rabbit_id = 'a0000000-0000-0000-0000-000000000012') THEN
+        RAISE EXCEPTION 'FLAG FAIL: resolved condition still marking D-I';
+    END IF;
+
+    -- D-N open 30 hours against a 24-hour escalation threshold.
+    SELECT needs_escalation INTO esc FROM v_open_conditions WHERE tag = 'D-N';
+    IF NOT esc THEN
+        RAISE EXCEPTION 'ESCALATION FAIL: D-N open 30h should have escalated';
+    END IF;
+    RAISE NOTICE 'ok  colour mark % on D-A, none on resolved D-I, D-N escalated after 24h', col;
+END $$;
+
+DO $$
+DECLARE
+    n int;
+BEGIN
+    SELECT count(*) INTO n FROM v_daily_list WHERE source = 'condition';
+    IF n <> 3 THEN
+        RAISE EXCEPTION 'DAILY LIST FAIL: expected 3 open conditions, got %', n;
+    END IF;
+    RAISE NOTICE 'ok  daily list carries all 3 open conditions continuously, not just at reminder time';
 END $$;
 
 DO $$ BEGIN RAISE NOTICE 'ALL CHECKS PASSED'; END $$;

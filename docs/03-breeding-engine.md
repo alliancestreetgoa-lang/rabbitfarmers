@@ -363,13 +363,87 @@ dose on the list forever.
 
 ---
 
-## Rule 6 — Alerts (push notifications)
+## Rule 6 — Ongoing health conditions
+
+A `health_event` is a moment ("vaccinated on the 3rd"). A **condition** is a state
+that persists until someone says it stopped, and nags while it is open.
+
+**Loose motion is the first one, and it earns the urgency.** Enteritis is among
+the biggest killers in a rabbitry — worst in the two weeks after weaning — and it
+can take a kit from loose to dead inside 24 to 48 hours. A two-hourly reminder is
+proportionate. It is also **contagious**, spreading through shared feed, water
+and soiled bedding, so one case is a warning about the whole row.
+
+### How it behaves
+
+| Event | Result |
+|---|---|
+| Anyone marks a rabbit loose | Condition opens, colour mark appears on that animal everywhere |
+| Every 2 hours it stays open | Reminder to whoever is assigned that shed, plus the manager |
+| Someone checks and says "still loose" | Observation logged, **the 2-hour clock restarts from that check** |
+| Someone marks it **stopped** | Condition resolves, mark disappears, reminders stop |
+| Open beyond 24 hours | Escalates to the manager |
+| 2+ open cases in one shed | Outbreak warning |
+| While open | The animal is held out of the breeding queue |
+
+### The clock restarts from the last look, not from onset
+
+This is the detail that decides whether the feature is used or muted. If
+reminders fired every 2 hours from **onset**, a caretaker who checks the doe at
+10:00 still gets buzzed at 10:02 because a slot elapsed, and any period offline
+returns a burst of stale reminders all at once. Counting from the **last
+observation** means checking the animal is what buys the quiet — which is exactly
+the behaviour you want to encourage.
+
+Nothing about the schedule is stored. The next reminder is computed as
+`last_checked_at + interval`, so resolving the condition silences it instantly:
+there is no queued job to cancel and no orphan reminder rows to clean up.
+
+### Quiet hours
+
+Repeating reminders are held overnight (default 22:00–06:00) and delivered as a
+catch-up at 06:00. A phone buzzing at 02:00 gets the whole app muted, and a muted
+app misses the reminder that mattered.
+
+The condition type can opt out of this if you decide loose motion is worth waking
+up for — it is a setting, not a hard rule. Note the trade-off honestly: nobody is
+treating a rabbit at 3am anyway, so the practical value of the overnight buzz is
+low, while the cost of training people to ignore notifications is high.
+
+**The in-app list is never suppressed** — only the push is held. Open at 04:00
+and the condition is right there. Suppression applies to buzzing a phone, not to
+telling the truth on screen.
+
+### The colour mark
+
+The condition type carries a colour (loose motion defaults to orange), drawn
+against the animal in every list, on the cage map, on its profile header and on
+the daily list. Two rules keep it honest:
+
+- **Never colour alone.** Colour-blindness is common, and phone screens in
+  sunlight wash out. The mark is a coloured dot **plus** the condition name.
+- **The mark is derived from the open condition**, not a field on the rabbit. Mark
+  it stopped and the colour is gone everywhere at once, with nothing to tidy up.
+
+### Generalising
+
+`condition_type` is a table, so sore hocks, ear mites, mastitis, injury or "off
+feed" are added as rows: name, colour, reminder interval, whether it blocks
+breeding, whether it is contagious, when it escalates. Loose motion just happens
+to be the first and the most urgent.
+
+---
+
+## Rule 7 — Alerts (push notifications)
 
 Keep these few. An app that notifies constantly gets muted, and then the one
 notification that mattered is missed too.
 
 | Alert | When | To whom |
 |---|---|---|
+| **Loose motion still open** | **every 2 hours** until marked stopped | Assigned caretaker + manager |
+| Loose motion open > 24 hours | once | Manager + owner |
+| 2+ contagious cases in one shed | once per shed per day | Manager + owner |
 | Medication dose due today | each dose day | Assigned caretaker |
 | Nest box due today | day 28 | Assigned caretaker + manager |
 | Separate the kits today | day 30 after kindling | Assigned caretaker |

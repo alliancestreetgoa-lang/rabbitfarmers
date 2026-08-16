@@ -147,6 +147,27 @@ corrects every future dose without a migration. A dose leaves the due list when
 a matching `health_event` exists — the same derive-don't-store rule as
 reproductive status.
 
+### `condition_type` and `health_condition`
+An ongoing state that persists until someone says it stopped — loose motion being
+the first.
+
+`condition_type` is the configuration: name, **colour mark**, reminder interval
+(2 hours for loose motion), whether it blocks breeding, whether it is contagious,
+and when it escalates.
+
+`health_condition` is one animal's open case: `started_at`, `last_checked_at`,
+`resolved_at`. Nothing about the reminder schedule is stored — the next reminder
+is `last_checked_at + interval`, so:
+
+- resolving the condition silences it instantly, with no queued job to cancel;
+- checking the animal restarts the clock, so a caretaker who just looked is not
+  nagged again two minutes later;
+- time offline produces no backlog of stale reminders on reconnect.
+
+The colour mark shown against a rabbit is likewise derived from its open
+conditions, never stored on `rabbit`. Mark it stopped and the mark disappears
+everywhere at once.
+
 ### `employee`
 See [04-employee-module.md](04-employee-module.md).
 

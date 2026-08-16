@@ -101,6 +101,14 @@ CREATE TABLE farm_settings (
     banding_weekday                int,                        -- 0=Sunday .. 6=Saturday
     edit_window_hours              int NOT NULL DEFAULT 24,
 
+    -- Repeating condition reminders are held back overnight and delivered as a
+    -- catch-up at quiet_hours_end, unless the condition type opts out. A phone
+    -- buzzing at 02:00 gets the whole app muted, which costs more than the
+    -- delay does.
+    quiet_hours_enabled            boolean NOT NULL DEFAULT true,
+    quiet_hours_start              int NOT NULL DEFAULT 22,     -- 0-23, farm local
+    quiet_hours_end                int NOT NULL DEFAULT 6,
+
     CONSTRAINT gestation_window_sane
         CHECK (gestation_window_start_day < gestation_window_end_day
                AND gestation_window_end_day < gestation_overdue_day),
@@ -385,6 +393,78 @@ CREATE TABLE health_event (
 CREATE INDEX health_rabbit_idx ON health_event (rabbit_id, occurred_on DESC);
 
 -- ----------------------------------------------------------------------------
+-- Ongoing health conditions
+--
+-- A health_event is a point in time ("vaccinated on the 3rd"). A condition is a
+-- state that persists until someone says it has stopped, and nags while it is
+-- open. Loose motion is the first one; the mechanism is general.
+--
+-- Nothing about the nagging is stored. The next reminder is computed from the
+-- last observation, so resolving the condition silences it with no scheduled
+-- job to cancel and no orphaned reminder rows left behind.
+-- ----------------------------------------------------------------------------
+CREATE TABLE condition_type (
+    id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    farm_id                 uuid NOT NULL REFERENCES farm(id) ON DELETE CASCADE,
+    code                    text NOT NULL,      -- loose_motion, sore_hocks, ...
+    name                    text NOT NULL,      -- shown to staff, in their language
+    -- The mark drawn on the animal everywhere it appears: list, cage map,
+    -- profile header, daily list.
+    colour                  text NOT NULL DEFAULT '#EA580C',
+    reminder_interval_hours numeric(4,1),       -- NULL = no repeating reminder
+    blocks_breeding         boolean NOT NULL DEFAULT true,
+    -- Contagious conditions drive the cluster check in v_condition_clusters.
+    is_contagious           boolean NOT NULL DEFAULT false,
+    escalate_after_hours    int,                -- unresolved this long -> tell the manager
+    respect_quiet_hours     boolean NOT NULL DEFAULT true,
+    is_active               boolean NOT NULL DEFAULT true,
+    UNIQUE (farm_id, code)
+);
+
+CREATE TABLE health_condition (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    farm_id           uuid NOT NULL REFERENCES farm(id) ON DELETE CASCADE,
+    condition_type_id uuid NOT NULL REFERENCES condition_type(id),
+    -- One or the other: a single animal, or a whole litter of kits.
+    rabbit_id         uuid REFERENCES rabbit(id) ON DELETE CASCADE,
+    litter_id         uuid REFERENCES litter(id) ON DELETE CASCADE,
+    started_at        timestamptz NOT NULL DEFAULT now(),
+    -- Every "still going" observation pushes this forward, which restarts the
+    -- reminder clock. Someone who just checked is not nagged again immediately.
+    last_checked_at   timestamptz NOT NULL DEFAULT now(),
+    resolved_at       timestamptz,
+    severity          text,                     -- mild | moderate | severe
+    notes             text,
+    reported_by       uuid REFERENCES employee(id),
+    resolved_by       uuid REFERENCES employee(id),
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT condition_subject
+        CHECK (rabbit_id IS NOT NULL OR litter_id IS NOT NULL),
+    CONSTRAINT resolved_after_start
+        CHECK (resolved_at IS NULL OR resolved_at >= started_at)
+);
+-- Partial index: the open-condition query runs on every screen load.
+CREATE INDEX condition_open_idx
+    ON health_condition (farm_id, last_checked_at)
+    WHERE resolved_at IS NULL;
+CREATE INDEX condition_rabbit_idx ON health_condition (rabbit_id)
+    WHERE resolved_at IS NULL;
+
+-- Each look at the animal while the condition is open. This is what makes the
+-- record useful afterwards: "loose for 3 days, mild throughout" is a different
+-- story from "mild, then severe overnight", and only the check history tells
+-- them apart.
+CREATE TABLE condition_check (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    condition_id uuid NOT NULL REFERENCES health_condition(id) ON DELETE CASCADE,
+    checked_at   timestamptz NOT NULL DEFAULT now(),
+    status       text NOT NULL,        -- ongoing | improving | worse | stopped
+    note         text,
+    checked_by   uuid REFERENCES employee(id)
+);
+CREATE INDEX condition_check_idx ON condition_check (condition_id, checked_at DESC);
+
+-- ----------------------------------------------------------------------------
 -- Tasks
 -- ----------------------------------------------------------------------------
 CREATE TABLE task (
@@ -609,6 +689,16 @@ WHERE r.status = 'active'                       -- excludes quarantine
         WHERE h.rabbit_id = s.rabbit_id
           AND h.blocks_breeding
           AND (h.cleared_on IS NULL OR h.cleared_on > current_date)
+      )
+  -- An open condition such as loose motion keeps her out of the queue until
+  -- someone marks it stopped.
+  AND NOT EXISTS (
+        SELECT 1
+        FROM health_condition hc
+        JOIN condition_type ct ON ct.id = hc.condition_type_id
+        WHERE hc.rabbit_id = s.rabbit_id
+          AND hc.resolved_at IS NULL
+          AND ct.blocks_breeding
       );
 
 
@@ -701,8 +791,93 @@ WHERE NOT EXISTS (
 );
 
 
--- The single feed behind the daily tab: everything a person must do today,
--- medication and husbandry together, oldest overdue first.
+-- Every open health condition, with its colour mark and its next nag.
+--
+-- next_reminder_at counts from the LAST OBSERVATION, not from onset, so
+-- recording "still loose" at 10:00 moves the next reminder to 12:00 rather than
+-- leaving a backlog of missed 2-hourly slots to fire all at once.
+--
+-- Quiet-hours suppression is applied by the notification sender, not here:
+-- this view answers "is a reminder due", the sender answers "may we buzz a
+-- phone right now". Keeping them separate means the in-app list stays truthful
+-- overnight even while pushes are held.
+CREATE OR REPLACE VIEW v_open_conditions AS
+SELECT
+    hc.id                       AS condition_id,
+    hc.farm_id,
+    hc.rabbit_id,
+    hc.litter_id,
+    r.tag,
+    r.name                      AS rabbit_name,
+    ct.code                     AS condition_code,
+    ct.name                     AS condition_name,
+    ct.colour,
+    ct.blocks_breeding,
+    ct.is_contagious,
+    ct.respect_quiet_hours,
+    hc.severity,
+    hc.started_at,
+    hc.last_checked_at,
+    round(EXTRACT(epoch FROM now() - hc.started_at) / 3600.0, 1)  AS hours_open,
+    CASE WHEN ct.reminder_interval_hours IS NOT NULL
+         THEN hc.last_checked_at
+              + make_interval(mins => (ct.reminder_interval_hours * 60)::int)
+    END                         AS next_reminder_at,
+    CASE WHEN ct.reminder_interval_hours IS NOT NULL
+          AND now() >= hc.last_checked_at
+              + make_interval(mins => (ct.reminder_interval_hours * 60)::int)
+         THEN true ELSE false
+    END                         AS reminder_due,
+    CASE WHEN ct.escalate_after_hours IS NOT NULL
+          AND now() >= hc.started_at
+              + make_interval(hours => ct.escalate_after_hours)
+         THEN true ELSE false
+    END                         AS needs_escalation
+FROM health_condition hc
+JOIN condition_type ct ON ct.id = hc.condition_type_id
+LEFT JOIN rabbit r     ON r.id = hc.rabbit_id
+WHERE hc.resolved_at IS NULL;
+
+
+-- The colour marks to draw against each animal, wherever it is listed.
+-- Most severe (longest open) first, so one dot can stand in when space is tight.
+CREATE OR REPLACE VIEW v_rabbit_flags AS
+SELECT
+    rabbit_id,
+    farm_id,
+    count(*)                                        AS flag_count,
+    (array_agg(colour         ORDER BY started_at))[1] AS primary_colour,
+    (array_agg(condition_name ORDER BY started_at))[1] AS primary_condition,
+    array_agg(condition_name  ORDER BY started_at)     AS conditions,
+    bool_or(reminder_due)                           AS any_reminder_due
+FROM v_open_conditions
+WHERE rabbit_id IS NOT NULL
+GROUP BY rabbit_id, farm_id;
+
+
+-- Contagious conditions appearing together in one shed. Loose motion spreads
+-- through shared feed, water and faeces, so two open cases in the same shed is
+-- an outbreak signal worth raising before it becomes ten.
+CREATE OR REPLACE VIEW v_condition_clusters AS
+SELECT
+    c.farm_id,
+    s.id            AS shed_id,
+    s.name          AS shed_name,
+    c.condition_code,
+    c.condition_name,
+    count(*)        AS open_cases,
+    min(c.started_at) AS first_case_at
+FROM v_open_conditions c
+JOIN rabbit r ON r.id = c.rabbit_id
+JOIN cage cg  ON cg.id = r.cage_id
+JOIN shed s   ON s.id = cg.shed_id
+WHERE c.is_contagious
+GROUP BY c.farm_id, s.id, s.name, c.condition_code, c.condition_name
+HAVING count(*) >= 2;
+
+
+-- The single feed behind the daily tab: everything a person must do now,
+-- medication, husbandry and open health conditions together, most urgent first.
 CREATE OR REPLACE VIEW v_daily_list AS
 SELECT
     'medication'                          AS source,
@@ -711,14 +886,18 @@ SELECT
     r.tag,
     md.farm_id,
     md.due_on,
+    md.due_on::timestamptz                AS due_at,
     md.protocol_name || ' — dose ' || md.dose_number || ' of ' || md.total_doses
                                           AS title,
-    CASE WHEN md.due_on < current_date THEN 'critical' ELSE 'high' END AS urgency
+    CASE WHEN md.due_on < current_date THEN 'critical' ELSE 'high' END AS urgency,
+    NULL::text                            AS colour
 FROM v_medication_due md
 JOIN rabbit r ON r.id = md.rabbit_id
 WHERE md.notify
   AND md.due_on <= current_date
+
 UNION ALL
+
 SELECT
     'task',
     t.id::text,
@@ -726,12 +905,33 @@ SELECT
     r.tag,
     t.farm_id,
     t.due_on,
+    t.due_on::timestamptz,
     t.title,
-    CASE WHEN t.due_on < current_date THEN 'critical' ELSE t.priority::text END
+    CASE WHEN t.due_on < current_date THEN 'critical' ELSE t.priority::text END,
+    NULL::text
 FROM task t
 LEFT JOIN rabbit r ON r.id = t.rabbit_id
 WHERE t.status = 'open'
-  AND t.due_on <= current_date;
+  AND t.due_on <= current_date
+
+UNION ALL
+
+-- Open conditions sit on the list continuously, not only at the reminder
+-- moment. The 2-hourly reminder is the push notification; the row itself stays
+-- visible the whole time so the condition cannot be forgotten between buzzes.
+SELECT
+    'condition',
+    oc.condition_id::text,
+    oc.rabbit_id,
+    oc.tag,
+    oc.farm_id,
+    oc.started_at::date,
+    oc.next_reminder_at,
+    oc.condition_name || ' — check ' || COALESCE(oc.rabbit_name, oc.tag, 'litter')
+        || ' (' || oc.hours_open || 'h)',
+    CASE WHEN oc.needs_escalation OR oc.reminder_due THEN 'critical' ELSE 'high' END,
+    oc.colour
+FROM v_open_conditions oc;
 
 
 -- The headline KPI: kits weaned per doe per year.

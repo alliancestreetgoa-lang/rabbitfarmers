@@ -8,7 +8,7 @@ the farm actually asked for, plus the minimum around them to make the data real.
 
 | Phase | Included |
 |---|---|
-| **MVP** | **Daily tab**, animals (manually named), cages, matings, pregnancy checks, kindling, separating kits, **medication protocols**, ready-to-mate queue, pregnant dashboard, tasks, employees, attendance |
+| **MVP** | **Daily tab**, animals (manually named), cages, matings, pregnancy checks, kindling, separating kits, **medication protocols**, **health conditions with repeating reminders**, ready-to-mate queue, pregnant dashboard, tasks, employees, attendance |
 | **Phase 2** | Vaccination schedules, weights & growth, feed & inventory, reports/KPIs |
 | **Phase 3** | Sales & finance, payroll, pedigree certificates, multi-farm, buyer portal |
 
@@ -23,26 +23,28 @@ you see: everything due today, in one list, with nothing else to navigate to.
 
 ```
 ┌──────────────────────────────────────────────┐
-│  ●  Daily        Herd    Breeding   More     │
+│  ●  Daily      Herd   Breeding   More        │
 ├──────────────────────────────────────────────┤
-│  TUESDAY 16 AUGUST                8 to do    │
+│  TUESDAY 16 AUGUST              9 to do      │
 ├──────────────────────────────────────────────┤
-│  OVERDUE                                  1  │
-│  ○  Ostovet dose 3 of 5 → Lakshmi   yesterday  │
+│  NEEDS A LOOK NOW                     2      │
+│  ●  Loose motion → Ganga        31h  ⚠       │
+│  ●  Loose motion → Rani          6h          │
 ├──────────────────────────────────────────────┤
-│  TODAY                                    7  │
-│  ○  Ostovet dose 5 of 5 → Rani                 │
+│  OVERDUE                              1      │
+│  ○  Ostovet 3 of 5 → Lakshmi   yesterday     │
+├──────────────────────────────────────────────┤
+│  TODAY                                6      │
+│  ○  Ostovet 5 of 5 → Rani                    │
 │     last dose before delivery                │
-│  ○  Ostovet dose 2 of 5 → Chandni              │
-│  ○  Ostovet dose 2 of 5 → Ganga                │
-│  ○  Nest box → Rani           day 28         │
-│  ○  Separate kits → Meera     30 days        │
-│  ○  Rebreed → Sita            3 days after   │
-│     separating · suggested buck: Raja        │
-│  ○  Palpate → Kaveri          day 12         │
+│  ○  Ostovet 2 of 5 → Chandni                 │
+│  ○  Nest box → Rani            day 28        │
+│  ○  Separate kits → Meera      30 days       │
+│  ○  Rebreed → Sita             buck: Raja    │
+│  ○  Palpate → Kaveri           day 12        │
 ├──────────────────────────────────────────────┤
-│  ✓  Ostovet dose 2 of 5 → Lakshmi    06:14     │
-│  ✓  Nest box → Gauri               06:20     │
+│  ✓  Ostovet 2 of 5 → Lakshmi     06:14       │
+│  ✓  Nest box → Gauri             06:20       │
 └──────────────────────────────────────────────┘
 ```
 
@@ -51,7 +53,8 @@ Behaviour, exactly as specified:
 | Rule | Implementation |
 |---|---|
 | Opens automatically on login | Daily is the default tab, always first |
-| Shows what is due today | Medication doses and husbandry tasks in one merged list |
+| Shows what is due today | Medication doses, husbandry tasks and open health conditions in one merged list |
+| Open health conditions pin to the top | They stay listed continuously, not only at the 2-hourly reminder |
 | Overdue items surface above today's | Sorted by due date ascending, oldest first |
 | **Tap to mark done → it leaves the list** | Completion writes the underlying record; the item drops out of the query on the next render |
 | Completed items stay visible until midnight | Greyed at the bottom with a timestamp, so a caretaker can see what they already did and undo a mistake |
@@ -61,7 +64,7 @@ The "done" list at the bottom matters more than it looks. Without it, a farm han
 who marks something done by accident has no way to see or undo it, and an owner
 cannot tell "nothing due" apart from "nobody opened the app today".
 
-Nothing on this screen is a separate to-do list. Marking a Ostovet dose done writes
+Nothing on this screen is a separate to-do list. Marking an Ostovet dose done writes
 a health record against that doe; marking a palpation done opens the result form.
 The list is a *view* of outstanding work, which is why an item cannot be ticked
 off without the underlying record actually existing.
@@ -186,7 +189,51 @@ This is the KPI moment — kits weaned per doe per year is counted here — so t
 form has to be fast and hard to skip. On save it schedules the rebreed task for
 three days later.
 
-### 9. Medication protocols (settings)
+### 9. Health conditions and the loose-motion flag
+
+**Reporting it** — from any animal, one tap: *Report a problem → Loose motion →
+mild / moderate / severe → save.* Any staff member can do this; it needs no
+permission and no manager.
+
+**While it is open**, the rabbit carries an orange mark everywhere it appears:
+
+```
+┌────────────────────────────────────────┐
+│  Herd · Shed B                          │
+├────────────────────────────────────────┤
+│   Lakshmi     D-104   Pregnant, day 22  │
+│ ● Rani        D-117   Loose motion 6h   │
+│   Meera       D-089   Nursing, 12 kits  │
+│ ● Ganga       D-051   Loose motion 31h ⚠│
+└────────────────────────────────────────┘
+```
+
+The dot is always paired with the words "Loose motion" — never colour alone.
+Colour-blindness is common, and a phone screen in Goa sunlight washes colour out
+entirely.
+
+**The reminder** arrives every 2 hours and offers two answers:
+
+| Answer | Effect |
+|---|---|
+| **Still loose** | Logs the observation, restarts the 2-hour clock |
+| **Stopped** | Resolves it — mark gone, reminders stop, breeding queue released |
+
+**On the cage map**, an affected cage is filled orange. That is the view that
+shows you a spreading problem: three orange cages in one row is a feed or water
+problem, not three unlucky rabbits.
+
+**Escalation and outbreak.** Open past 24 hours and the manager is told. Two or
+more open cases in one shed raises an outbreak warning — loose motion spreads via
+shared feed, water and soiled bedding, so the second case is the one worth acting
+on, not the fifth.
+
+**Afterwards**, the condition stays in the animal's history with its full check
+trail. "Loose 3 days, mild throughout" and "mild, then severe overnight" are
+different animals and different decisions, and only the check history tells them
+apart. A doe with repeat episodes surfaces in the cull review.
+
+### 10. Medication protocols (settings)
 
 Define a course once and it applies to every doe automatically from then on:
 
@@ -205,23 +252,23 @@ The "counts from" choice is the only part that needs thought:
 | Mating | Tied to service, not birth | — |
 | Separating the kits | Tied to weaning | — |
 
-### 10. Tasks and rosters
+### 11. Tasks and rosters
 
 Manager's view of the same work the Daily tab shows a caretaker — who is assigned
 what, what is unassigned, and what is running late. See
 [04-employee-module.md](04-employee-module.md#the-daily-work-screen-a-farm-hands-entire-app).
 
-### 11. Cages / shed map
+### 12. Cages / shed map
 
 Visual grid of sheds → rows → cages. Each cage shows occupant tag and state
 colour. Empty cages highlighted (idle capacity is lost income). Tap to move an
 animal, which writes a `movement` record.
 
-### 12. Employees
+### 13. Employees
 
 List, profiles, roles, attendance calendar, task completion stats.
 
-### 13. Reports (Phase 2)
+### 14. Reports (Phase 2)
 
 Lead with **kits weaned per doe per year**. Then conception rate by buck, by doe
 and by staff member; pre-weaning mortality by shed; kindling interval
@@ -230,7 +277,7 @@ distribution; doe league table with cull suggestions; feed conversion.
 Every report exports to CSV/Excel. Farmers and their accountants live in
 spreadsheets; an app that traps data is worse than the paper it replaced.
 
-### 14. Settings
+### 15. Settings
 
 Farm profile and timezone · breeding rhythm and all constants from
 [03-breeding-engine.md](03-breeding-engine.md#configuration-per-farm-with-per-doe-overrides)
@@ -241,6 +288,8 @@ The settings that matter most on this farm, and their current values:
 
 | Setting | Value |
 |---|---|
+| Loose motion reminder | every 2 hours until marked stopped |
+| Quiet hours | 22:00 – 06:00, catch-up at 06:00 |
 | Separate the kits | 30 days after delivery |
 | Rebreed | 3 days after separating |
 | Nest box in | day 28 |
