@@ -47,7 +47,7 @@ the product.
 | Plans, subscriptions, invoices | You now take money on a schedule |
 | Self-serve signup and onboarding | Nobody is there to set the farm up by hand |
 | Settings **templates** | Your rhythm is no longer *the* rhythm — it is one starting preset |
-| Entitlements and limits | Plans have to mean something |
+| Entitlements | Paid or not paid has to gate something |
 | Hardened tenant isolation | One leak across farms and the product is finished |
 | Backups, uptime, support | Other people's businesses now depend on you |
 | Terms, privacy policy, GST invoicing | Legal obligations that did not exist for a personal tool |
@@ -81,29 +81,85 @@ you built:
 - Offline operation in a shed with no signal
 
 That is not a records app for a hobbyist. That is an **operations app for a farm
-with staff** — a different buyer with a much higher willingness to pay, because
-you are saving labour and preventing dead litters rather than storing pedigrees.
+with staff** — a genuinely stronger product for a commercial buyer, because you
+are saving labour and preventing dead litters rather than storing pedigrees.
 
-**Price against that buyer**, and tier on doe count *and* staff seats.
+Worth holding on to, because at ₹99 you are pricing well below all of them.
 
-### Proposed tiers (India, INR, GST inclusive)
+### The pricing — decided
 
-| Plan | Breeding does | Staff logins | Monthly | Yearly |
-|---|---|---|---|---|
-| **Trial** | full access | | 30 days free, no card | |
-| **Starter** | up to 25 | 1 | ₹299 | ₹2,990 |
-| **Farm** | up to 75 | 3 | ₹699 | ₹6,990 |
-| **Commercial** | up to 200 | 8 | ₹1,499 | ₹14,990 |
-| **Estate** | unlimited | unlimited | ₹2,999 | ₹29,990 |
+| | |
+|---|---|
+| **Trial** | 30 days, **full access**, no card |
+| **Monthly** | **₹99** |
+| **Yearly** | **₹999** |
+| Limits | None. Unlimited does, unlimited staff |
 
-Yearly is priced at ten months — two months free. Push it hard, for two reasons
-beyond cash flow: UPI Autopay and e-NACH mandates fail more often across twelve
-monthly debits than one annual one, and an annual customer gets eleven fewer
-opportunities to churn.
+Yearly works out at 10.1 months — effectively two months free — which is the
+right shape.
 
-**Quote prices GST-inclusive.** SaaS carries 18% GST in India and most of your
-customers will be unregistered smallholders who cannot reclaim it. A farmer who
-is shown ₹299 and charged ₹353 feels cheated, and you will lose him over ₹54.
+**Quote both prices GST-inclusive.** SaaS carries 18% GST in India and most of
+your customers will be unregistered smallholders who cannot reclaim it. At ₹99 a
+farmer shown ₹99 and charged ₹117 feels cheated, and you lose him over ₹18. Net
+of GST you keep about ₹84.
+
+### What flat pricing buys you
+
+Real simplification, and worth naming because it is most of a sprint saved:
+
+- No plan comparison page, no upgrade or downgrade flows, no proration
+- No limit enforcement, no "you have hit your doe limit" dead ends
+- No "which plan am I on" support conversations
+- One Razorpay plan object, two billing cycles
+
+Tiering only pays when the price spread is wide enough to matter. Between ₹99 and
+₹99 there is nothing to segment, so all that machinery would be pure cost. The
+`max_breeding_does` and `max_staff_seats` columns stay in the schema set to NULL,
+so a tier can be added later without a migration — but nothing is capped today.
+
+### Push annual hard — harder than you would at a higher price
+
+At ₹99, a failed monthly mandate costs more in dunning, SMS and support time than
+the ₹99 it is chasing. Twelve debits a year is twelve chances to fail; one is one.
+Make **₹999/year the default and pre-selected option**, with monthly available but
+secondary.
+
+### The arithmetic, plainly
+
+At ₹99/month you keep roughly ₹84 after GST and about ₹82 after Razorpay's cut.
+
+| Farms paying | Monthly revenue (net) |
+|---|---|
+| 50 | ~₹4,100 |
+| 100 | ~₹8,200 |
+| 500 | ~₹41,000 |
+| 1,000 | ~₹82,000 |
+
+Infrastructure runs ₹2,000–7,500/month, so you cover costs at roughly **30–90
+paying farms** — very achievable. But a meaningful income needs **around a
+thousand farms**, and India does not have a thousand commercial rabbit farms
+that will pay for software.
+
+Three honest consequences:
+
+1. **Support must be near-zero per customer.** At ₹82 net, one WhatsApp
+   conversation a month wipes out the margin. Everything has to be self-serve —
+   which raises the stakes on the onboarding flow considerably.
+2. **This makes the species question urgent, not optional.** Goats and sheep are
+   the same engine with different constants, and a vastly larger market. At ₹99
+   flat, broadening the species is the growth path rather than a nice-to-have.
+   Take that schema decision now.
+3. **Decide whether ₹99 is a launch price or the forever price.** Launching low
+   to remove friction and win the first few hundred farms is a perfectly good
+   strategy, and raising prices later for *new* customers while grandfathering
+   existing ones is normal and accepted. Going the other way is not. If you think
+   ₹99 might be temporary, say "introductory pricing" on the site from day one —
+   it costs nothing now and buys you the option later.
+
+There is also a tension worth seeing clearly: you have built a **commercial farm
+operations tool** — staff, accountability, medication rounds — and priced it at
+**hobbyist level**. That is not wrong, but it is a choice. It means winning on
+volume and self-service rather than on value capture per farm.
 
 ### What is *not* gated
 
@@ -130,8 +186,9 @@ collecting and not collecting from a smallholder.
 | Mandate | UPI Autopay first, e-NACH fallback, card for those who prefer it |
 | Retries | Razorpay's retry scheduling; then your own dunning emails/SMS |
 | Invoices | GST-compliant, sequential numbering, your GSTIN, downloadable |
-| Upgrades | Prorated immediately; downgrades take effect next period |
-| Refunds | Published policy; a short no-questions window builds more trust than it costs |
+| Switching cycle | Monthly ↔ yearly at the next renewal. With one plan there is nothing else to change |
+| Refunds | Published policy; at ₹99 a no-questions refund window costs you almost nothing and buys real trust |
+| Minimums | Check Razorpay's per-transaction floor against a ₹99 ticket — another reason to steer people to the ₹999 annual |
 
 Keep the gateway at arm's length: store `gateway`, `gateway_subscription_id` and
 `gateway_payment_id`, and derive access from **your own** `subscription` table.
@@ -180,14 +237,14 @@ warn before any deletion, and let them export the whole time.
 Enforce limits **in the database**, not just the UI, and enforce them at the
 point of creation:
 
-- Over the doe limit → cannot add another breeding doe; existing animals keep
-  working, nothing is hidden or deleted
-- Over the seat limit → cannot add another staff login
-- The upgrade prompt appears at the moment of the block, showing the exact plan
-  that solves it
+**There are no limits on the current plan** — unlimited does, unlimited staff. So
+the only entitlement that matters today is *paid or not paid*, and that is
+enforced in `v_farm_entitlement`.
 
-Never respond to an over-limit farm by hiding data they already entered. Block
-the *next* addition and explain why.
+The limit columns remain in the schema and the view still computes
+`at_doe_limit` / `at_seat_limit` (always false while the caps are NULL). If a
+tier is ever introduced, the rule is already decided: block the *next* addition,
+and never hide or delete data the farm already entered.
 
 ---
 
@@ -271,10 +328,12 @@ Not advice — a checklist to take to someone qualified:
 
 | Metric | Why |
 |---|---|
-| Trial → paid conversion | The health of onboarding |
+| Trial → paid conversion | The health of onboarding. At ₹99 this is the whole business |
+| Annual share of new subscriptions | Target > 60%. Monthly mandates at ₹99 cost more to chase than they collect |
 | Activation rate (10 animals + 1 event in 7 days) | Predicts conversion better than anything else |
 | Monthly churn | Under 3% is healthy; over 7% means the product is not sticking |
-| MRR and annual share | Annual share is your cash flow and your churn defence |
+| MRR and paying-farm count | At ₹99 flat, farm count *is* revenue — one number, easy to track |
+| Support minutes per farm per month | The margin killer. Above ~5 minutes the unit economics stop working |
 | Support tickets per customer per month | Rising means the product is confusing, not that customers are needy |
 | Farms with zero writes in 14 days | Silent churn, still paying. Reach out before they cancel |
 
@@ -305,13 +364,21 @@ day, weaning day, rebreed interval. Goats, sheep and pigs are the same machine
 with different constants. Moving those constants from `farm_settings` to a
 `species` table is cheap now and expensive after a thousand farms are live.
 
-Rabbit farming in India is a small market. Goats are not. This is not a feature
-to build now, but it is a schema decision to take now.
+At ₹99 flat this stops being a hedge and becomes the growth path. You need
+roughly a thousand paying farms for the business to be worth your time, and
+India does not have a thousand commercial rabbit farms that buy software. It
+does have a great many goat farms. **Take the schema decision now**, build the
+species later.
 
-**2. Who is the buyer — the hobbyist or the commercial farm?**
+**2. Is ₹99 a launch price or the forever price?**
 
-You cannot serve both well. The hobbyist wants pedigrees and show records and
-will pay ₹299. The commercial farm wants labour accountability and dead-litter
-prevention and will pay ₹1,499. Everything you have built so far points at the
-second. Pick it deliberately, and let the Starter tier be a doorway rather than
-the target.
+At one flat price the segmentation question resolves itself — you are selling to
+everyone at hobbyist money. That is a legitimate volume strategy, and ₹99 removes
+essentially all purchase friction, which matters enormously for a first product
+with no reputation.
+
+But decide *now* whether it is introductory. Raising prices later for new
+customers while grandfathering existing ones is normal and accepted; lowering
+them is easy but going back up is not. If there is any chance ₹99 is temporary,
+label it **introductory pricing** on the site from day one. It costs nothing
+today and preserves the option.

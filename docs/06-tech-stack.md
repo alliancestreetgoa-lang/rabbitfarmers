@@ -78,9 +78,9 @@ system, because people have stopped watching for the thing themselves.
 
 ## Tenant strategy: one database, not one per farm
 
-Neon's branching makes database-per-tenant tempting. Do not — not at this price
-point. Hundreds of farms paying ₹299–₹1,499/month cannot carry per-tenant compute,
-and migrations across hundreds of branches become a job in themselves.
+Neon's branching makes database-per-tenant tempting. Do not — emphatically not at
+₹99/month. A farm paying ₹99 cannot carry its own compute, and migrations across
+hundreds of branches become a job in themselves.
 
 **One database, `farm_id` on every table, RLS enforcing it.** Revisit only if you
 land an enterprise customer who contractually demands physical isolation.
@@ -184,17 +184,23 @@ before anyone pays you.
 | Cloudflare R2 (photos; no egress fees, which matters) | ~$1–5 |
 | Expo EAS build & OTA updates | $0–$19 |
 | SMS OTP in India (~₹0.15–0.25 per message, MSG91 or similar) | usage |
-| Razorpay | ~2% per transaction, no monthly fee |
+| Razorpay | ~2% per transaction, no monthly fee (₹2 on ₹99, ₹20 on ₹999) |
 | Google Play developer account | $25 one-off |
 | Domain + landing page | ~$15/yr |
 
-**Roughly $25–90/month to run before revenue.** At ₹699/month per farm, you break
-even on infrastructure at around **8–12 paying farms**. Text records are tiny;
-**photos** are what grows storage, so compress on device before upload.
+**Roughly ₹2,000–7,500/month ($25–90) to run before revenue.** At ₹99/month you
+keep about ₹82 net of GST and gateway fees, so infrastructure breaks even at
+around **30–90 paying farms**. Text records are tiny; **photos** are what grows
+storage, so compress on device before upload.
 
-Two costs that surprise people: **SMS OTP** is a real per-signup expense in India
-and a bot-signup vector — rate-limit it. And **support time** is your largest
-cost by far, and it does not appear on any invoice.
+Two costs that surprise people, and both bite hard at a ₹99 price point:
+
+- **SMS OTP** is a real per-signup expense in India (~₹0.15–0.25 a message) and a
+  bot-signup vector. Rate-limit it, or a scripted signup flood costs you money
+  directly.
+- **Support time** is your largest cost by far and appears on no invoice. At ₹82
+  net per farm per month, roughly five minutes of WhatsApp is the entire margin.
+  This is the real argument for spending the extra week on onboarding.
 
 ---
 
@@ -205,7 +211,7 @@ For one competent full-stack mobile developer:
 | Phase | Effort |
 |---|---|
 | MVP for one farm (animals, breeding cycle, ready-to-mate, daily tab, medication protocols, health conditions, tasks, employees, attendance, offline sync) | **10–14 weeks** |
-| **SaaS layer** (signup, onboarding templates, plans, Razorpay, entitlements, RLS hardening, cross-tenant tests, admin console) | **+4–6 weeks** |
+| **SaaS layer** (signup, onboarding templates, one plan + Razorpay, trial/grace handling, RLS hardening, cross-tenant tests, admin console) | **+3–5 weeks** |
 | Phase 2 (vaccination, feed, weights, reports, web dashboard) | 6–8 weeks |
 | Phase 3 (sales, finance, payroll, pedigree certificates) | 6–8 weeks |
 

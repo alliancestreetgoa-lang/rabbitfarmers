@@ -971,11 +971,14 @@ CREATE TYPE subscription_status_t AS ENUM
 CREATE TYPE billing_period_t AS ENUM ('monthly', 'yearly');
 CREATE TYPE invoice_status_t AS ENUM ('draft', 'due', 'paid', 'failed', 'refunded');
 
+-- One plan, sold two ways: ₹99/month or ₹999/year, after a 30-day full-access
+-- trial. The limit columns stay NULL (unlimited) — they are kept so a tier can
+-- be introduced later without a migration, not because anything is capped today.
 CREATE TABLE plan (
     id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    code               text UNIQUE NOT NULL,      -- starter | farm | commercial | estate
+    code               text UNIQUE NOT NULL,
     name               text NOT NULL,
-    -- NULL means unlimited.
+    -- NULL means unlimited. Both are NULL on the current single plan.
     max_breeding_does  int,
     max_staff_seats    int,
     -- Stored in paise to avoid float money. GST-inclusive: most customers are
