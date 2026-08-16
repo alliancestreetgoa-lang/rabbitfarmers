@@ -25,32 +25,41 @@ function readAdminToken(c) {
   return null;
 }
 
-// Admin sessions reuse user_session, keyed by a sentinel employee row? No —
-// they get their own storage, because mixing platform admins into the tenant
-// session table is exactly the conflation this design avoids.
-const adminSessions = new Map(); // tokenHash -> { adminId, expiresAt }
-
-function issueAdminSession(adminId) {
+// Admin sessions live in the database, not in a Map. On serverless each request
+// may hit a different instance, and an in-memory session store means the admin
+// console signs you out at random. They also get their own table rather than
+// sharing user_session, because platform admins are not tenants.
+async function issueAdminSession(adminId, ip, userAgent) {
   const { token, hash } = newSessionToken();
-  adminSessions.set(hash, {
-    adminId,
-    expiresAt: Date.now() + ADMIN_SESSION_HOURS * 3600_000,
-  });
+  await adminQuery(`
+    INSERT INTO admin_session (admin_id, token_hash, expires_at, ip, user_agent)
+    VALUES ($1, $2, now() + make_interval(hours => $3), $4, $5)`,
+    [adminId, hash, ADMIN_SESSION_HOURS, ip || null, userAgent ?? null]);
   return token;
 }
 
 async function requireAdmin(c, next) {
   const token = readAdminToken(c);
-  const entry = token ? adminSessions.get(hashToken(token)) : null;
-  if (!entry || entry.expiresAt < Date.now()) {
-    if (entry) adminSessions.delete(hashToken(token));
-    if (c.req.header('accept')?.includes('text/html')) return c.redirect('/admin/login');
+  const wantsHtml = c.req.header('accept')?.includes('text/html');
+
+  if (!token) {
+    if (wantsHtml) return c.redirect('/admin/login');
     throw new HttpError(401, 'Admin sign-in required');
   }
-  const { rows } = await adminQuery(
-    'SELECT id, email, full_name, role FROM platform_admin WHERE id = $1 AND is_active',
-    [entry.adminId]);
-  if (!rows.length) throw new HttpError(401, 'Admin account is inactive');
+
+  const { rows } = await adminQuery(`
+    SELECT p.id, p.email, p.full_name, p.role
+    FROM admin_session s
+    JOIN platform_admin p ON p.id = s.admin_id
+    WHERE s.token_hash = $1
+      AND s.revoked_at IS NULL
+      AND s.expires_at > now()
+      AND p.is_active`, [hashToken(token)]);
+
+  if (!rows.length) {
+    if (wantsHtml) return c.redirect('/admin/login');
+    throw new HttpError(401, 'Admin sign-in required');
+  }
   c.set('admin', rows[0]);
   await next();
 }
@@ -100,7 +109,8 @@ adminRoutes.post('/login', async (c) => {
   }
 
   await adminQuery('UPDATE platform_admin SET last_login_at = now() WHERE id = $1', [admin.id]);
-  const token = issueAdminSession(admin.id);
+  const token = await issueAdminSession(
+    admin.id, c.req.header('x-forwarded-for'), c.req.header('user-agent'));
   c.header('Set-Cookie',
     `${ADMIN_COOKIE}=${token}; Path=/admin; HttpOnly; SameSite=Lax; Max-Age=${ADMIN_SESSION_HOURS * 3600}`);
 
@@ -108,9 +118,13 @@ adminRoutes.post('/login', async (c) => {
   return c.redirect('/admin/farms');
 });
 
-adminRoutes.post('/logout', (c) => {
+adminRoutes.post('/logout', async (c) => {
   const token = readAdminToken(c);
-  if (token) adminSessions.delete(hashToken(token));
+  if (token) {
+    await adminQuery(
+      `UPDATE admin_session SET revoked_at = now()
+       WHERE token_hash = $1 AND revoked_at IS NULL`, [hashToken(token)]);
+  }
   c.header('Set-Cookie', `${ADMIN_COOKIE}=; Path=/admin; HttpOnly; Max-Age=0`);
   return c.redirect('/admin/login');
 });

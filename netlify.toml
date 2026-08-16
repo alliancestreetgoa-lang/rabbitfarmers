@@ -1,0 +1,24 @@
+[build]
+  # Nothing to compile — the function imports the API source directly.
+  command = "npm --prefix apps/api ci --omit=dev"
+  publish = "public"
+
+[functions]
+  node_bundler = "esbuild"
+  # pg ships optional native bits it does not need; leaving it external keeps
+  # the bundle honest and avoids esbuild trying to resolve them.
+  external_node_modules = ["pg", "pg-native"]
+
+[dev]
+  command = "npm --prefix apps/api start"
+  targetPort = 3000
+  port = 8888
+  publish = "public"
+
+# Migrations are deliberately NOT run in the build.
+#
+# Netlify builds can run concurrently (a deploy preview alongside production),
+# and two runners applying the same migration at once is a bad afternoon. Run
+# them yourself against the Neon branch before promoting a deploy:
+#
+#   ADMIN_DATABASE_URL='postgres://...neon.tech/...' npm --prefix apps/api run migrate

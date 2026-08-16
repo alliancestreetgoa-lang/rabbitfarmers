@@ -57,8 +57,13 @@ describe('tenant isolation', () => {
       JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public' AND c.relkind = 'r'
         AND NOT c.relrowsecurity
+        -- Platform tables, deliberately outside the tenant model. They are not
+        -- reachable by the farmer-facing role at all (see migration 0006), so
+        -- RLS would be belt on top of a wall. Adding a table here is a decision
+        -- to make on purpose, which is the point of the list.
         AND c.relname NOT IN ('schema_migration','plan','platform_admin',
-                              'admin_audit_log','admin_impersonation','audit_log')
+                              'admin_audit_log','admin_impersonation',
+                              'admin_session','audit_log')
       ORDER BY 1`);
     assert.deepEqual(rows.map((r) => r.relname), [],
       `these tables have no row-level security: ${rows.map((r) => r.relname).join(', ')}`);
@@ -112,6 +117,17 @@ describe('tenant isolation', () => {
       `SELECT rolbypassrls FROM pg_roles WHERE rolname = 'rabbitry_app'`);
     assert.equal(rows[0]?.rolbypassrls, false,
       'the farmer-facing role must never bypass row-level security');
+  });
+
+  test('the app role cannot touch the platform tables at all', async () => {
+    // These hold every admin's credentials and every farm's audit trail. RLS is
+    // not the defence here — the grant is.
+    for (const table of ['platform_admin', 'admin_session', 'admin_audit_log']) {
+      const { rows } = await adminQuery(
+        `SELECT has_table_privilege('rabbitry_app', $1, 'SELECT') AS can_read`, [table]);
+      assert.equal(rows[0].can_read, false,
+        `the farmer-facing role must not be able to read ${table}`);
+    }
   });
 
   test('an unset farm context sees nothing at all', async () => {

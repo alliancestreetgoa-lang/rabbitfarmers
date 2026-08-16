@@ -26,21 +26,36 @@ with grandfathering enforced in the schema.
 
 | Part | State |
 |---|---|
-| Database migrations, RLS, tenant isolation | Built, 8 isolation tests |
+| Database migrations, RLS, tenant isolation | Built, 9 isolation tests |
 | Signup / sign in / sign out | Built, 10 tests |
 | Breeding cycle, daily list, ready-to-mate, conditions | Built, 8 tests |
 | Subscriptions, trial, grace, entitlements | Built, 4 tests |
-| Super-admin CRM with audit trail | Built, 12 tests |
+| Super-admin CRM with audit trail | Built, 14 tests |
 | Scheduler (task generation, 2-hourly reminders) | **Not built** — see the note below |
-| Expo mobile app | **Not built** |
+| Netlify deployment | Configured, not deployed |
+| Expo mobile app | Not started — deliberately deferred |
+| Razorpay billing | Not started — deliberately deferred |
+
+### Verify it yourself
 
 ```bash
-cd apps/api && npm install && npm run migrate && npm test   # 42 passing
-npm start                                                    # api + /admin/login
+./scripts/verify.sh
 ```
 
-The domain fixtures in `db/verify.sql` add a further 41 assertions against the
-breeding rules themselves.
+From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
+the 45 API tests, then boots the server and hits real endpoints over HTTP. Uses
+`$DATABASE_URL` if you have one, otherwise starts a throwaway `postgres:16`
+container and removes it afterwards.
+
+Then poke at it by hand:
+
+```bash
+cd apps/api && npm start                    # http://localhost:3000
+ADMIN_PASSWORD='something long' npm run create-admin -- you@example.com "You"
+                                            # then http://localhost:3000/admin/login
+```
+
+Deploying is [docs/11-deploying-to-netlify.md](docs/11-deploying-to-netlify.md).
 
 ### The next thing to build
 
@@ -63,6 +78,7 @@ no error anywhere. See [docs/06-tech-stack.md](docs/06-tech-stack.md).
 | [docs/08-open-questions.md](docs/08-open-questions.md) | Decisions needed from the farm owner before building. |
 | [docs/09-saas-model.md](docs/09-saas-model.md) | Pricing, plans, billing, tenant isolation, onboarding, go-to-market. |
 | [docs/10-admin-console.md](docs/10-admin-console.md) | Signup and sign-in, and the super-admin CRM for running every farm and subscription. |
+| [docs/11-deploying-to-netlify.md](docs/11-deploying-to-netlify.md) | Netlify + Neon setup, environment variables, and what to check after a deploy. |
 | [apps/api](apps/api) | The backend and admin CRM, with its own README. |
 | [db/migrations](db/migrations) | Ordered, immutable migrations — the source of truth for the schema. |
 | [db/verify.sql](db/verify.sql) | Fixtures that prove the derived-state logic returns the right answers. |

@@ -1,9 +1,13 @@
 -- ============================================================================
--- Verification fixtures for the derived-state views in schema.sql
+-- Verification fixtures for the breeding rules and the derived-state views.
 --
--- Run against a database with schema.sql already applied:
---   psql -d rabbitfarm -v ON_ERROR_STOP=1 -f db/schema.sql
---   psql -d rabbitfarm -v ON_ERROR_STOP=1 -f db/verify.sql
+-- Run against a database with the migrations applied:
+--   cd apps/api && npm run migrate
+--   psql -d rabbitry -v ON_ERROR_STOP=1 -f db/verify.sql
+--
+-- Everything happens inside a transaction that ROLLS BACK at the end, so it is
+-- safe to run against a database that already has data — including production,
+-- though there is no good reason to.
 --
 -- Each doe below is a case that breaks naive implementations. The expected
 -- result is asserted, so a change to the breeding rules that regresses one of
@@ -13,10 +17,13 @@
 
 BEGIN;
 
--- Start from a clean slate: db/seed.sql has already inserted the live plan, and
--- these fixtures assert on exactly one plan being on sale. Everything here
--- rolls back, so the seeded row survives the run.
-DELETE FROM subscription;
+-- Start from a known-empty state.
+--
+-- Several assertions here are herd-wide by nature — "how many farms are on
+-- trial", "which does are ready to mate" — so any pre-existing farm would make
+-- them non-deterministic. The whole block rolls back, so nothing is actually
+-- removed; this just fixes what the fixtures are measuring against.
+DELETE FROM farm;
 DELETE FROM plan;
 
 -- Signup collects exactly four things plus the farm name: email, phone,

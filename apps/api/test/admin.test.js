@@ -237,6 +237,28 @@ describe('admin CRM', () => {
     assert.ok(page.text.includes('&lt;script&gt;'));
   });
 
+  test('an admin session survives a fresh app instance', async () => {
+    // On Netlify each request may land on a different instance. An in-memory
+    // session store passes every test on one long-lived server and then logs
+    // admins out at random in production, so prove it against a second app.
+    const admin = await makeAdmin('superadmin');
+    const { createApp } = await import('../src/app.js?fresh=1');
+    const other = createApp();
+
+    const res = await other.fetch(new Request('http://test/admin/api/summary', {
+      headers: { authorization: `Bearer ${admin.token}` },
+    }));
+    assert.equal(res.status, 200,
+      'a token issued by one instance must work on another');
+  });
+
+  test('signing out revokes the admin session everywhere', async () => {
+    const admin = await makeAdmin('superadmin');
+    assert.equal((await api('GET', '/admin/api/summary', { token: admin.token })).status, 200);
+    await form('POST', '/admin/logout', {}, { token: admin.token });
+    assert.equal((await api('GET', '/admin/api/summary', { token: admin.token })).status, 401);
+  });
+
   test('form login works and a wrong password does not', async () => {
     const admin = await makeAdmin('superadmin');
     const bad = await form('POST', '/admin/login',
