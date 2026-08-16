@@ -46,7 +46,7 @@ GRANT rabbitry_admin TO admin_login;
 npm test
 ```
 
-42 tests against a real database — no mocks, because the parts most worth
+70 tests against a real database — no mocks, because the parts most worth
 testing here (RLS, view security, the derived breeding state) only exist in
 Postgres. They create and clean up their own data, scoped by process id so the
 files can run concurrently.
@@ -79,7 +79,10 @@ src/
     auth.js       signup, signin, signout, me
     farm.js       animals, breeding cycle, conditions, daily list, settings
     admin.js      the super-admin CRM
+    scheduler.js  the run trigger and the heartbeat
   admin-ui.js     server-rendered admin pages (no build step)
+  scheduler.js    task and notification generation, plus health
+  run-scheduler.js  run one pass from a shell
   migrate.js      migration runner
   create-admin.js first platform admin
 ```
@@ -95,7 +98,11 @@ litter. There is a test asserting this.
 rather than `Date` objects. A kindling date is a day on the farm, not an
 instant, and converting it attaches the server's timezone to it.
 
-**Scheduling is not in here yet.** Nothing generates the day-28 nest box task or
-fires the 2-hourly condition reminder — that runs from an external scheduler,
-*not* `pg_cron`, because Neon suspends idle computes and cron jobs silently stop
-firing. See `docs/06-tech-stack.md`.
+**The scheduler runs from outside the database.** `src/scheduler.js` generates
+tasks and notifications; Netlify's scheduled function calls it every 15 minutes.
+Deliberately *not* `pg_cron`, which stops running whenever Neon suspends an idle
+compute, with no error anywhere.
+
+Run a pass by hand with `npm run scheduler`. `GET /scheduler/health` returns 503
+once nothing has succeeded within `SCHEDULER_STALE_SECONDS` — point an uptime
+monitor at it, because that is the alerting.

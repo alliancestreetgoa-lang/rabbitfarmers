@@ -378,6 +378,56 @@ farmRoutes.post('/conditions/:id/check', write, async (c) => {
   });
 });
 
+/* ---------------------------------------------------------- notifications -- */
+
+/**
+ * GET /notifications — what the scheduler has raised for this farm.
+ *
+ * Deliberately unaffected by subscription status. A farm that has stopped
+ * paying still gets told its doe is due to kindle; billing failure must not
+ * cost a litter.
+ */
+farmRoutes.get('/notifications', async (c) => {
+  const db = c.get('db');
+  const session = c.get('session');
+  const unreadOnly = c.req.query('unread') === '1';
+
+  const rows = await db(async (client) => {
+    const { rows } = await client.query(`
+      SELECT n.id, n.kind, n.title, n.body, n.urgency, n.rabbit_id,
+             r.name AS rabbit_name, n.created_at, n.read_at
+      FROM notification n
+      LEFT JOIN rabbit r ON r.id = n.rabbit_id
+      WHERE (n.employee_id IS NULL OR n.employee_id = $1)
+        AND ($2::boolean IS NOT TRUE OR n.read_at IS NULL)
+        AND n.created_at > now() - interval '7 days'
+      ORDER BY CASE n.urgency WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,
+               n.created_at DESC
+      LIMIT 100`, [session.employeeId, unreadOnly]);
+    return rows;
+  });
+
+  return c.json({ notifications: rows, unread: rows.filter((r) => !r.read_at).length });
+});
+
+/** POST /notifications/read — dismiss, either one or everything. */
+farmRoutes.post('/notifications/read', async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const db = c.get('db');
+  const session = c.get('session');
+
+  const n = await db(async (client) => {
+    const { rowCount } = await client.query(`
+      UPDATE notification SET read_at = now()
+       WHERE read_at IS NULL
+         AND (employee_id IS NULL OR employee_id = $1)
+         AND ($2::uuid IS NULL OR id = $2)`,
+      [session.employeeId, b.id ?? null]);
+    return rowCount;
+  });
+  return c.json({ marked_read: n });
+});
+
 /* --------------------------------------------------------------- settings -- */
 
 farmRoutes.get('/settings', async (c) => {

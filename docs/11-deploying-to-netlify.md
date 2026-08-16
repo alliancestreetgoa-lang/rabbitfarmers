@@ -12,9 +12,10 @@ the data. No mobile app and no Razorpay yet — those are separate decisions.
 ```
 
 From nothing, it applies the migrations, runs the 41 breeding-rule assertions,
-runs the 45 API tests, then boots the server and hits real endpoints over HTTP.
-It uses `$DATABASE_URL` if you have one, otherwise starts a throwaway
-`postgres:16` container and removes it afterwards.
+runs the 70 API tests, then boots the server and hits real endpoints over HTTP —
+including running the scheduler and confirming the day-28 nest box task reaches
+the daily list. It uses `$DATABASE_URL` if you have one, otherwise starts a
+throwaway `postgres:16` container and removes it afterwards.
 
 To poke at it by hand:
 
@@ -82,6 +83,8 @@ GRANT rabbitry_admin TO admin_login;
 | `ADMIN_DATABASE_URL` | pooled Neon string as **`admin_login`** |
 | `NODE_ENV` | `production` — this is what makes session cookies `Secure` |
 | `TRIAL_DAYS` | `30` |
+| `SCHEDULER_SECRET` | a long random string; guards `POST /scheduler/run` |
+| `SCHEDULER_STALE_SECONDS` | `3600` — how long without a successful run before the heartbeat reports unhealthy |
 
 Getting `DATABASE_URL` wrong is the one mistake that matters: point it at
 `admin_login` and every farm can read every other farm, because that role
@@ -136,18 +139,64 @@ production.
 
 ---
 
+## The scheduler
+
+`netlify/functions/scheduler.mjs` runs every 15 minutes and is what actually
+creates the day-28 nest box task, the separate-the-kits task on day 30, and the
+2-hourly loose-motion reminder.
+
+**Not `pg_cron`.** It exists on Neon and will appear to work while you test.
+Then the farm goes quiet overnight, Neon suspends the compute, `pg_cron` stops —
+there is no wake-on-cron — and the reminders simply do not arrive, with no error
+anywhere. An external scheduler both drives the work *and* wakes the database.
+
+Two constraints shaped it:
+
+- **Netlify caps a scheduled function at 30 seconds.** All the generation is
+  set-based SQL across every farm in one pass. Looping farms in JavaScript would
+  be fine at ten customers and start timing out at five hundred. Watch
+  `duration_ms` in `scheduler_run` as you grow.
+- **Netlify cron is UTC.** Nothing assumes the server's day: farm-local dates and
+  quiet hours are computed from `farm.timezone` in SQL.
+
+It is safe to run twice — every generated row carries a deterministic unique key,
+so a repeat pass inserts nothing rather than doubling a farmer's task list. There
+is a test for exactly that, and another proving a completed task is not
+resurrected.
+
+### After deploying, check the heartbeat
+
+```
+GET /scheduler/health
+```
+
+Returns **503** when nothing has succeeded within `SCHEDULER_STALE_SECONDS`.
+**Point an uptime monitor at it** — a free Better Stack or UptimeRobot check is
+enough. That is the alerting, and it is the whole reason the endpoint exists: a
+reminder system that fails silently is worse than none, because everyone has
+stopped watching for the thing themselves.
+
+You can also trigger a pass by hand, which is useful for a first run or after
+downtime:
+
+```bash
+curl -X POST https://your-site.netlify.app/scheduler/run \
+  -H "x-scheduler-secret: $SCHEDULER_SECRET"
+
+# or from your machine, straight against the database
+ADMIN_DATABASE_URL='postgres://…neon.tech/rabbitry' npm --prefix apps/api run scheduler
+```
+
+---
+
 ## Still missing before this is a real product
 
 Worth being explicit, because the deploy will look finished and will not be:
 
-**The scheduler.** Nothing generates the day-28 nest box task or fires the
-2-hourly loose-motion reminder. Netlify Scheduled Functions are the natural home
-— *not* `pg_cron`, which on Neon stops running whenever the compute suspends,
-with no error anywhere. Add a heartbeat that alerts you when a run is missed; a
-reminder system that fails silently is worse than none, because everyone has
-stopped watching for the thing themselves.
-
-**Push notifications.** The daily list is correct; nothing pushes it to a phone.
+**Push notifications.** The scheduler creates notification rows and the API
+serves them, but nothing delivers them to a phone — there is no mobile app yet.
+`notification.sent_at` stays NULL until a dispatcher exists. Until then a farmer
+sees them by opening the app.
 
 **Rate limiting on signup.** A 30-day trial with no card and no verification is
 trivially farmed. Netlify has rate limiting available at the edge.

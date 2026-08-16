@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { authRoutes } from './routes/auth.js';
 import { farmRoutes } from './routes/farm.js';
 import { adminRoutes } from './routes/admin.js';
+import { schedulerRoutes } from './routes/scheduler.js';
 import { errorHandler } from './middleware.js';
 import { appQuery } from './db.js';
 
@@ -35,6 +36,9 @@ export function createApp() {
   // carry a use('*') auth guard, which would otherwise run for /admin/* too and
   // reject platform admins with a farmer-facing "sign in" error.
   app.route('/admin', adminRoutes);
+  // Also before the farm routes: the scheduler authenticates with a shared
+  // secret, not a farm session, so it must not hit the farm auth guard.
+  app.route('/scheduler', schedulerRoutes);
   app.route('/', farmRoutes);
 
   return app;

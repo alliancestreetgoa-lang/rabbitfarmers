@@ -63,7 +63,7 @@ describe('tenant isolation', () => {
         -- to make on purpose, which is the point of the list.
         AND c.relname NOT IN ('schema_migration','plan','platform_admin',
                               'admin_audit_log','admin_impersonation',
-                              'admin_session','audit_log')
+                              'admin_session','scheduler_run','audit_log')
       ORDER BY 1`);
     assert.deepEqual(rows.map((r) => r.relname), [],
       `these tables have no row-level security: ${rows.map((r) => r.relname).join(', ')}`);
@@ -122,7 +122,8 @@ describe('tenant isolation', () => {
   test('the app role cannot touch the platform tables at all', async () => {
     // These hold every admin's credentials and every farm's audit trail. RLS is
     // not the defence here — the grant is.
-    for (const table of ['platform_admin', 'admin_session', 'admin_audit_log']) {
+    for (const table of ['platform_admin', 'admin_session', 'admin_audit_log',
+                         'scheduler_run']) {
       const { rows } = await adminQuery(
         `SELECT has_table_privilege('rabbitry_app', $1, 'SELECT') AS can_read`, [table]);
       assert.equal(rows[0].can_read, false,

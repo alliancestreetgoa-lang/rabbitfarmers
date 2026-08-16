@@ -31,8 +31,8 @@ with grandfathering enforced in the schema.
 | Breeding cycle, daily list, ready-to-mate, conditions | Built, 8 tests |
 | Subscriptions, trial, grace, entitlements | Built, 4 tests |
 | Super-admin CRM with audit trail | Built, 14 tests |
-| Scheduler (task generation, 2-hourly reminders) | **Not built** — see the note below |
-| Netlify deployment | Configured, not deployed |
+| Scheduler (task generation, 2-hourly reminders, heartbeat) | Built, 25 tests |
+| Netlify deployment | Configured and deployment-ready, not deployed |
 | Expo mobile app | Not started — deliberately deferred |
 | Razorpay billing | Not started — deliberately deferred |
 
@@ -43,9 +43,10 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 45 API tests, then boots the server and hits real endpoints over HTTP. Uses
-`$DATABASE_URL` if you have one, otherwise starts a throwaway `postgres:16`
-container and removes it afterwards.
+the 70 API tests, then boots the server and hits real endpoints over HTTP —
+including running the scheduler and confirming the day-28 nest box task reaches
+the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
+throwaway `postgres:16` container and removes it afterwards.
 
 Then poke at it by hand:
 
@@ -59,10 +60,9 @@ Deploying is [docs/11-deploying-to-netlify.md](docs/11-deploying-to-netlify.md).
 
 ### The next thing to build
 
-The **scheduler**. Nothing yet generates the day-28 nest box task or fires the
-2-hourly loose-motion reminder. It must run from an external scheduler rather
-than `pg_cron` — Neon suspends idle computes and cron jobs then stop firing with
-no error anywhere. See [docs/06-tech-stack.md](docs/06-tech-stack.md).
+**Push delivery.** The scheduler raises notifications and the API serves them,
+but nothing pushes them to a phone yet — that waits on the mobile app. Until
+then a farmer sees them by opening the app.
 
 ## Documents
 

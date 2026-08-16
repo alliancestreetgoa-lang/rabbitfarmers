@@ -10,7 +10,8 @@
     "test": "node --test test/*.test.js",
     "verify": "bash ../../scripts/verify.sh",
     "smoke": "node src/smoke.js",
-    "create-admin": "node src/create-admin.js"
+    "create-admin": "node src/create-admin.js",
+    "scheduler": "node src/run-scheduler.js"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

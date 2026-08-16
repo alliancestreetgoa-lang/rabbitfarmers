@@ -182,6 +182,33 @@ ok "GET /pregnant — confirmed and presumed counted separately"
 curl -fsS localhost:$PORT/daily -H "authorization: Bearer $TOKEN" >/dev/null || die "daily failed"
 ok "GET /daily — the tab that opens on login"
 
+# The scheduler is the part that makes the app worth paying for, so verify it
+# actually creates the day-28 task rather than just that the endpoint answers.
+MATED=$(date -u -d '28 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -v-28d +%Y-%m-%dT%H:%M:%SZ)
+curl -fsS -X POST localhost:$PORT/matings -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d "{\"doe_id\":\"$DOE\",\"mated_at\":\"$MATED\"}" >/dev/null
+
+SCHED=$(cd "$API" && SCHEDULER_SECRET=verify-secret node -e "
+  import('./src/scheduler.js').then(async (m) => {
+    const r = await m.runScheduler({ triggeredBy: 'verify' });
+    console.log(JSON.stringify(r));
+    const { closePools } = await import('./src/db.js');
+    await closePools();
+  });
+")
+echo "$SCHED" | grep -q '"ok":true' || die "scheduler run failed: $SCHED"
+ok "scheduler ran — $(echo "$SCHED" | sed -n 's/.*"tasksCreated":\([0-9]*\).*/\1/p') task(s) created"
+
+curl -fsS localhost:$PORT/daily -H "authorization: Bearer $TOKEN" \
+  | grep -qi 'nest box' || die "the day-28 nest box task did not reach the daily list"
+ok "the day-28 nest box task reached the daily list"
+
+curl -fsS localhost:$PORT/scheduler/health | grep -q '"healthy":true' \
+  || die "scheduler heartbeat is not healthy"
+ok "GET /scheduler/health — heartbeat healthy"
+
 curl -fsS localhost:$PORT/admin/login | grep -q 'Rabbitry admin' || die "admin console did not render"
 ok "GET /admin/login — admin console renders"
 
