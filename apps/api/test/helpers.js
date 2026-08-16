@@ -83,6 +83,14 @@ export async function cleanup() {
   await adminQuery(`DELETE FROM admin_audit_log   WHERE target_farm_id IN (${farms})`);
   await adminQuery(`DELETE FROM admin_impersonation WHERE farm_id      IN (${farms})`);
   await adminQuery(`DELETE FROM farm               WHERE id            IN (${farms})`);
+  // Then anything else this process's admins logged. Deleting a farm nulls the
+  // audit row's target_farm_id — that is the point, the entry outlives the farm
+  // — so those rows are no longer reachable through the farm and would
+  // otherwise hold their admin hostage. In production nobody deletes an admin;
+  // they are deactivated, and the log's foreign key is what guarantees it.
+  await adminQuery(
+    `DELETE FROM admin_audit_log
+      WHERE admin_id IN (SELECT id FROM platform_admin WHERE email::text LIKE $1)`, [mine]);
   await adminQuery(`DELETE FROM platform_admin WHERE email::text LIKE $1`, [mine]);
 }
 

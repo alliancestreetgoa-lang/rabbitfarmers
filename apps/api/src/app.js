@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { authRoutes } from './routes/auth.js';
 import { farmRoutes } from './routes/farm.js';
 import { adminRoutes } from './routes/admin.js';
@@ -11,6 +12,39 @@ export function createApp() {
 
   app.onError(errorHandler);
   app.notFound((c) => c.json({ error: 'No such endpoint' }, 404));
+
+  /**
+   * CORS.
+   *
+   * On Netlify the app and the API are the same origin and this is a no-op.
+   * It matters everywhere else: the Expo dev server runs on :8081, a web build
+   * gets served from :8080, and without these headers the browser blocks every
+   * request and the app just says "no connection" — which looks exactly like
+   * being offline and is maddening to debug.
+   *
+   * Origins are an allowlist, never a wildcard, because these requests carry a
+   * session token.
+   */
+  const configured = (process.env.CORS_ORIGINS ?? '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+
+  app.use('*', cors({
+    origin: (origin) => {
+      if (!origin) return origin;                   // same-origin or a native app
+      if (configured.includes(origin)) return origin;
+      // Local development only. Never in production, where an attacker could
+      // run a page on localhost and read a farmer's data.
+      if (process.env.NODE_ENV !== 'production'
+          && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return origin;
+      }
+      return null;
+    },
+    allowHeaders: ['content-type', 'authorization', 'accept', 'x-scheduler-secret'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    credentials: true,
+    maxAge: 86400,
+  }));
 
   // Liveness plus a real database round-trip. A health check that does not
   // touch the database will happily report green while every request fails.

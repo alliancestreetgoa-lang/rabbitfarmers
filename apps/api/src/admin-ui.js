@@ -210,6 +210,16 @@ export function renderFarm({ farm, audit, subscription, admin }) {
       ${action('suspend', 'Suspend', 'Read-only. Reminders keep firing.', '', canBill)}
       ${action('cancel', 'Cancel', 'Read-only. Data kept 12 months.', '', canBill)}
       ${action('comp', 'Comp free', 'Case study, beta tester, friend.', '', canComp)}
+      ${/*
+        The only irreversible action on this page, so it asks for the farm's
+        name as well as a reason. `pattern` makes the browser refuse the wrong
+        name before anything is sent, and the server checks it again — a typo
+        on a tired evening should not cost a farmer their records.
+      */ ''}
+      ${action('delete', 'Delete farm', 'Erasure request, or created in error. Cannot be undone.',
+        `<input name="confirm_name" placeholder="Type &quot;${esc(farm.farm_name)}&quot;"
+                pattern="${esc(farm.farm_name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"
+                title="Type the farm's name exactly" required>`, canComp)}
     </div>
 
     <h2>Audit trail</h2>

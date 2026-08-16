@@ -1,7 +1,20 @@
 [build]
-  # Nothing to compile — the function imports the API source directly.
-  command = "npm --prefix apps/api ci --omit=dev"
-  publish = "public"
+  # Two installs: the API's runtime dependencies, which the function imports
+  # directly from source, and the app's build toolchain, which produces the
+  # static site. The web export is what farmers actually open.
+  command = """
+    npm --prefix apps/api ci --omit=dev &&
+    npm --prefix apps/mobile ci &&
+    npm --prefix apps/mobile run build:web
+  """
+  publish = "apps/mobile/dist"
+
+  [build.environment]
+    # Empty on purpose. The app then talks to /api on whatever origin it was
+    # served from, so the same build works on a deploy preview, a branch deploy
+    # and production without rebuilding. Set it only to point a build at an API
+    # somewhere else.
+    EXPO_PUBLIC_API_URL = ""
 
 [functions]
   node_bundler = "esbuild"
@@ -9,11 +22,64 @@
   # the bundle honest and avoids esbuild trying to resolve them.
   external_node_modules = ["pg", "pg-native"]
 
+# ---------------------------------------------------------------- routing --
+#
+# The site serves two things from one origin: a single-page app exported by
+# Expo, and the API/admin console inside the function. Their paths collide —
+# /daily is both a screen and an endpoint — so the split has to be explicit.
+#
+# Redirects are evaluated top to bottom and the first match wins. The API rules
+# come first, the SPA fallback last. Nothing here is `force`d, so a real static
+# file (/_expo/static/js/...) is still served before any of it.
+#
+# The app calls /api/*. The admin console keeps its own top-level path because
+# it is a plain server-rendered page a human types into the address bar.
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/admin"
+  to = "/.netlify/functions/api/admin"
+  status = 200
+
+[[redirects]]
+  from = "/admin/*"
+  to = "/.netlify/functions/api/admin/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/scheduler/*"
+  to = "/.netlify/functions/api/scheduler/:splat"
+  status = 200
+
+# Uptime monitors and the pricing page point at these, so they stay where they
+# are rather than moving under /api.
+[[redirects]]
+  from = "/health"
+  to = "/.netlify/functions/api/health"
+  status = 200
+
+[[redirects]]
+  from = "/plans"
+  to = "/.netlify/functions/api/plans"
+  status = 200
+
+# Everything else is a screen. Expo exports a single index.html and routes on
+# the client, so a deep link like /record/mating must return that shell with a
+# 200 — a 301 would lose the path and a 404 would break a bookmarked page.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
 [dev]
   command = "npm --prefix apps/api start"
   targetPort = 3000
   port = 8888
-  publish = "public"
+  publish = "apps/mobile/dist"
 
 # Migrations are deliberately NOT run in the build.
 #

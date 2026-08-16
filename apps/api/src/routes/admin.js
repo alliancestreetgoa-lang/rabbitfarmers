@@ -75,13 +75,13 @@ function requireAdminRole(...roles) {
 }
 
 /** Every admin action against a farm lands here. Append-only, reason required. */
-async function audit(admin, action, farmId, before, after, reason, ip) {
+async function audit(admin, action, farmId, before, after, reason, ip, table = 'subscription') {
   await adminQuery(`
     INSERT INTO admin_audit_log (admin_id, action, target_farm_id, target_table,
                                  before_value, after_value, reason, ip)
-    VALUES ($1,$2,$3,'subscription',$4,$5,$6,$7)`,
+    VALUES ($1,$2,$3,$8,$4,$5,$6,$7)`,
     [admin.id, action, farmId, before ? JSON.stringify(before) : null,
-     after ? JSON.stringify(after) : null, reason ?? null, ip ?? null]);
+     after ? JSON.stringify(after) : null, reason ?? null, ip ?? null, table]);
 }
 
 /* ------------------------------------------------------------------ pages -- */
@@ -219,6 +219,56 @@ const ACTIONS = {
        WHERE farm_id = $1 RETURNING *`, [farmId]),
   },
 };
+
+/**
+ * DELETE a farm and everything in it.
+ *
+ * Superadmin only, reason required, and logged before the rows go — otherwise
+ * the audit trail disappears along with the farm it was describing.
+ *
+ * This is for an erasure request or a farm created in error. It is NOT how a
+ * lapsed subscription is handled: non-payment goes read-only and the data is
+ * retained, because deleting a farmer's own records over ₹99 is indefensible.
+ *
+ * Registered BEFORE /farms/:id/:action below. Hono matches in registration
+ * order, so the wildcard would otherwise swallow this and answer
+ * `Unknown action "delete"`.
+ */
+adminRoutes.post('/farms/:id/delete', requireAdminRole('superadmin'), async (c) => {
+  const admin = c.get('admin');
+  const farmId = c.req.param('id');
+  const ct = c.req.header('content-type') ?? '';
+  const body = ct.includes('application/json')
+    ? await c.req.json().catch(() => ({}))
+    : Object.fromEntries(await c.req.formData());
+
+  const reason = String(body.reason ?? '').trim();
+  if (!reason) throw new HttpError(400, 'A reason is required to delete a farm');
+
+  const { rows } = await adminQuery(
+    'SELECT name FROM farm WHERE id = $1', [farmId]);
+  if (!rows.length) throw new HttpError(404, 'Farm not found');
+
+  // Typed confirmation, checked here and not only in the browser. The console
+  // sends it; anything calling this endpoint directly has to mean it too, which
+  // is the point — the caller has to have looked up which farm this id is.
+  const confirm = String(body.confirm_name ?? '').trim();
+  if (confirm !== rows[0].name) {
+    throw new HttpError(400,
+      `Confirm by sending the farm's exact name. This one is "${rows[0].name}".`,
+      { field: 'confirm_name' });
+  }
+
+  // Logged first. target_farm_id is ON DELETE SET NULL, so the entry survives
+  // with the farm's name preserved in the payload.
+  await audit(admin, 'delete_farm', farmId,
+    { name: rows[0].name }, null, reason, c.req.header('x-forwarded-for') ?? null, 'farm');
+
+  await adminQuery('DELETE FROM farm WHERE id = $1', [farmId]);
+
+  if (ct.includes('application/json')) return c.json({ ok: true, deleted: rows[0].name });
+  return c.redirect('/admin/farms');
+});
 
 adminRoutes.post('/farms/:id/:action', async (c) => {
   const admin = c.get('admin');

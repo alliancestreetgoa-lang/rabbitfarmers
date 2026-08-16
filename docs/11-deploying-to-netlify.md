@@ -1,7 +1,9 @@
 # 11 — Deploying to Netlify
 
-Netlify hosts the API and the admin console as a serverless function; Neon holds
-the data. No mobile app and no Razorpay yet — those are separate decisions.
+One Netlify site serves the whole product: the farmer-facing app as static
+files, the API and admin console as a serverless function, and the reminder
+scheduler as a scheduled function. Neon holds the data. No Razorpay yet — that
+is a separate decision.
 
 ---
 
@@ -12,7 +14,7 @@ the data. No mobile app and no Razorpay yet — those are separate decisions.
 ```
 
 From nothing, it applies the migrations, runs the 41 breeding-rule assertions,
-runs the 70 API tests, then boots the server and hits real endpoints over HTTP —
+runs the API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. It uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.
@@ -27,8 +29,49 @@ npm run migrate
 npm start                     # http://localhost:3000
 
 ADMIN_PASSWORD='something long' npm run create-admin -- you@example.com "Your Name"
-# then sign in at http://localhost:3000/admin/login
 ```
+
+Then bring up the app on the same origin the deploy will use:
+
+```bash
+npm --prefix apps/mobile install
+npm --prefix apps/mobile run build:web
+node scripts/dev-site.mjs      # http://localhost:8080, admin at /admin/login
+```
+
+`dev-site.mjs` mirrors the redirect table in `netlify.toml`. Serving the app on
+one port and the API on another hides the single most likely deployment bug:
+`/daily` is both a screen and an endpoint, and only a same-origin run proves
+which of the two answers it.
+
+For something to look at, seed a farm with a herd, four matings at different
+stages, a weaned litter and an open health case:
+
+```bash
+node scripts/demo-data.mjs
+# add ADMIN_EMAIL / ADMIN_PASSWORD to also seed neighbouring farms on other
+# plans, so the admin console has a realistic list
+```
+
+---
+
+## How one site serves two things
+
+The app and the API share an origin and their paths overlap. `netlify.toml`
+resolves that with an ordered redirect table, first match wins:
+
+| Path | Goes to |
+|---|---|
+| `/api/*` | the function (prefix stripped — `/api/daily` → `/daily`) |
+| `/admin`, `/admin/*` | the function — the server-rendered console |
+| `/scheduler/*`, `/health`, `/plans` | the function |
+| everything else | `/index.html` with a **200**, so client-side routes and deep links work |
+
+The app finds the API through `EXPO_PUBLIC_API_URL`. It is deliberately **empty**
+in the Netlify build: the app then calls `/api` on whatever origin served it, so
+one build works on a deploy preview, a branch deploy and production. Set it only
+to point a build somewhere else — a native build, for instance, which has no
+origin to fall back on.
 
 ---
 
@@ -85,6 +128,7 @@ GRANT rabbitry_admin TO admin_login;
 | `TRIAL_DAYS` | `30` |
 | `SCHEDULER_SECRET` | a long random string; guards `POST /scheduler/run` |
 | `SCHEDULER_STALE_SECONDS` | `3600` — how long without a successful run before the heartbeat reports unhealthy |
+| `EXPO_PUBLIC_API_URL` | leave **empty** — `netlify.toml` already sets it so, and a value here would pin the app to one host |
 
 Getting `DATABASE_URL` wrong is the one mistake that matters: point it at
 `admin_login` and every farm can read every other farm, because that role
@@ -194,9 +238,14 @@ ADMIN_DATABASE_URL='postgres://…neon.tech/rabbitry' npm --prefix apps/api run 
 Worth being explicit, because the deploy will look finished and will not be:
 
 **Push notifications.** The scheduler creates notification rows and the API
-serves them, but nothing delivers them to a phone — there is no mobile app yet.
-`notification.sent_at` stays NULL until a dispatcher exists. Until then a farmer
-sees them by opening the app.
+serves them, but nothing delivers them to a phone. `notification.sent_at` stays
+NULL until a dispatcher exists. Until then a farmer sees them by opening the app
+— which is why the app opens on Today rather than a dashboard.
+
+**App store builds.** The web export is what Netlify serves. The same Expo
+project builds for Android and iOS, but that needs EAS, signing keys and store
+accounts, and a native build must have `EXPO_PUBLIC_API_URL` set to the site's
+real URL because there is no origin to infer.
 
 **Rate limiting on signup.** A 30-day trial with no card and no verification is
 trivially farmed. Netlify has rate limiting available at the edge.

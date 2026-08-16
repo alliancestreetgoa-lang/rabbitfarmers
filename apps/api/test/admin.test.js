@@ -41,10 +41,7 @@ describe('entitlements', () => {
     const doe = await api('POST', '/animals', {
       token: f.token, body: { name: 'Sita', sex: 'doe', date_of_birth: '2024-01-01' },
     });
-    await adminQuery(`
-      INSERT INTO condition_type (farm_id, code, name, reminder_interval_hours,
-                                  blocks_breeding, escalate_after_hours)
-      VALUES ($1,'loose_motion','Loose motion',2,true,24)`, [f.farm.id]);
+    // loose_motion comes from the signup seed.
     await api('POST', '/conditions', {
       token: f.token, body: { rabbit_id: doe.body.animal.id },
     });
@@ -269,5 +266,64 @@ describe('admin CRM', () => {
       { email: admin.email, password: 'admin password 123' });
     assert.equal(good.status, 302);
     assert.match(good.headers.get('set-cookie') ?? '', /rb_admin=/);
+  });
+
+  describe('deleting a farm', () => {
+    test('needs superadmin, a reason, and the farm typed back', async () => {
+      const f = await signupFarm();
+      const support = await makeAdmin('support');
+      const admin = await makeAdmin('superadmin');
+      const url = `/admin/farms/${f.farm.id}/delete`;
+
+      const wrongRole = await api('POST', url, {
+        token: support.token, body: { reason: 'x', confirm_name: f.farm.name },
+      });
+      assert.equal(wrongRole.status, 403);
+
+      const noReason = await api('POST', url, {
+        token: admin.token, body: { confirm_name: f.farm.name },
+      });
+      assert.equal(noReason.status, 400);
+      assert.match(noReason.body.error, /reason/i);
+
+      const wrongName = await api('POST', url, {
+        token: admin.token, body: { reason: 'Erasure request', confirm_name: 'Some Other Farm' },
+      });
+      assert.equal(wrongName.status, 400);
+      assert.equal(wrongName.body.detail.field, 'confirm_name');
+
+      // Three refusals and the farm is still there.
+      assert.equal((await api('GET', '/auth/me', { token: f.token })).status, 200);
+    });
+
+    test('removes the farm but keeps the audit entry that says why', async () => {
+      const f = await signupFarm();
+      await api('POST', '/animals', { token: f.token, body: { name: 'Gauri', sex: 'doe' } });
+      const admin = await makeAdmin('superadmin');
+
+      const res = await api('POST', `/admin/farms/${f.farm.id}/delete`, {
+        token: admin.token,
+        body: { reason: 'Owner asked for their data to be removed', confirm_name: f.farm.name },
+      });
+      assert.equal(res.status, 200, res.text);
+
+      // Gone, and the farmer's session with it.
+      assert.equal((await api('GET', '/auth/me', { token: f.token })).status, 401);
+      const list = await api('GET', '/admin/farms?format=json', { token: admin.token });
+      assert.equal(list.body.farms.filter((x) => x.farm_id === f.farm.id).length, 0);
+
+      // The log survives the row it describes — target_farm_id is nulled by the
+      // cascade, so the farm's name has to be in the payload or the entry
+      // becomes unreadable the moment it matters.
+      const { rows } = await adminQuery(
+        `SELECT action, reason, before_value, target_farm_id, target_table
+         FROM admin_audit_log WHERE admin_id = (SELECT id FROM platform_admin WHERE email = $1)
+           AND action = 'delete_farm'`, [admin.email]);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].target_farm_id, null);
+      assert.equal(rows[0].target_table, 'farm');
+      assert.equal(rows[0].before_value.name, f.farm.name);
+      assert.match(rows[0].reason, /removed/);
+    });
   });
 });

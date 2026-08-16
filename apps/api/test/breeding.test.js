@@ -195,12 +195,7 @@ describe('buck suggestion', () => {
 describe('loose motion', () => {
   test('marks the animal, reminds, and clears when stopped', async () => {
     const f = await farmWithStock();
-    await adminQuery(`
-      INSERT INTO condition_type (farm_id, code, name, colour,
-                                  reminder_interval_hours, blocks_breeding,
-                                  is_contagious, escalate_after_hours)
-      VALUES ($1,'loose_motion','Loose motion','#EA580C',2,true,true,24)`, [f.farm.id]);
-
+    // loose_motion comes from the signup seed, not from this test.
     const created = await api('POST', '/conditions', {
       token: f.token, body: { rabbit_id: f.doe, severity: 'moderate' },
     });
@@ -250,5 +245,32 @@ describe('loose motion', () => {
 
     const after = await api('GET', '/animals', { token: f.token });
     assert.equal(after.body.animals.find((a) => a.id === f.doe).primary_colour, null);
+  });
+
+  test('the clock runs from when it was seen, not when it was typed in', async () => {
+    const f = await farmWithStock();
+    const seen = new Date(Date.now() - 3 * 3600_000).toISOString();
+
+    const created = await api('POST', '/conditions', {
+      token: f.token, body: { rabbit_id: f.doe, observed_at: seen },
+    });
+    assert.equal(created.status, 201, created.text);
+
+    // Three hours on a two-hourly reminder: already overdue on arrival, rather
+    // than starting a fresh two-hour wait because of when the phone came out.
+    const open = await api('GET', '/conditions', { token: f.token });
+    const row = open.body.open[0];
+    assert.equal(row.reminder_due, true);
+    assert.ok(row.hours_open >= 3, `expected at least 3 hours open, got ${row.hours_open}`);
+  });
+
+  test('refuses a sighting from the future', async () => {
+    const f = await farmWithStock();
+    const res = await api('POST', '/conditions', {
+      token: f.token,
+      body: { rabbit_id: f.doe, observed_at: new Date(Date.now() + 86_400_000).toISOString() },
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /future/i);
   });
 });

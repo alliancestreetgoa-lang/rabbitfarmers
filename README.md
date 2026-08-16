@@ -13,27 +13,28 @@ The two questions this app exists to answer, instantly, from a phone in the shed
 Everything else — medication rounds, health alerts, feed, growth, sales, staff —
 supports those two.
 
-**Stack:** Expo (React Native) + Neon serverless PostgreSQL, email-and-password
-sign-in, Razorpay for subscriptions. See [docs/06-tech-stack.md](docs/06-tech-stack.md)
-— including the scheduling trap that would silently stop every reminder.
+**Stack:** Expo (React Native, exported to web) + Hono on Netlify Functions +
+Neon serverless PostgreSQL, email-and-password sign-in, Razorpay for
+subscriptions later. See [docs/06-tech-stack.md](docs/06-tech-stack.md) —
+including the scheduling trap that would silently stop every reminder.
 
 **Pricing:** 30-day full-access trial, then ₹99/month or ₹999/year — introductory,
 with grandfathering enforced in the schema.
 
 ## Status
 
-**Backend and admin CRM are built and tested.** The mobile app is not started.
+**The app, the backend and the admin CRM are built and tested.** Not deployed.
 
 | Part | State |
 |---|---|
 | Database migrations, RLS, tenant isolation | Built, 9 isolation tests |
 | Signup / sign in / sign out | Built, 10 tests |
-| Breeding cycle, daily list, ready-to-mate, conditions | Built, 8 tests |
+| Breeding cycle, daily list, ready-to-mate, conditions | Built, 12 tests |
 | Subscriptions, trial, grace, entitlements | Built, 4 tests |
-| Super-admin CRM with audit trail | Built, 14 tests |
+| Super-admin CRM with audit trail | Built, 16 tests |
 | Scheduler (task generation, 2-hourly reminders, heartbeat) | Built, 25 tests |
-| Netlify deployment | Configured and deployment-ready, not deployed |
-| Expo mobile app | Not started — deliberately deferred |
+| Expo app — Today, Breeding, Herd, recording, offline outbox | Built, 18 tests against the real API |
+| Netlify deployment | Configured and deployment-ready, **not deployed** |
 | Razorpay billing | Not started — deliberately deferred |
 
 ### Verify it yourself
@@ -43,26 +44,38 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 70 API tests, then boots the server and hits real endpoints over HTTP —
+the 74 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.
 
-Then poke at it by hand:
+### Run the whole thing locally
 
 ```bash
-cd apps/api && npm start                    # http://localhost:3000
+cd apps/api && npm start                       # the API on :3000
 ADMIN_PASSWORD='something long' npm run create-admin -- you@example.com "You"
-                                            # then http://localhost:3000/admin/login
+
+npm --prefix apps/mobile run build:web         # build the app
+node scripts/dev-site.mjs                      # both on http://localhost:8080
+node scripts/demo-data.mjs                     # a farm with something in it
 ```
+
+`:8080` serves the app and the API on one origin, exactly as Netlify will — the
+farmer's app at `/`, the admin console at `/admin/login`. That matters: `/daily`
+is both a screen and an endpoint, so a two-port setup cannot tell you which one
+a deploy would answer with.
 
 Deploying is [docs/11-deploying-to-netlify.md](docs/11-deploying-to-netlify.md).
 
 ### The next thing to build
 
 **Push delivery.** The scheduler raises notifications and the API serves them,
-but nothing pushes them to a phone yet — that waits on the mobile app. Until
-then a farmer sees them by opening the app.
+but nothing pushes them to a phone yet. Until then a farmer sees them by opening
+the app — which is why the app opens on Today rather than a dashboard.
+
+**Store builds.** The web export is what gets deployed. The same Expo project
+builds for Android and iOS through EAS, which needs signing keys and store
+accounts.
 
 ## Documents
 
@@ -80,6 +93,7 @@ then a farmer sees them by opening the app.
 | [docs/10-admin-console.md](docs/10-admin-console.md) | Signup and sign-in, and the super-admin CRM for running every farm and subscription. |
 | [docs/11-deploying-to-netlify.md](docs/11-deploying-to-netlify.md) | Netlify + Neon setup, environment variables, and what to check after a deploy. |
 | [apps/api](apps/api) | The backend and admin CRM, with its own README. |
+| [apps/mobile](apps/mobile) | The Expo app — Today, Breeding, Herd, recording, and the offline outbox. |
 | [db/migrations](db/migrations) | Ordered, immutable migrations — the source of truth for the schema. |
 | [db/verify.sql](db/verify.sql) | Fixtures that prove the derived-state logic returns the right answers. |
 

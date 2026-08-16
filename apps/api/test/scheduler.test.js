@@ -214,11 +214,10 @@ describe('task generation', () => {
 describe('condition reminders', () => {
   async function farmWithLooseDoe(quiet = false) {
     const f = await farmWithDoe();
-    await adminQuery(`
-      INSERT INTO condition_type (farm_id, code, name, colour, reminder_interval_hours,
-                                  blocks_breeding, is_contagious, escalate_after_hours,
-                                  respect_quiet_hours)
-      VALUES ($1,'loose_motion','Loose motion','#EA580C',2,true,true,24,true)`, [f.farm.id]);
+    // No condition_type insert here on purpose. Signup seeds loose_motion, and
+    // these tests are only meaningful if they run against that seed — the
+    // previous version inserted its own row and so passed happily while every
+    // real new farm could not report a sick rabbit at all.
     if (!quiet) {
       await adminQuery(
         `UPDATE farm_settings SET quiet_hours_enabled = false WHERE farm_id = $1`, [f.farm.id]);

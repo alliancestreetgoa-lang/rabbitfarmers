@@ -52,14 +52,15 @@ farmRoutes.post('/animals', write, async (c) => {
   const session = c.get('session');
   const row = await db(async (client) => {
     const { rows } = await client.query(`
-      INSERT INTO rabbit (farm_id, tag, name, sex, role, breed_id, date_of_birth,
+      INSERT INTO rabbit (id, farm_id, tag, name, sex, role, breed_id, date_of_birth,
                           dam_id, sire_id, cage_id, origin, created_by)
-      VALUES (current_farm_id(), $1, $2, $3, COALESCE($4,'breeder')::rabbit_role_t,
+      VALUES (COALESCE($12::uuid, gen_random_uuid()),
+              current_farm_id(), $1, $2, $3, COALESCE($4,'breeder')::rabbit_role_t,
               $5, $6, $7, $8, $9, COALESCE($10,'born_here')::origin_t, $11)
       RETURNING id, tag, name, sex, role`,
       [(b.tag ?? name).trim(), name, sex, b.role ?? null, b.breed_id ?? null,
        b.date_of_birth ?? null, b.dam_id ?? null, b.sire_id ?? null,
-       b.cage_id ?? null, b.origin ?? null, session.employeeId]);
+       b.cage_id ?? null, b.origin ?? null, session.employeeId, b.id ?? null]);
     return rows[0];
   });
   return c.json({ animal: row }, 201);
@@ -183,15 +184,16 @@ farmRoutes.post('/matings', write, async (c) => {
 
   const row = await db(async (client) => {
     const { rows } = await client.query(`
-      INSERT INTO mating (farm_id, doe_id, buck_id, mated_at, service_count,
+      INSERT INTO mating (id, farm_id, doe_id, buck_id, mated_at, service_count,
                           service_observed, receptivity, notes, recorded_by)
-      VALUES (current_farm_id(), $1, $2, COALESCE($3::timestamptz, now()),
+      VALUES (COALESCE($9::uuid, gen_random_uuid()),
+              current_farm_id(), $1, $2, COALESCE($3::timestamptz, now()),
               COALESCE($4,1), COALESCE($5,true),
               COALESCE($6,'unknown')::receptivity_t, $7, $8)
       RETURNING id, doe_id, buck_id, mated_at`,
       [b.doe_id, b.buck_id ?? null, b.mated_at ?? null, b.service_count ?? null,
        b.service_observed ?? null, b.receptivity ?? null, b.notes ?? null,
-       session.employeeId]);
+       session.employeeId, b.id ?? null]);
 
     // Give the answer back immediately — the farmer wants the dates, not an id.
     const { rows: sched } = await client.query(`
@@ -218,12 +220,13 @@ farmRoutes.post('/pregnancy-checks', write, async (c) => {
 
   const row = await db(async (client) => {
     const { rows } = await client.query(`
-      INSERT INTO pregnancy_check (mating_id, checked_on, method, result, checked_by, notes)
-      VALUES ($1, COALESCE($2::date, current_date),
+      INSERT INTO pregnancy_check (id, mating_id, checked_on, method, result, checked_by, notes)
+      VALUES (COALESCE($7::uuid, gen_random_uuid()),
+              $1, COALESCE($2::date, current_date),
               COALESCE($3,'palpation')::check_method_t, $4::check_result_t, $5, $6)
       RETURNING id, checked_on, result`,
       [b.mating_id, b.checked_on ?? null, b.method ?? null, b.result,
-       session.employeeId, b.notes ?? null]);
+       session.employeeId, b.notes ?? null, b.id ?? null]);
 
     // Keep the cached projection on mating in step with the check just written.
     await client.query(`
@@ -248,13 +251,15 @@ farmRoutes.post('/litters', write, async (c) => {
 
   const row = await db(async (client) => {
     const { rows } = await client.query(`
-      INSERT INTO litter (farm_id, mating_id, doe_id, nest_box_placed_on, kindled_on,
+      INSERT INTO litter (id, farm_id, mating_id, doe_id, nest_box_placed_on, kindled_on,
                           born_alive, born_dead, notes, recorded_by)
-      VALUES (current_farm_id(), $1, $2, $3, COALESCE($4::date, current_date),
+      VALUES (COALESCE($9::uuid, gen_random_uuid()),
+              current_farm_id(), $1, $2, $3, COALESCE($4::date, current_date),
               COALESCE($5,0), COALESCE($6,0), $7, $8)
       RETURNING id, kindled_on, born_alive, born_dead`,
       [b.mating_id ?? null, b.doe_id, b.nest_box_placed_on ?? null, b.kindled_on ?? null,
-       b.born_alive ?? null, b.born_dead ?? null, b.notes ?? null, session.employeeId]);
+       b.born_alive ?? null, b.born_dead ?? null, b.notes ?? null, session.employeeId,
+       b.id ?? null]);
 
     if (b.mating_id) {
       await client.query(
@@ -318,6 +323,19 @@ farmRoutes.post('/conditions', write, async (c) => {
   const db = c.get('db');
   const session = c.get('session');
 
+  // When it was actually seen, which is not when it was typed in. Someone
+  // notices wet fur at first feed and records it when they come off the shed
+  // floor an hour later; the 2-hourly reminder clock has to run from the
+  // observation or every reminder is an hour late all day.
+  const observedAt = b.observed_at ?? null;
+  if (observedAt !== null) {
+    const t = Date.parse(observedAt);
+    if (Number.isNaN(t)) throw new HttpError(400, 'observed_at is not a date');
+    if (t > Date.now() + 60_000) {
+      throw new HttpError(400, 'That is in the future', { field: 'observed_at' });
+    }
+  }
+
   const row = await db(async (client) => {
     const { rows: types } = await client.query(
       'SELECT id FROM condition_type WHERE code = $1 AND is_active',
@@ -325,12 +343,16 @@ farmRoutes.post('/conditions', write, async (c) => {
     if (!types.length) throw new HttpError(400, `Unknown condition "${b.code}"`);
 
     const { rows } = await client.query(`
-      INSERT INTO health_condition (farm_id, condition_type_id, rabbit_id, litter_id,
-                                    severity, notes, reported_by)
-      VALUES (current_farm_id(), $1, $2, $3, $4, $5, $6)
+      INSERT INTO health_condition (id, farm_id, condition_type_id, rabbit_id, litter_id,
+                                    severity, notes, reported_by,
+                                    started_at, last_checked_at)
+      VALUES (COALESCE($7::uuid, gen_random_uuid()),
+              current_farm_id(), $1, $2, $3, $4, $5, $6,
+              COALESCE($8::timestamptz, now()), COALESCE($8::timestamptz, now()))
       RETURNING id, started_at`,
       [types[0].id, b.rabbit_id ?? null, b.litter_id ?? null,
-       b.severity ?? 'moderate', b.notes ?? null, session.employeeId]);
+       b.severity ?? 'moderate', b.notes ?? null, session.employeeId, b.id ?? null,
+       observedAt]);
     return rows[0];
   });
   return c.json({ condition: row }, 201);
