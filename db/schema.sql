@@ -974,6 +974,15 @@ CREATE TYPE invoice_status_t AS ENUM ('draft', 'due', 'paid', 'failed', 'refunde
 -- One plan, sold two ways: ₹99/month or ₹999/year, after a 30-day full-access
 -- trial. The limit columns stay NULL (unlimited) — they are kept so a tier can
 -- be introduced later without a migration, not because anything is capped today.
+--
+-- ₹99 is INTRODUCTORY. Two rules follow, and both matter:
+--
+--   1. Plan rows are immutable price points. Raising the price means INSERTing a
+--      new row and setting available_until on the old one — never UPDATEing a
+--      price in place, because existing subscriptions point at these rows.
+--   2. The price is also snapshotted onto the subscription at signup. That is
+--      the belt-and-braces: even if someone does edit a plan row by hand, no
+--      existing customer is silently repriced.
 CREATE TABLE plan (
     id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     code               text UNIQUE NOT NULL,
@@ -987,6 +996,12 @@ CREATE TABLE plan (
     price_monthly_paise int NOT NULL,
     price_yearly_paise  int NOT NULL,
     features           jsonb NOT NULL DEFAULT '{}'::jsonb,
+    -- Shown on the pricing page as "Introductory pricing".
+    is_introductory    boolean NOT NULL DEFAULT false,
+    -- The window in which NEW signups may take this price. Closing it does not
+    -- affect anyone already on it.
+    available_from     date NOT NULL DEFAULT current_date,
+    available_until    date,
     is_public          boolean NOT NULL DEFAULT true,
     sort_order         int NOT NULL DEFAULT 0
 );
@@ -1001,7 +1016,19 @@ CREATE TABLE subscription (
     current_period_start    date,
     current_period_end      date,
     grace_until             date,
+    -- Price snapshotted at signup. This is what the farm actually pays for as
+    -- long as the subscription lives, regardless of what the plan row later
+    -- says. Grandfathering an introductory price is not a promise you keep by
+    -- remembering — it is one you keep by storing the number.
+    locked_price_monthly_paise int,
+    locked_price_yearly_paise  int,
+    price_locked_at            timestamptz,
     gateway                 text,                 -- razorpay
+    -- Set the UPI Autopay mandate MAXIMUM well above the amount charged (a few
+    -- thousand rupees is still under the ₹15,000 no-OTP threshold). The mandate
+    -- max cannot be raised without the customer re-authorising, so headroom
+    -- costs nothing now and avoids re-onboarding every customer later.
+    gateway_mandate_max_paise int,
     gateway_subscription_id text,
     cancelled_at            timestamptz,
     cancel_reason           text,
@@ -1027,7 +1054,19 @@ CREATE TABLE invoice (
 );
 CREATE INDEX invoice_farm_idx ON invoice (farm_id, issued_on DESC);
 
--- What a farm may do right now, and how close it is to its plan limits.
+-- What a NEW signup would pay today. Exactly one row while a single plan is on
+-- sale; the pricing page reads from here rather than hard-coding ₹99 anywhere.
+CREATE OR REPLACE VIEW v_current_public_plan AS
+SELECT *
+FROM plan
+WHERE is_public
+  AND available_from <= current_date
+  AND (available_until IS NULL OR available_until >= current_date)
+ORDER BY sort_order;
+
+
+-- What a farm may do right now, what it actually pays, and how close it is to
+-- any plan limits.
 --
 -- Note what NEVER degrades: reminders. A farm past due, in grace or suspended
 -- still gets its nest-box and loose-motion alerts. They cost almost nothing to
@@ -1065,10 +1104,32 @@ SELECT
     (p.max_breeding_does IS NOT NULL
      AND d.breeding_does_used >= p.max_breeding_does) AS at_doe_limit,
     (p.max_staff_seats IS NOT NULL
-     AND e.staff_seats_used >= p.max_staff_seats)     AS at_seat_limit
+     AND e.staff_seats_used >= p.max_staff_seats)     AS at_seat_limit,
+    -- What this farm actually pays: the snapshot taken at signup, falling back
+    -- to the plan row only when no snapshot exists.
+    CASE s.billing_period
+        WHEN 'monthly' THEN COALESCE(s.locked_price_monthly_paise, p.price_monthly_paise)
+        WHEN 'yearly'  THEN COALESCE(s.locked_price_yearly_paise,  p.price_yearly_paise)
+    END AS effective_price_paise,
+    -- What the same subscription would cost a new customer signing up today.
+    CASE s.billing_period
+        WHEN 'monthly' THEN cur.price_monthly_paise
+        WHEN 'yearly'  THEN cur.price_yearly_paise
+    END AS current_list_price_paise,
+    -- True once the list price has risen above what this farm locked in.
+    (CASE s.billing_period
+        WHEN 'monthly' THEN COALESCE(s.locked_price_monthly_paise, p.price_monthly_paise)
+                              < cur.price_monthly_paise
+        WHEN 'yearly'  THEN COALESCE(s.locked_price_yearly_paise, p.price_yearly_paise)
+                              < cur.price_yearly_paise
+     END) AS is_grandfathered
 FROM farm f
 LEFT JOIN subscription s ON s.farm_id = f.id
 LEFT JOIN plan p         ON p.id = s.plan_id
+LEFT JOIN LATERAL (
+    SELECT price_monthly_paise, price_yearly_paise
+    FROM v_current_public_plan LIMIT 1
+) cur ON true
 CROSS JOIN LATERAL (
     SELECT count(*)::int AS breeding_does_used
     FROM rabbit r

@@ -515,15 +515,18 @@ END $$;
 -- One plan, two billing periods: ₹99/month or ₹999/year, after a 30-day
 -- full-access trial. No caps on does or staff.
 INSERT INTO plan (id, code, name, max_breeding_does, max_staff_seats,
-                  price_monthly_paise, price_yearly_paise, sort_order)
-VALUES ('f0000000-0000-0000-0000-000000000001', 'standard', 'Rabbitry',
-        NULL, NULL, 9900, 99900, 1);
+                  price_monthly_paise, price_yearly_paise, is_introductory, sort_order)
+VALUES ('f0000000-0000-0000-0000-000000000001', 'intro-2026', 'Rabbitry',
+        NULL, NULL, 9900, 99900, true, 1);
 
--- Signed up 18 days ago, so 12 days of trial left.
-INSERT INTO subscription (farm_id, plan_id, status, billing_period, trial_ends_on)
+-- Signed up 18 days ago, so 12 days of trial left. The price is snapshotted
+-- onto the subscription at signup, which is what makes grandfathering real.
+INSERT INTO subscription (farm_id, plan_id, status, billing_period, trial_ends_on,
+                          locked_price_monthly_paise, locked_price_yearly_paise,
+                          price_locked_at, gateway_mandate_max_paise)
 VALUES ('11111111-1111-1111-1111-111111111111',
         'f0000000-0000-0000-0000-000000000001', 'trialing', 'yearly',
-        current_date + 12);
+        current_date + 12, 9900, 99900, now(), 500000);
 
 DO $$
 DECLARE
@@ -545,16 +548,64 @@ END $$;
 
 DO $$
 DECLARE
-    m int; y int; ratio numeric;
+    m int; y int; ratio numeric; intro boolean;
 BEGIN
-    SELECT price_monthly_paise, price_yearly_paise INTO m, y FROM plan WHERE code = 'standard';
+    SELECT price_monthly_paise, price_yearly_paise, is_introductory
+      INTO m, y, intro
+    FROM v_current_public_plan;
     ratio := round(y::numeric / m, 1);
 
     IF (m, y) IS DISTINCT FROM (9900, 99900) THEN
         RAISE EXCEPTION 'PRICE FAIL: expected ₹99 / ₹999, got % / % paise', m, y;
     END IF;
-    RAISE NOTICE 'ok  pricing: ₹% monthly, ₹% yearly (% months — 2 months free)',
+    IF NOT intro THEN
+        RAISE EXCEPTION 'PRICE FAIL: launch plan must be flagged introductory';
+    END IF;
+    RAISE NOTICE 'ok  pricing: ₹% monthly, ₹% yearly (% months), flagged introductory',
         m/100, y/100, ratio;
+END $$;
+
+-- The test this whole mechanism exists for: raising the price must not touch a
+-- single existing customer.
+DO $$
+DECLARE
+    paying int; list int; grand boolean; new_list int;
+BEGIN
+    -- Close the introductory offer and publish a new price point as a NEW row.
+    UPDATE plan SET available_until = current_date - 1, is_public = false
+     WHERE code = 'intro-2026';
+    INSERT INTO plan (code, name, max_breeding_does, max_staff_seats,
+                      price_monthly_paise, price_yearly_paise, sort_order)
+    VALUES ('standard-2027', 'Rabbitry', NULL, NULL, 24900, 249000, 1);
+
+    SELECT effective_price_paise, current_list_price_paise, is_grandfathered
+      INTO paying, list, grand
+    FROM v_farm_entitlement;
+
+    -- Existing farm is on the yearly cycle and must still pay ₹999.
+    IF paying <> 99900 THEN
+        RAISE EXCEPTION 'GRANDFATHER FAIL: existing farm repriced to ₹%', paying/100;
+    END IF;
+    IF list <> 249000 OR NOT grand THEN
+        RAISE EXCEPTION 'GRANDFATHER FAIL: expected list ₹2490 and grandfathered, got ₹% / %',
+            list/100, grand;
+    END IF;
+
+    -- A new signup today gets the new price, and only one plan is on sale.
+    SELECT price_yearly_paise INTO new_list FROM v_current_public_plan;
+    IF new_list <> 249000 THEN
+        RAISE EXCEPTION 'GRANDFATHER FAIL: new signup should see ₹2490, got ₹%', new_list/100;
+    END IF;
+    IF (SELECT count(*) FROM v_current_public_plan) <> 1 THEN
+        RAISE EXCEPTION 'GRANDFATHER FAIL: exactly one plan should be on sale';
+    END IF;
+
+    RAISE NOTICE 'ok  price raised to ₹%/yr for new signups; existing farm still pays ₹% (grandfathered)',
+        new_list/100, paying/100;
+
+    -- Restore for the remaining assertions.
+    DELETE FROM plan WHERE code = 'standard-2027';
+    UPDATE plan SET available_until = NULL, is_public = true WHERE code = 'intro-2026';
 END $$;
 
 DO $$

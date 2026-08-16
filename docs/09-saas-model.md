@@ -91,12 +91,52 @@ Worth holding on to, because at ₹99 you are pricing well below all of them.
 | | |
 |---|---|
 | **Trial** | 30 days, **full access**, no card |
-| **Monthly** | **₹99** |
-| **Yearly** | **₹999** |
+| **Monthly** | **₹99** — introductory |
+| **Yearly** | **₹999** — introductory |
 | Limits | None. Unlimited does, unlimited staff |
 
 Yearly works out at 10.1 months — effectively two months free — which is the
 right shape.
+
+### Introductory pricing: say it, and mean it
+
+"Introductory pricing" appears on the pricing page and in the app from day one.
+Two commitments come with that word, and both are cheap now and impossible to
+retrofit later.
+
+**1. Existing customers keep their price, forever.** This is a promise you keep
+by *storing the number*, not by remembering. Two mechanisms, deliberately
+belt-and-braces:
+
+- **Plan rows are immutable price points.** Raising the price means inserting a
+  *new* plan row and setting `available_until` on the old one. Never `UPDATE` a
+  price in place — existing subscriptions point at these rows.
+- **The price is snapshotted onto the subscription at signup**
+  (`locked_price_monthly_paise`, `locked_price_yearly_paise`, `price_locked_at`).
+  So even if someone edits a plan row by hand at 2am, no existing customer is
+  silently repriced.
+
+`v_farm_entitlement` exposes `effective_price_paise` (what this farm pays),
+`current_list_price_paise` (what a new signup pays) and `is_grandfathered`. There
+is a test asserting that raising the list price to ₹2,490 leaves an existing farm
+paying ₹999.
+
+Tell grandfathered customers, too. *"You joined on our introductory price and you
+keep it"* is one of the cheapest loyalty messages in existence, and it makes the
+eventual price rise a reason to stay rather than a reason to leave.
+
+**2. Set the UPI mandate maximum far above the charge.** This is the operational
+detail that will otherwise bite you.
+
+A UPI Autopay mandate is authorised with a **maximum amount**, and you can never
+debit above it. Raise the mandate max and every customer has to re-authorise —
+which in practice means most of them silently don't, and you lose them.
+
+So register the mandate at a few thousand rupees while charging ₹99 or ₹999.
+Recurring debits stay OTP-free up to **₹15,000** under the RBI e-mandate
+framework, so headroom is free. Note also that a **pre-debit notification is
+mandatory 24 hours before** each debit — Razorpay handles the sending, but the
+amount you notify must match what you charge.
 
 **Quote both prices GST-inclusive.** SaaS carries 18% GST in India and most of
 your customers will be unregistered smallholders who cannot reclaim it. At ₹99 a
@@ -149,12 +189,12 @@ Three honest consequences:
    the same engine with different constants, and a vastly larger market. At ₹99
    flat, broadening the species is the growth path rather than a nice-to-have.
    Take that schema decision now.
-3. **Decide whether ₹99 is a launch price or the forever price.** Launching low
-   to remove friction and win the first few hundred farms is a perfectly good
-   strategy, and raising prices later for *new* customers while grandfathering
-   existing ones is normal and accepted. Going the other way is not. If you think
-   ₹99 might be temporary, say "introductory pricing" on the site from day one —
-   it costs nothing now and buys you the option later.
+3. **₹99 is introductory, and that is now built in.** Launching low removes
+   essentially all purchase friction, which matters enormously for a first
+   product with no reputation. The grandfathering machinery above means you can
+   raise the price for new customers whenever the product has earned it, without
+   touching anyone already paying — so the low launch price costs you the option
+   on nothing.
 
 There is also a tension worth seeing clearly: you have built a **commercial farm
 operations tool** — staff, accountability, medication rounds — and priced it at
@@ -186,7 +226,8 @@ collecting and not collecting from a smallholder.
 | Mandate | UPI Autopay first, e-NACH fallback, card for those who prefer it |
 | Retries | Razorpay's retry scheduling; then your own dunning emails/SMS |
 | Invoices | GST-compliant, sequential numbering, your GSTIN, downloadable |
-| Switching cycle | Monthly ↔ yearly at the next renewal. With one plan there is nothing else to change |
+| Switching cycle | Monthly ↔ yearly at the next renewal, at the farm's locked-in prices |
+| Mandate max | Register a few thousand rupees of headroom. It can never be raised without the customer re-authorising |
 | Refunds | Published policy; at ₹99 a no-questions refund window costs you almost nothing and buys real trust |
 | Minimums | Check Razorpay's per-transaction floor against a ₹99 ticket — another reason to steer people to the ₹999 annual |
 
@@ -329,6 +370,7 @@ Not advice — a checklist to take to someone qualified:
 | Metric | Why |
 |---|---|
 | Trial → paid conversion | The health of onboarding. At ₹99 this is the whole business |
+| Share of farms on the introductory price | Tells you what a price rise would and would not touch |
 | Annual share of new subscriptions | Target > 60%. Monthly mandates at ₹99 cost more to chase than they collect |
 | Activation rate (10 animals + 1 event in 7 days) | Predicts conversion better than anything else |
 | Monthly churn | Under 3% is healthy; over 7% means the product is not sticking |
@@ -370,15 +412,17 @@ India does not have a thousand commercial rabbit farms that buy software. It
 does have a great many goat farms. **Take the schema decision now**, build the
 species later.
 
-**2. Is ₹99 a launch price or the forever price?**
+**2. When do you raise the introductory price?**
 
-At one flat price the segmentation question resolves itself — you are selling to
-everyone at hobbyist money. That is a legitimate volume strategy, and ₹99 removes
-essentially all purchase friction, which matters enormously for a first product
-with no reputation.
+Decided: ₹99 is introductory, grandfathering is built, so the *when* is now a
+judgement call rather than an architectural one. Reasonable triggers:
 
-But decide *now* whether it is introductory. Raising prices later for new
-customers while grandfathering existing ones is normal and accepted; lowering
-them is easy but going back up is not. If there is any chance ₹99 is temporary,
-label it **introductory pricing** on the site from day one. It costs nothing
-today and preserves the option.
+- **Around 200–300 paying farms**, once you have testimonials and the churn
+  number is known.
+- **When a second species ships.** A goat farmer arriving at a broader product is
+  a natural moment for a new price point, and rabbit customers keep theirs.
+- **Not before support is genuinely self-serve.** Raising the price while
+  onboarding still needs hand-holding just raises expectations you cannot meet.
+
+When you do it, tell existing customers *before* they hear it elsewhere, and lead
+with the fact that their own price is unchanged.
