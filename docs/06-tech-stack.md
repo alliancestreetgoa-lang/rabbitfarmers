@@ -9,7 +9,7 @@
 | **Local database** | **SQLite** on device (`expo-sqlite` or WatermelonDB) | Offline-first is a hard requirement, not a feature |
 | **Sync** | **PowerSync** or a custom outbox queue over your API | Bidirectional sync with conflict handling |
 | **API layer** | Next.js route handlers or Hono on **Vercel / Cloudflare Workers** | Neon is a database, not a backend — this is the part Supabase would have given you |
-| **Auth** | **Clerk** (phone OTP), issuing JWTs that Neon RLS validates | Farm workers have phone numbers, not reliably email addresses |
+| **Auth** | **Email + password**, no verification — via Clerk/Auth0, or self-hosted with `user_session`. Issues JWTs that Neon RLS validates | Signup friction costs signups; see [10-admin-console.md](10-admin-console.md) |
 | **Row-level security** | **Neon RLS** via `pg_session_jwt`, `auth.user_id()` | Tenant isolation enforced in the database, not the application |
 | **File storage** | **Cloudflare R2** (or S3) | Neon has no object store; photos need one, with per-farm scoping |
 | **Business logic** | PostgreSQL views and functions for state derivation | Every client gets identical answers to "who is pregnant" |
@@ -116,7 +116,7 @@ land an enterprise customer who contractually demands physical isolation.
 │    UI  →  local SQLite  →  sync outbox queue         │
 │    Works fully offline. Queue drains when online.    │
 └───────────────┬──────────────────────────────────────┘
-                │ HTTPS, JWT from Clerk
+                │ HTTPS, JWT from the auth provider
 ┌───────────────▼──────────────────────────────────────┐
 │  API — Vercel / Cloudflare Workers                   │
 │    sync endpoints · entitlement checks               │
@@ -127,9 +127,11 @@ land an enterprise customer who contractually demands physical isolation.
 │  Neon — serverless PostgreSQL                        │
 │    tables:  farm, rabbit, mating, litter, task,      │
 │             employee, health_condition,              │
-│             subscription, invoice …                  │
+│             subscription, invoice, user_session,     │
+│             platform_admin, admin_audit_log …        │
 │    views:   v_doe_reproductive_state, v_daily_list,  │
-│             v_ready_to_mate, v_farm_entitlement      │
+│             v_ready_to_mate, v_farm_entitlement,     │
+│             v_admin_farm_overview                    │
 │    RLS:     pg_session_jwt → auth.user_id()          │
 │    branches: one per pull request + staging          │
 └──────────────────────────────────────────────────────┘
@@ -145,7 +147,8 @@ land an enterprise customer who contractually demands physical isolation.
                    │ wakes Neon, runs the SQL
                    └──────────────► Neon
 
-   Clerk — phone OTP, issues the JWT
+   Auth — email + password, issues the JWT
+   Admin CRM — separate domain, RLS-bypassing role, every action audited
    Cloudflare R2 — animal photos, per-farm scoped
    Razorpay — UPI Autopay / e-NACH subscriptions
 ```
@@ -180,10 +183,10 @@ before anyone pays you.
 | Neon Free (0.5 GB, fine for building and the first customers) | $0 |
 | Neon Launch (when you outgrow it — autoscaling, PITR, branches) | ~$19 |
 | Vercel or Cloudflare Workers (API + cron) | $0–$20 |
-| Clerk auth (free to ~10k monthly active users) | $0–$25 |
+| Auth provider, e.g. Clerk (free to ~10k monthly active users) | $0–$25 |
 | Cloudflare R2 (photos; no egress fees, which matters) | ~$1–5 |
 | Expo EAS build & OTA updates | $0–$19 |
-| SMS OTP in India (~₹0.15–0.25 per message, MSG91 or similar) | usage |
+| SMS for password reset (~₹0.15–0.25 per message, MSG91 or similar) | usage |
 | Razorpay | ~2% per transaction, no monthly fee (₹2 on ₹99, ₹20 on ₹999) |
 | Google Play developer account | $25 one-off |
 | Domain + landing page | ~$15/yr |
@@ -195,9 +198,9 @@ storage, so compress on device before upload.
 
 Two costs that surprise people, and both bite hard at a ₹99 price point:
 
-- **SMS OTP** is a real per-signup expense in India (~₹0.15–0.25 a message) and a
-  bot-signup vector. Rate-limit it, or a scripted signup flood costs you money
-  directly.
+- **Unverified signup is free to abuse.** A 30-day trial with no card and no
+  verification is trivially farmed. It costs compute rather than money, but a
+  thousand junk farms makes the admin console useless — rate-limit signups per IP.
 - **Support time** is your largest cost by far and appears on no invoice. At ₹82
   net per farm per month, roughly five minutes of WhatsApp is the entire margin.
   This is the real argument for spending the extra week on onboarding.
@@ -211,7 +214,8 @@ For one competent full-stack mobile developer:
 | Phase | Effort |
 |---|---|
 | MVP for one farm (animals, breeding cycle, ready-to-mate, daily tab, medication protocols, health conditions, tasks, employees, attendance, offline sync) | **10–14 weeks** |
-| **SaaS layer** (signup, onboarding templates, one plan + Razorpay, trial/grace handling, RLS hardening, cross-tenant tests, admin console) | **+3–5 weeks** |
+| **SaaS layer** (signup, onboarding templates, one plan + Razorpay, trial/grace handling, RLS hardening, cross-tenant tests) | **+3–5 weeks** |
+| **Super-admin CRM** (farm list, subscription controls, audit log, impersonation, revenue screen) | **+2 weeks** |
 | Phase 2 (vaccination, feed, weights, reports, web dashboard) | 6–8 weeks |
 | Phase 3 (sales, finance, payroll, pedigree certificates) | 6–8 weeks |
 

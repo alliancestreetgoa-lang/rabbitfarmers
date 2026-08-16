@@ -13,8 +13,11 @@
 
 BEGIN;
 
-INSERT INTO farm (id, name, timezone)
-VALUES ('11111111-1111-1111-1111-111111111111', 'Test Rabbitry', 'Asia/Kolkata');
+-- Signup collects exactly four things plus the farm name: email, phone,
+-- address, password. No verification step — the account is usable immediately.
+INSERT INTO farm (id, name, timezone, address_line, city, state, pincode, country)
+VALUES ('11111111-1111-1111-1111-111111111111', 'Test Rabbitry', 'Asia/Kolkata',
+        'Survey 42, Curtorim', 'Margao', 'Goa', '403709', 'IN');
 
 -- Defaults are this farm's real rhythm: wean (separate the kits) 30 days after
 -- kindling, rebreed 3 days after weaning.
@@ -27,6 +30,13 @@ VALUES ('22222222-2222-2222-2222-222222222222',
 INSERT INTO shed (id, farm_id, name)
 VALUES ('33333333-3333-3333-3333-333333333333',
         '11111111-1111-1111-1111-111111111111', 'Shed A');
+
+-- The owner account created by that signup. email_verified_at stays NULL:
+-- verification is deliberately off.
+INSERT INTO employee (id, farm_id, full_name, email, phone, role, password_hash)
+VALUES ('99999999-9999-9999-9999-999999999999',
+        '11111111-1111-1111-1111-111111111111', 'Farm Owner',
+        'Owner@TestRabbitry.in', '+919876543210', 'owner', '$argon2id$dummy');
 
 -- --------------------------------------------------------------------------
 -- The two medication courses this farm runs.
@@ -664,6 +674,175 @@ BEGIN
         RAISE EXCEPTION 'TRIAL EXPIRY FAIL: expired farm must not have animals hidden';
     END IF;
     RAISE NOTICE 'ok  trial expired: read_only, all animals still visible and exportable';
+END $$;
+
+-- --- Signup, sign in, sign out ----------------------------------------------
+DO $$
+DECLARE
+    e text; ph text; addr text; verified timestamptz;
+BEGIN
+    SELECT em.email, em.phone, f.address_line || ', ' || f.city || ' ' || f.pincode,
+           em.email_verified_at
+      INTO e, ph, addr, verified
+    FROM employee em JOIN farm f ON f.id = em.farm_id
+    WHERE em.role = 'owner';
+
+    IF e IS NULL OR ph IS NULL OR addr IS NULL THEN
+        RAISE EXCEPTION 'SIGNUP FAIL: email/phone/address must all be captured';
+    END IF;
+    IF verified IS NOT NULL THEN
+        RAISE EXCEPTION 'SIGNUP FAIL: no verification step should have run';
+    END IF;
+    RAISE NOTICE 'ok  signup: %, %, % — unverified, usable immediately', e, ph, addr;
+END $$;
+
+DO $$
+DECLARE
+    n int;
+BEGIN
+    -- Email is case-insensitive: the same login however it is typed.
+    SELECT count(*) INTO n FROM employee WHERE email = 'owner@testrabbitry.in';
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'LOGIN FAIL: case-insensitive email lookup returned %', n;
+    END IF;
+
+    BEGIN
+        INSERT INTO employee (farm_id, full_name, email, phone)
+        VALUES ('11111111-1111-1111-1111-111111111111', 'Impostor',
+                'OWNER@testrabbitry.IN', '+910000000000');
+        RAISE EXCEPTION 'LOGIN FAIL: duplicate email in another case was accepted';
+    EXCEPTION WHEN unique_violation THEN
+        NULL;  -- expected
+    END;
+    RAISE NOTICE 'ok  login identity: email is case-insensitive and unique';
+END $$;
+
+DO $$
+DECLARE
+    live int;
+BEGIN
+    -- Sign in on two devices.
+    INSERT INTO user_session (employee_id, token_hash, expires_at, device)
+    VALUES ('99999999-9999-9999-9999-999999999999', 'hash-phone', now() + interval '30 days', 'Redmi Note 12'),
+           ('99999999-9999-9999-9999-999999999999', 'hash-web',   now() + interval '30 days', 'Chrome, laptop');
+
+    SELECT count(*) INTO live FROM v_active_session
+     WHERE employee_id = '99999999-9999-9999-9999-999999999999';
+    IF live <> 2 THEN
+        RAISE EXCEPTION 'SESSION FAIL: expected 2 live sessions, got %', live;
+    END IF;
+
+    -- Sign out on the phone only.
+    UPDATE user_session SET revoked_at = now(), revoked_reason = 'sign out'
+     WHERE token_hash = 'hash-phone';
+
+    SELECT count(*) INTO live FROM v_active_session
+     WHERE employee_id = '99999999-9999-9999-9999-999999999999';
+    IF live <> 1 THEN
+        RAISE EXCEPTION 'SESSION FAIL: sign-out left % live sessions', live;
+    END IF;
+    -- The revoked row is kept, so "who was signed in when" stays answerable.
+    IF (SELECT count(*) FROM user_session
+        WHERE employee_id = '99999999-9999-9999-9999-999999999999') <> 2 THEN
+        RAISE EXCEPTION 'SESSION FAIL: sign-out must revoke, not delete';
+    END IF;
+    RAISE NOTICE 'ok  sign in on 2 devices, sign out revokes one and keeps the record';
+END $$;
+
+-- --- Super-admin CRM ---------------------------------------------------------
+DO $$
+DECLARE
+    r record;
+BEGIN
+    INSERT INTO platform_admin (id, email, full_name, role)
+    VALUES ('aaaa0000-0000-0000-0000-00000000000a', 'me@rabbitryapp.in',
+            'Super Admin', 'superadmin');
+
+    SELECT * INTO r FROM v_admin_farm_overview
+     WHERE farm_id = '11111111-1111-1111-1111-111111111111';
+
+    IF r.owner_email IS NULL OR r.owner_phone IS NULL OR r.city IS NULL THEN
+        RAISE EXCEPTION 'ADMIN FAIL: console must show owner contact and address';
+    END IF;
+    IF r.breeding_does <> 14 OR r.staff_count < 1 THEN
+        RAISE EXCEPTION 'ADMIN FAIL: expected 14 does and staff, got % / %',
+            r.breeding_does, r.staff_count;
+    END IF;
+    IF r.last_activity_at IS NULL THEN
+        RAISE EXCEPTION 'ADMIN FAIL: last activity must be computed';
+    END IF;
+    RAISE NOTICE 'ok  admin console: % (%) — % · % does · % staff · plan % · pays ₹%',
+        r.farm_name, r.city, r.owner_email, r.breeding_does, r.staff_count,
+        r.plan_code, r.effective_price_paise/100;
+END $$;
+
+DO $$
+DECLARE
+    before_status text; after_status text; logged int;
+BEGIN
+    -- A support action: extend the trial by 15 days, with the before/after and
+    -- a reason written to the audit log.
+    SELECT status::text INTO before_status FROM subscription
+     WHERE farm_id = '11111111-1111-1111-1111-111111111111';
+
+    UPDATE subscription
+       SET status = 'trialing', trial_ends_on = current_date + 15
+     WHERE farm_id = '11111111-1111-1111-1111-111111111111';
+
+    INSERT INTO admin_audit_log (admin_id, action, target_farm_id, target_table,
+                                 before_value, after_value, reason)
+    VALUES ('aaaa0000-0000-0000-0000-00000000000a', 'extend_trial',
+            '11111111-1111-1111-1111-111111111111', 'subscription',
+            jsonb_build_object('status', before_status),
+            jsonb_build_object('status', 'trialing', 'trial_ends_on', current_date + 15),
+            'Customer asked for more time to migrate paper records');
+
+    SELECT count(*) INTO logged FROM admin_audit_log
+     WHERE target_farm_id = '11111111-1111-1111-1111-111111111111';
+    IF logged <> 1 THEN
+        RAISE EXCEPTION 'AUDIT FAIL: expected 1 logged admin action, got %', logged;
+    END IF;
+
+    SELECT access INTO after_status FROM v_farm_entitlement;
+    IF after_status <> 'full' THEN
+        RAISE EXCEPTION 'AUDIT FAIL: extended trial should restore full access, got %', after_status;
+    END IF;
+    RAISE NOTICE 'ok  admin extended trial, access back to %, action logged with reason', after_status;
+END $$;
+
+DO $$
+DECLARE
+    s record;
+BEGIN
+    SELECT * INTO s FROM v_admin_revenue_summary;
+    IF s.trialing <> 1 THEN
+        RAISE EXCEPTION 'REVENUE FAIL: expected 1 trialing farm, got %', s.trialing;
+    END IF;
+    -- Trials are not revenue, so MRR must still be zero.
+    IF s.mrr_paise <> 0 THEN
+        RAISE EXCEPTION 'REVENUE FAIL: a trial must not count toward MRR, got %', s.mrr_paise;
+    END IF;
+    RAISE NOTICE 'ok  revenue summary: % trialing, % active, MRR ₹% (trials excluded)',
+        s.trialing, s.active, s.mrr_paise/100;
+END $$;
+
+DO $$
+DECLARE
+    mrr bigint;
+BEGIN
+    -- Convert to a paying yearly customer at the grandfathered ₹999.
+    UPDATE subscription
+       SET status = 'active', trial_ends_on = NULL,
+           current_period_start = current_date, current_period_end = current_date + 365
+     WHERE farm_id = '11111111-1111-1111-1111-111111111111';
+
+    SELECT mrr_paise INTO mrr FROM v_admin_revenue_summary;
+    -- ₹999/year normalised to a month = 8325 paise.
+    IF mrr <> round(99900 / 12.0) THEN
+        RAISE EXCEPTION 'REVENUE FAIL: yearly ₹999 should normalise to % paise/month, got %',
+            round(99900/12.0), mrr;
+    END IF;
+    RAISE NOTICE 'ok  yearly ₹999 normalises to ₹%/month of MRR', round(mrr/100.0, 2);
 END $$;
 
 DO $$ BEGIN RAISE NOTICE 'ALL CHECKS PASSED'; END $$;

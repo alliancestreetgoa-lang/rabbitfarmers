@@ -1,0 +1,175 @@
+# 10 — Signup, Sign-in, and the Super-Admin CRM
+
+Two separate things that are easy to confuse, and dangerous to merge:
+
+- **Farm accounts** — the farmers who sign up and pay. Scoped to one farm, RLS
+  enforced, cannot see anything outside it.
+- **Platform admins** — you and whoever helps you run the business. No farm, no
+  tenant scope, a separate login, and every action logged.
+
+Keeping them in separate tables with separate logins is deliberate. Making a
+support account "just an employee with extra permissions" is how a support login
+becomes a back door into every customer's data.
+
+---
+
+## Signup — four fields, no verification
+
+Exactly what gets collected:
+
+| Field | Notes |
+|---|---|
+| **Email** | The login identity. Stored `citext`, so `Ravi@Farm.in` and `ravi@farm.in` are one account |
+| **Phone** | Contact, and the fallback channel for password reset |
+| **Address** | Also what a GST invoice needs, so it is not a wasted field |
+| **Password** | Argon2id or bcrypt. Never anything reversible |
+| Farm name | Needed to create the farm itself |
+
+**No verification.** No OTP, no confirmation email, no waiting. Fill the form,
+land in the app, 30-day trial running. That is the whole point — every extra step
+between "interested" and "using it" costs signups, and at ₹99 you need volume.
+
+The `email_verified_at` column exists and stays NULL. Verification can be
+switched on later without a migration if you ever want it.
+
+### The one consequence worth planning for
+
+Unverified email means **you cannot prove an email address belongs to the person
+using it**, and that shows up in exactly one place: *password reset*. A farmer who
+mistypes his email at signup and later forgets his password has no way back in,
+and it becomes a support ticket — which at ₹82 net per farm per month is expensive.
+
+Cheap fix that adds no signup friction: **send the reset code to the phone
+number**, which you are collecting anyway. Reset by SMS is not signup
+verification; it costs the farmer nothing at signup and gives you a recovery path.
+Offer email reset too for whoever typed theirs correctly.
+
+Two smaller things to handle while you are there:
+
+- **Rate-limit signups per IP.** A 30-day free trial with no card and no
+  verification is trivially farmed. It costs you compute rather than money, but a
+  thousand junk farms makes your admin console useless.
+- **Show the email back before submit.** A one-line "we will send receipts to
+  ravi@gmial.com — correct?" catches most typos at the only moment it is free to
+  fix them.
+
+---
+
+## Sign in and sign out
+
+| Action | Behaviour |
+|---|---|
+| **Sign in** | Email + password. Issues a session token; the app stores it and stays signed in |
+| **Stay signed in** | Default, and long — 30 days or more. Farm staff should never be typing a password in a shed |
+| **Sign out** | Revokes that one session. The row is kept, not deleted |
+| **Sign out everywhere** | Revokes every session for that user. Offer it after a password change |
+
+`user_session` stores a **hash** of the token, never the token, so a leaked
+database does not hand over live sessions. Revoked rows are retained so "who was
+signed in, on what, and when" is still answerable after an incident.
+
+> If you use Clerk or Auth0 for auth, they own this table's job and you can drop
+> `user_session` entirely. Worth considering even though you want email and
+> password rather than OTP: providers support email+password with verification
+> turned off, and you avoid owning password hashing, reset flows and breach
+> response. At ₹99 a farm you cannot afford a credential incident. The extra
+> fields — phone, address — live in your own tables either way.
+
+---
+
+## The super-admin CRM
+
+One console, at an address separate from the farmer-facing app.
+
+### What it shows
+
+`v_admin_farm_overview` — one row per farm:
+
+```
+FARM              CITY      OWNER                 PLAN        STATUS    PAYS    DOES  STAFF  LAST SEEN
+Sunrise Rabbitry  Margao    ravi@…    +9198…      intro-2026  active    ₹999/y   47     3     2h ago
+Green Acres       Belgaum   anil@…    +9199…      intro-2026  grace     ₹99/m    22     1     6d ago
+Hilltop Farm      Pune      s@…       +9197…      intro-2026  trialing  —        3      1     19d ago ⚠
+```
+
+Filter by status, plan, city, activity. Search by farm name, owner email or
+phone — support calls start with a phone number, so make that searchable.
+
+**`days_since_activity` is the most valuable column on the screen.** A farm that
+has written nothing in two weeks is churning whether or not it is still paying.
+That is your list of people to phone, and phoning them is the highest-return
+thing you will do all week.
+
+### What it lets you do
+
+| Action | Notes |
+|---|---|
+| Extend a trial | The most common support action. Give it a one-click 15-day button |
+| Change subscription status | Activate, suspend, cancel, reinstate |
+| Comp an account | Free for a case-study customer, a friend, a beta tester |
+| Change the plan or price | Assigns a different plan row; never edits a price in place |
+| Mark an invoice paid | For the customer who paid you by UPI directly |
+| Refund | Through Razorpay, recorded here |
+| Resend an invoice | GST invoices get lost; this is a weekly request |
+| Export a farm's data | For a customer asking, or a cancellation |
+| Impersonate ("view as") | Support only. Time-boxed, reason required, logged |
+| Delete a farm | Superadmin only, typed confirmation, soft delete first |
+
+### Roles
+
+| Role | Can |
+|---|---|
+| `superadmin` | Everything, including deletion and creating other admins |
+| `billing` | Subscriptions, invoices, refunds. No animal data |
+| `support` | Read farms, extend trials, impersonate read-only. No refunds |
+| `readonly` | Look, and nothing else. Good for an analyst or an investor demo |
+
+### Everything is logged
+
+`admin_audit_log` records admin, action, farm, before, after, reason and time.
+It is append-only.
+
+This is not bureaucracy. It is the only answer you will have when a customer says
+*"my subscription was cancelled and I didn't do it"* — and the only way to trust
+a second admin once you hire one. **Require a typed reason** for anything
+destructive; it takes four seconds and makes the log actually readable a year
+later.
+
+### Impersonation, carefully
+
+Being able to see a farm as its owner sees it turns a twenty-minute support call
+into a two-minute one. It is also, in effect, a master key.
+
+- **Read-only by default.** Write access is a separate, deliberate switch.
+- **Time-boxed** — expires after an hour, not when someone remembers to log out.
+- **Reason required**, stored on the session.
+- **Visible to the farm owner.** A line in their activity log saying support
+  viewed their account, and when. If you would be uncomfortable with them seeing
+  that, you should not be in there.
+
+### The revenue screen
+
+`v_admin_revenue_summary` gives farm counts by status, **MRR** with yearly
+subscriptions normalised to a monthly figure, how many farms are on old pricing
+(so you know what a price rise would and would not touch), and the count of
+paying farms that have gone quiet for two weeks.
+
+Trials are excluded from MRR. A trial is not revenue, and counting it flatters the
+number in exactly the way that leads to bad decisions.
+
+---
+
+## Security notes for the admin surface
+
+The console reaches across every tenant, so it is the highest-value target in the
+system.
+
+- **Separate domain or path**, not a hidden route in the farmer app.
+- **The admin connection uses a role that bypasses RLS.** That is the point of it —
+  which is precisely why farm-facing code must never use that role. Two different
+  database roles, two different connection strings, not a flag.
+- **Two-factor for admins.** You skipped verification for farmers deliberately;
+  do not skip it for the account that can read every farm.
+- **Alert on unusual admin activity** — bulk exports, many impersonations in an
+  hour, out-of-hours access. Alert yourself; you are the only one watching.
+- **Admin sessions expire fast** — hours, not the 30 days farm staff get.

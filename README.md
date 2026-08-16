@@ -13,9 +13,12 @@ The two questions this app exists to answer, instantly, from a phone in the shed
 Everything else — medication rounds, health alerts, feed, growth, sales, staff —
 supports those two.
 
-**Stack:** Expo (React Native) + Neon serverless PostgreSQL, Clerk for phone-OTP
-auth, Razorpay for subscriptions. See [docs/06-tech-stack.md](docs/06-tech-stack.md)
+**Stack:** Expo (React Native) + Neon serverless PostgreSQL, email-and-password
+sign-in, Razorpay for subscriptions. See [docs/06-tech-stack.md](docs/06-tech-stack.md)
 — including the scheduling trap that would silently stop every reminder.
+
+**Pricing:** 30-day full-access trial, then ₹99/month or ₹999/year — introductory,
+with grandfathering enforced in the schema.
 
 ## Status
 
@@ -37,6 +40,7 @@ app succeeds or fails.
 | [docs/07-roadmap.md](docs/07-roadmap.md) | Phased build plan and success metrics. |
 | [docs/08-open-questions.md](docs/08-open-questions.md) | Decisions needed from the farm owner before building. |
 | [docs/09-saas-model.md](docs/09-saas-model.md) | Pricing, plans, billing, tenant isolation, onboarding, go-to-market. |
+| [docs/10-admin-console.md](docs/10-admin-console.md) | Signup and sign-in, and the super-admin CRM for running every farm and subscription. |
 | [db/schema.sql](db/schema.sql) | Reference PostgreSQL schema for the MVP. |
 | [db/verify.sql](db/verify.sql) | Fixtures that prove the derived-state logic returns the right answers. |
 
@@ -45,8 +49,9 @@ app succeeds or fails.
 The schema is not just a sketch — it runs, and the logic is tested against the
 cases that break naive implementations: overdue pregnancy, pseudopregnancy,
 nursing doe, under-age doe, doe under veterinary hold, a medication course
-cancelled by an early kindling, a loose-motion reminder cycle, and a suspended
-subscription that must still fire its reminders.
+cancelled by an early kindling, a loose-motion reminder cycle, a suspended
+subscription that must still fire its reminders, and a price rise that must not
+touch a single existing customer.
 
 ```bash
 createdb rabbitfarm
@@ -54,7 +59,7 @@ psql -d rabbitfarm -v ON_ERROR_STOP=1 -f db/schema.sql
 psql -d rabbitfarm -v ON_ERROR_STOP=1 -f db/verify.sql
 ```
 
-Expected output ends with `ALL CHECKS PASSED` after 32 assertions. The fixtures
+Expected output ends with `ALL CHECKS PASSED` after 40 assertions. The fixtures
 roll back, so the database is left empty. Verified on PostgreSQL 16; Neon runs
 Postgres, so it applies unchanged.
 

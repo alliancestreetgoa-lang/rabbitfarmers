@@ -17,9 +17,8 @@ Cheap work that prevents expensive mistakes.
    with a precise list of what is missing. Both are wins.
 5. **Freeze the MVP scope in writing.** Everything else goes on a later-phase
    list that nobody is allowed to touch until the MVP is in daily use.
-6. **Decide the two structural questions** in
-   [09-saas-model.md](09-saas-model.md): rabbit-only or species-agnostic, and
-   hobbyist or commercial buyer. Both are cheap now and expensive after a
+6. **Decide the structural question** in [09-saas-model.md](09-saas-model.md):
+   rabbit-only, or species-agnostic from the start. Cheap now, expensive after a
    thousand farms are live.
 
 ---
@@ -66,18 +65,18 @@ Ship the SaaS layer during this season, not before it.
 
 ---
 
-## Phase 2 — SaaS layer (4–6 weeks, overlapping the season above)
+## Phase 2 — SaaS layer + admin CRM (5–7 weeks, overlapping the season above)
 
 See [09-saas-model.md](09-saas-model.md).
 
 | Sprint | Deliverable |
 |---|---|
-| 1 | Self-serve signup, phone OTP, farm creation, onboarding templates |
+| 1 | Self-serve signup (email, phone, address, password — no verification), sign in/out, farm creation, onboarding templates |
 | 2 | Plans, Razorpay subscriptions (UPI Autopay + e-NACH), invoices with GST |
-| 3 | Entitlements, plan limits, upgrade and downgrade flows, dunning |
+| 3 | Entitlements, trial/grace/suspension handling, dunning, grandfathered pricing |
 | 4 | **RLS hardening + automated cross-tenant test suite in CI** |
-| 5 | Admin console, support tooling, backup restore drill |
-| 6 | Landing page, pricing page, terms, privacy policy |
+| 5 | **Super-admin CRM**: farm list, subscription controls, audit log, impersonation, revenue screen |
+| 6 | Backup restore drill, landing page, pricing page, terms, privacy policy |
 
 **Definition of done:** a farmer you have never met signs up on their phone, adds
 ten rabbits, records a mating, pays, and never contacts you.
@@ -146,7 +145,7 @@ that number is your single best piece of marketing.
 | Activation: 10 animals + 1 breeding event within 7 days | > 50% of signups |
 | Trial → paid conversion | > 20% |
 | Monthly churn | < 3% |
-| Share of revenue on annual plans | > 40% |
+| Share of revenue on annual plans | > 60% — at ₹99 a failed monthly mandate costs more than it collects |
 | Farms with zero writes in 14 days | < 10% — this is silent churn, still paying |
 
 Watch activation hardest. It predicts conversion better than any other number,
