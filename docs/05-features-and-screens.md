@@ -138,11 +138,18 @@ Every rabbit is entered manually by you, with a name you choose. No
 auto-generated codes: if the doe is called *Lakshmi*, the app says Lakshmi
 everywhere — daily list, notifications, reports.
 
-Add a rabbit: **name → doe or buck → breed → date of birth → cage →
+Add a rabbit: **name → male or female → breed → date of birth → cage →
 mother and father (if bred here) → photo.** Only name and sex are required, so a
 doe can be entered in about ten seconds and filled in later.
 
 Two notes on this:
+
+- **The sex picker says male and female, with "doe" and "buck" underneath.**
+  The breeding screens use the rabbitry terms throughout and should — they are
+  precise. But this is the screen where someone entering stock on their first
+  morning has to be certain, and a buck filed as a doe joins the ready-to-mate
+  queue and never kindles. The plain words lead; the pairing is taught here and
+  repeated on the animal's own page.
 
 - **An optional short tag alongside the name.** Names get duplicated on a farm
   (two does called Rani) and reused after an animal dies. A short unique tag —

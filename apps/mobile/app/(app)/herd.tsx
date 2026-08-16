@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
 import { TabBar } from '../../src/ui/nav';
 import { ConditionMark, Empty, H1, Loading, Screen } from '../../src/ui/components';
+import { sexLabel } from '../../src/ui/labels';
 import { STATE_LABEL, colors, radius, space, type as t } from '../../src/ui/theme';
 
 export default function Herd() {
@@ -46,7 +47,7 @@ export default function Herd() {
             <View style={{ flex: 1 }}>
               <Text style={s.name}>{a.name ?? a.tag}</Text>
               <Text style={s.meta}>
-                {a.sex === 'doe' ? 'Doe' : 'Buck'}
+                {sexLabel(a.sex)}
                 {a.reproductive_state ? ` · ${STATE_LABEL[a.reproductive_state] ?? a.reproductive_state}` : ''}
                 {a.cage ? ` · ${a.cage}` : ''}
               </Text>

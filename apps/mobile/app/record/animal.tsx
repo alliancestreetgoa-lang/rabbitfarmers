@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useApp } from '../../src/state';
 import { Button, Field, H1, Muted, Screen } from '../../src/ui/components';
+import { sexLabel, sexLabelFull, sexTerm } from '../../src/ui/labels';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 
 /** Name and sex are the only required fields. Everything else can wait. */
@@ -15,7 +16,7 @@ export default function AddAnimal() {
   const [error, setError] = useState<string | null>(null);
 
   const save = async () => {
-    if (!name.trim() || !sex) { setError('A name and doe or buck, that is all.'); return; }
+    if (!name.trim() || !sex) { setError('A name, and male or female. That is all.'); return; }
     setBusy(true); setError(null);
     try {
       await outbox.enqueue('animal', {
@@ -39,14 +40,24 @@ export default function AddAnimal() {
         <Field label="Name" testID="name" value={name} onChangeText={setName}
                placeholder="Lakshmi" />
 
-        <Text style={s.label}>DOE OR BUCK</Text>
+        {/*
+          Male and female, with the rabbitry word underneath. The rest of the
+          app talks about does and bucks; this is where someone learns which is
+          which, and getting it wrong here is expensive — a buck filed as a doe
+          shows up in the ready-to-mate queue and never kindles.
+        */}
+        <Text style={s.label}>MALE OR FEMALE</Text>
         <View style={{ flexDirection: 'row', gap: space.sm, marginBottom: space.lg }}>
           {(['doe', 'buck'] as const).map((v) => (
             <Pressable key={v} testID={`sex-${v}`} onPress={() => setSex(v)}
+                       accessibilityRole="radio"
+                       accessibilityState={{ selected: sex === v }}
+                       accessibilityLabel={sexLabelFull(v)}
                        style={[s.pick, sex === v && s.pickOn]}>
               <Text style={[s.pickText, sex === v && s.pickTextOn]}>
-                {v === 'doe' ? 'Doe' : 'Buck'}
+                {sexLabel(v)}
               </Text>
+              <Text style={[s.pickSub, sex === v && s.pickTextOn]}>{sexTerm(v)}</Text>
             </Pressable>
           ))}
         </View>
@@ -70,5 +81,6 @@ const s = StyleSheet.create({
   },
   pickOn: { borderColor: colors.accent, backgroundColor: colors.accentSoft, borderWidth: 2 },
   pickText: { ...t.title, color: colors.ink },
+  pickSub: { ...t.small, color: colors.muted, marginTop: 2 },
   pickTextOn: { color: colors.accent },
 });

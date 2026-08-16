@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
 import { Card, ConditionMark, H1, Loading, Muted, Pill, Screen } from '../../src/ui/components';
+import { sexLabelFull } from '../../src/ui/labels';
 import { STATE_LABEL, colors, radius, relativeDay, space, type as t } from '../../src/ui/theme';
 
 export default function AnimalScreen() {
@@ -19,7 +20,7 @@ export default function AnimalScreen() {
       <ScrollView contentContainerStyle={{ padding: space.lg, paddingBottom: space.xxl }}>
         <H1>{a.name ?? a.tag}</H1>
         <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
-          <Pill text={a.sex === 'doe' ? 'Doe' : 'Buck'} urgency="low" />
+          <Pill text={sexLabelFull(a.sex)} urgency="low" />
           {!!a.reproductive_state && (
             <Pill
               text={STATE_LABEL[a.reproductive_state] ?? a.reproductive_state}
