@@ -49,12 +49,18 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
 
     const tasks = await client.query('SELECT generate_due_tasks() AS n');
     const notes = await client.query('SELECT generate_notifications() AS n');
+    // Sessions nobody can use any more. Expired ones were always rejected at
+    // sign-in, so this is housekeeping rather than a fix — but nothing ever
+    // deleted them, and user_session grows by a row per device per sign-in for
+    // ever. The scheduler is already awake every fifteen minutes.
+    const purged = await client.query('SELECT purge_expired_sessions() AS n');
     await client.query('COMMIT');
 
     const result = {
       ok: true,
       tasksCreated: tasks.rows[0].n,
       notificationsCreated: notes.rows[0].n,
+      sessionsPurged: purged.rows[0].n,
       durationMs: Date.now() - started,
     };
 

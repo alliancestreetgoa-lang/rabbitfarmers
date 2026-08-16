@@ -122,3 +122,62 @@ authRoutes.get('/me', requireAuth, async (c) => {
     ...data,
   });
 });
+
+/**
+ * POST /auth/password — change your own password.
+ *
+ * Until now there was no way to change a password, and no way to recover one:
+ * a farmer who forgot theirs lost the farm, permanently, with every record in
+ * it. There was no admin action either. For a product people pay for monthly
+ * that is not a gap, it is an ending.
+ *
+ * This is the half that needs no email or SMS: you are signed in, you know the
+ * old one, you want a new one. Recovery for someone locked out entirely goes
+ * through support — see POST /admin/farms/:id/reset_password.
+ */
+authRoutes.post('/password', requireAuth, async (c) => {
+  const b = await c.req.json();
+  const session = c.get('session');
+  const current = b.current_password ?? '';
+  const next = b.new_password ?? '';
+
+  if (typeof next !== 'string' || next.length < 8) {
+    throw new HttpError(400, 'The new password must be at least 8 characters',
+      { field: 'new_password' });
+  }
+  if (next === current) {
+    throw new HttpError(400, 'That is the password you already have',
+      { field: 'new_password' });
+  }
+
+  const { rows } = await appQuery(
+    'SELECT password_hash FROM auth_lookup_by_id($1)', [session.employeeId]);
+  if (!rows.length || !(await verifyPassword(current, rows[0].password_hash))) {
+    throw new HttpError(401, 'That is not your current password',
+      { field: 'current_password' });
+  }
+
+  await appQuery('SELECT auth_set_password($1, $2)',
+    [session.employeeId, await hashPassword(next)]);
+
+  /*
+   * Every other session is revoked, and this one is replaced.
+   *
+   * A password change is what someone does when they think a phone has been
+   * taken or a farm hand has left. Leaving the old sessions alive makes the act
+   * pointless — the whole reason to change it is to lock somebody out.
+   */
+  // hashToken, not the raw token: the function matches on token_hash, and a
+  // value that matches nothing revokes nothing and reports success. A "sign
+  // every device out" that silently does nothing is worse than not offering it.
+  await appQuery('SELECT auth_revoke_session($1, true)', [hashToken(session.token)]);
+  const { token, hash } = newSessionToken();
+  await appQuery('SELECT auth_create_session($1,$2,$3,$4)',
+    [session.employeeId, hash, 30, c.req.header('user-agent') ?? null]);
+
+  c.header('Set-Cookie', sessionCookie(token));
+  return c.json({
+    token,
+    message: 'Password changed. Every other device has been signed out.',
+  });
+});

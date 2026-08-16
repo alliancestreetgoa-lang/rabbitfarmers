@@ -358,3 +358,168 @@ describe('admin CRM', () => {
     });
   });
 });
+
+describe('a farm cannot break the platform', () => {
+  test('an unknown timezone is refused at signup', async () => {
+    const res = await api('POST', '/auth/signup', {
+      body: {
+        farm_name: 'TZ Probe', full_name: 'Probe Person',
+        email: `tz${process.pid}x${Date.now()}@example.test`,
+        phone: '+919820000000', password: 'probe-password-123',
+        timezone: 'Middle-Earth/Shire',
+      },
+    });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.detail.timezone, 'and it says which field');
+  });
+
+  test('the database refuses one too, however it is written', async () => {
+    const f = await signupFarm();
+    await assert.rejects(
+      () => adminQuery(`UPDATE farm SET timezone = 'Nowhere/Nothing' WHERE id = $1`,
+        [f.farm.id]),
+      /unknown timezone/i,
+      'the API is not the only way rows get written');
+  });
+
+  test('a bad row cannot take the scheduler down for everybody', async () => {
+    /*
+     * The reason this is here rather than in a note somewhere.
+     *
+     * Task generation is one set-based statement across every farm. Before the
+     * guard, a single farm with an unrecognised timezone aborted that
+     * statement, so nobody on the platform got a nest box task, a separation
+     * reminder or an Ostovet dose — from an unauthenticated signup.
+     *
+     * The trigger stops it getting in. farm_today falling back to UTC is what
+     * stops a row that got in some other way (an old dump, a superuser) from
+     * doing it again.
+     */
+    const f = await signupFarm();
+    await api('POST', '/animals', {
+      token: f.token, body: { name: 'Lakshmi', sex: 'doe', date_of_birth: '2024-01-01' } });
+
+    // The trigger is the guarantee, and it is what this asserts. Getting a bad
+    // row past it needs table ownership, which nothing in this suite has — so
+    // the UTC fallback inside farm_today is deliberately belt to the trigger's
+    // braces, for a restore from an older dump or a superuser at a prompt.
+    await assert.rejects(
+      () => adminQuery(`UPDATE farm SET timezone = '' WHERE id = $1`, [f.farm.id]),
+      /unknown timezone/i);
+
+    const daily = await api('GET', '/daily', { token: f.token });
+    assert.equal(daily.status, 200);
+    const { rows } = await adminQuery('SELECT farm_today($1::uuid) AS d', [f.farm.id]);
+    assert.ok(rows[0].d, 'and the farm still has a day');
+  });
+
+  test('a farm can correct its own timezone', async () => {
+    const f = await signupFarm();
+    const bad = await api('PATCH', '/settings', {
+      token: f.token, body: { timezone: 'Nowhere/Nothing' } });
+    assert.equal(bad.status, 400);
+
+    const ok = await api('PATCH', '/settings', {
+      token: f.token, body: { timezone: 'Asia/Kolkata' } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.equal(ok.body.settings.timezone, 'Asia/Kolkata',
+      'a farm that got it wrong at signup had no way back before this');
+  });
+});
+
+describe('specific admin routes are not swallowed by the wildcard', () => {
+  test('every named action reaches its own handler', async () => {
+    /*
+     * Hono matches in registration order, and /farms/:id/:action is a wildcard
+     * that will happily answer for a path a specific route was meant to take.
+     * It has caught two routes already — delete, then reset_password — and each
+     * time the symptom was a 404 saying "Unknown action", with the role check
+     * never running. This fails the moment a third one is added below it.
+     */
+    const f = await signupFarm();
+    const admin = await makeAdmin('superadmin');
+
+    for (const action of ['delete', 'reset_password']) {
+      const res = await api('POST', `/admin/farms/${f.farm.id}/${action}`, {
+        token: admin.token, body: {} });
+      assert.ok(!/Unknown action/.test(res.body?.error ?? ''),
+        `${action} is being answered by the wildcard, not its own handler`);
+      assert.equal(res.status, 400,
+        `${action} should reach its handler and ask for what it needs`);
+    }
+  });
+});
+
+describe('passwords can be changed and recovered', () => {
+  test('changing it signs every other device out', async () => {
+    const f = await signupFarm();
+    // A second device, signed in before the change.
+    const other = await api('POST', '/auth/signin', {
+      body: { email: f.email, password: 'correct horse battery' } });
+    assert.equal(other.status, 200);
+
+    const wrong = await api('POST', '/auth/password', {
+      token: f.token,
+      body: { current_password: 'not it', new_password: 'a longer new password' } });
+    assert.equal(wrong.status, 401);
+
+    const res = await api('POST', '/auth/password', {
+      token: f.token,
+      body: { current_password: 'correct horse battery',
+              new_password: 'a longer new password' } });
+    assert.equal(res.status, 200, res.text);
+    assert.ok(res.body.token, 'the caller gets a fresh session');
+
+    // The other device is out — the whole point of changing it.
+    assert.equal((await api('GET', '/auth/me', { token: other.body.token })).status, 401);
+    // And the new one works.
+    assert.equal((await api('GET', '/auth/me', { token: res.body.token })).status, 200);
+
+    assert.equal((await api('POST', '/auth/signin', {
+      body: { email: f.email, password: 'correct horse battery' } })).status, 401);
+    assert.equal((await api('POST', '/auth/signin', {
+      body: { email: f.email, password: 'a longer new password' } })).status, 200);
+  });
+
+  test('a short new password is refused', async () => {
+    const f = await signupFarm();
+    const res = await api('POST', '/auth/password', {
+      token: f.token, body: { current_password: 'correct horse battery', new_password: 'short' } });
+    assert.equal(res.status, 400);
+  });
+
+  test('support can get a locked-out farmer back in, with a reason and a trail', async () => {
+    const f = await signupFarm();
+    const admin = await makeAdmin('support');
+
+    const noReason = await api('POST', `/admin/farms/${f.farm.id}/reset_password`, {
+      token: admin.token, body: {} });
+    assert.equal(noReason.status, 400);
+
+    const res = await api('POST', `/admin/farms/${f.farm.id}/reset_password`, {
+      token: admin.token, body: { reason: 'Owner called, locked out, verified by phone' } });
+    assert.equal(res.status, 200, res.text);
+    assert.ok(res.body.temporary_password?.length >= 12);
+
+    // The old one is dead, the temporary one works, the old session is gone.
+    assert.equal((await api('POST', '/auth/signin', {
+      body: { email: f.email, password: 'correct horse battery' } })).status, 401);
+    assert.equal((await api('GET', '/auth/me', { token: f.token })).status, 401,
+      'a reset must end a takeover, not sit alongside it');
+    assert.equal((await api('POST', '/auth/signin', {
+      body: { email: f.email, password: res.body.temporary_password } })).status, 200);
+
+    const { rows } = await adminQuery(
+      `SELECT action, reason FROM admin_audit_log
+       WHERE target_farm_id = $1 AND action = 'reset_password'`, [f.farm.id]);
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].reason, /locked out/);
+  });
+
+  test('billing cannot reset a password', async () => {
+    const f = await signupFarm();
+    const billing = await makeAdmin('billing');
+    assert.equal((await api('POST', `/admin/farms/${f.farm.id}/reset_password`, {
+      token: billing.token, body: { reason: 'nope' } })).status, 403);
+  });
+});

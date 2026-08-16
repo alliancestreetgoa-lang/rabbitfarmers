@@ -221,6 +221,68 @@ const ACTIONS = {
 };
 
 /**
+ * POST /admin/farms/:id/reset_password — the only way out of a lockout.
+ *
+ * There is no email verification, so there is no reset link to send. Someone
+ * who forgets their password has no path back to their own records except
+ * through a person — and until now that person had nothing to click either, so
+ * the farm was simply gone.
+ *
+ * Support sets a temporary password and reads it out. Everything about that is
+ * uncomfortable, so it is all constrained: a reason is required, it is audited
+ * like every other admin action, the temporary password is shown exactly once
+ * and never stored in readable form, and every existing session for that farm
+ * is revoked — if the account was taken over, the reset must end the takeover
+ * rather than leave the intruder signed in beside the owner.
+ *
+ * Registered before /farms/:id/:action, like the delete route. Hono matches
+ * in registration order, so the wildcard below would otherwise answer
+ * `Unknown action "reset_password"` and the role check would never run.
+ */
+adminRoutes.post('/farms/:id/reset_password',
+  requireAdminRole('superadmin', 'support'), async (c) => {
+    const admin = c.get('admin');
+    const farmId = c.req.param('id');
+    const ct = c.req.header('content-type') ?? '';
+    const body = ct.includes('application/json')
+      ? await c.req.json().catch(() => ({}))
+      : Object.fromEntries(await c.req.formData());
+
+    const reason = String(body.reason ?? '').trim();
+    if (!reason) throw new HttpError(400, 'A reason is required to reset a password');
+
+    const { rows: owner } = await adminQuery(`
+      SELECT e.id, e.full_name, e.email::text AS email, f.name AS farm_name
+      FROM employee e JOIN farm f ON f.id = e.farm_id
+      WHERE e.farm_id = $1 AND e.role = 'owner' AND e.is_active
+      ORDER BY e.created_at LIMIT 1`, [farmId]);
+    if (!owner.length) throw new HttpError(404, 'That farm has no active owner');
+
+    // Generated, never chosen by the admin: a support person picking
+    // "rabbit123" for the fourth time this week is how a platform gets breached.
+    const temporary = newSessionToken().token.slice(0, 14);
+    await adminQuery(
+      `UPDATE employee SET password_hash = $2, password_changed_at = now() WHERE id = $1`,
+      [owner[0].id, await hashPassword(temporary)]);
+
+    // Everyone signed out, including whoever may have taken the account.
+    await adminQuery(
+      `UPDATE user_session SET revoked_at = now()
+        WHERE employee_id IN (SELECT id FROM employee WHERE farm_id = $1)
+          AND revoked_at IS NULL`, [farmId]);
+
+    await audit(admin, 'reset_password', farmId,
+      { owner: owner[0].email }, null, reason,
+      c.req.header('x-forwarded-for') ?? null, 'employee');
+
+    return c.json({
+      owner: { name: owner[0].full_name, email: owner[0].email },
+      temporary_password: temporary,
+      message: 'Read this to them once. Every session on the farm has been signed out.',
+    });
+  });
+
+/**
  * DELETE a farm and everything in it.
  *
  * Superadmin only, reason required, and logged before the rows go — otherwise
@@ -321,7 +383,11 @@ adminRoutes.post('/api/impersonate/:id', requireAdminRole('superadmin', 'support
     INSERT INTO admin_impersonation (admin_id, farm_id, reason, expires_at, read_only)
     VALUES ($1,$2,$3, now() + interval '1 hour', $4)
     RETURNING id, expires_at, read_only`,
-    [admin.id, farmId, reason, body.read_only !== false]);
+    // Always read-only. It used to be caller-controlled, which would have been
+    // a footgun the moment somebody wired the consumer up: the docs promise
+    // impersonation is read-only, and an API that lets the caller opt out of
+    // that promise is not read-only.
+    [admin.id, farmId, reason, true]);
 
   await audit(admin, 'impersonate', farmId, null, { reason }, reason, null);
   return c.json({ impersonation: rows[0] });

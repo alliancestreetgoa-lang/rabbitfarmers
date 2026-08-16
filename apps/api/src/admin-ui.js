@@ -211,6 +211,14 @@ export function renderFarm({ farm, audit, subscription, admin }) {
       ${action('cancel', 'Cancel', 'Read-only. Data kept 12 months.', '', canBill)}
       ${action('comp', 'Comp free', 'Case study, beta tester, friend.', '', canComp)}
       ${/*
+        There is no email verification, so there is no reset link to send. This
+        is the only way back in for someone locked out of their own farm, which
+        is why it is here rather than left to a database prompt.
+      */ ''}
+      ${action('reset_password', 'Reset password',
+        'They are locked out. Sets a temporary one and signs every device out.',
+        '', admin.role === 'superadmin' || admin.role === 'support')}
+      ${/*
         The only irreversible action on this page, so it asks for the farm's
         name as well as a reason. `pattern` makes the browser refuse the wrong
         name before anything is sent, and the server checks it again — a typo

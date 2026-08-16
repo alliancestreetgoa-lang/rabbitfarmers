@@ -67,6 +67,28 @@ export class HttpError extends Error {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
+ * Is this a timezone the system actually knows?
+ *
+ * It goes into farm.timezone, and every day count in the breeding engine is
+ * computed in it. An unrecognised name does not degrade gracefully — Postgres
+ * raises on `now() AT TIME ZONE 'nonsense'`, which broke that farm's herd list
+ * outright and, because task generation is one statement across every farm,
+ * took the whole platform's reminders down with it.
+ *
+ * The database refuses bad values too (migration 0021). This is here so the
+ * farmer gets a sentence they can act on rather than a constraint violation.
+ */
+export function isKnownTimezone(tz) {
+  try {
+    // Throws RangeError for anything the ICU database does not recognise.
+    new Intl.DateTimeFormat('en', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Signup validation.
  *
  * Email is NOT verified — that is a deliberate product decision (see
@@ -92,6 +114,11 @@ export function validateSignup(body) {
     errors.password = 'Password must be at least 8 characters';
   }
 
+  const timezone = (body.timezone ?? '').trim() || 'Asia/Kolkata';
+  if (!isKnownTimezone(timezone)) {
+    errors.timezone = 'Use a timezone name like Asia/Kolkata';
+  }
+
   if (Object.keys(errors).length) throw new HttpError(400, 'Check the form', errors);
 
   return {
@@ -104,6 +131,6 @@ export function validateSignup(body) {
     city: (body.city ?? '').trim() || null,
     state: (body.state ?? '').trim() || null,
     pincode: (body.pincode ?? '').trim() || null,
-    timezone: (body.timezone ?? '').trim() || 'Asia/Kolkata',
+    timezone,
   };
 }

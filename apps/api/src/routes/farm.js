@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { requireAuth, requireWriteAccess } from '../middleware.js';
-import { HttpError } from '../auth.js';
+import { HttpError, isKnownTimezone } from '../auth.js';
 
 export const farmRoutes = new Hono();
 farmRoutes.use('*', requireAuth);
@@ -1194,14 +1194,42 @@ farmRoutes.patch('/settings', write, async (c) => {
     'quiet_hours_enabled', 'quiet_hours_start', 'quiet_hours_end',
   ]);
   const keys = Object.keys(b).filter((k) => allowed.has(k));
-  if (!keys.length) throw new HttpError(400, 'Nothing to update');
+
+  /*
+   * Timezone lives on `farm`, not `farm_settings`, and until now nothing
+   * exposed it at all. That mattered more than it looks: every day count in the
+   * breeding engine is computed in it, and a farm that got it wrong at signup
+   * had no way to correct it from anywhere in the product.
+   */
+  const timezone = typeof b.timezone === 'string' ? b.timezone.trim() : null;
+  if (timezone !== null) {
+    if (!isKnownTimezone(timezone)) {
+      throw new HttpError(400, 'Use a timezone name like Asia/Kolkata',
+        { field: 'timezone' });
+    }
+  } else if (!keys.length) {
+    throw new HttpError(400, 'Nothing to update');
+  }
 
   const db = c.get('db');
   const row = await db(async (client) => {
+    if (timezone !== null) {
+      await client.query(
+        'UPDATE farm SET timezone = $1 WHERE id = current_farm_id()', [timezone]);
+    }
+    if (!keys.length) {
+      const { rows } = await client.query(`
+        SELECT fs.*, f.timezone FROM farm_settings fs
+        JOIN farm f ON f.id = fs.farm_id WHERE fs.farm_id = current_farm_id()`);
+      return rows[0];
+    }
     const sets = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
-    const { rows } = await client.query(
-      `UPDATE farm_settings SET ${sets} WHERE farm_id = current_farm_id() RETURNING *`,
+    await client.query(
+      `UPDATE farm_settings SET ${sets} WHERE farm_id = current_farm_id()`,
       keys.map((k) => b[k]));
+    const { rows } = await client.query(`
+      SELECT fs.*, f.timezone FROM farm_settings fs
+      JOIN farm f ON f.id = fs.farm_id WHERE fs.farm_id = current_farm_id()`);
     return rows[0];
   });
   return c.json({ settings: row });
