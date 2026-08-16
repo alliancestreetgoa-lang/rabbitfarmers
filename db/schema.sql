@@ -31,14 +31,20 @@ CREATE TYPE check_result_t     AS ENUM ('positive', 'negative', 'uncertain');
 
 CREATE TYPE rhythm_t           AS ENUM ('intensive', 'semi_intensive', 'extensive');
 
+-- What a medication course counts its days from. 'expected_kindling' is the
+-- only anchor that points at a date which has not happened yet, and it is the
+-- one the pre-delivery course needs.
+CREATE TYPE protocol_anchor_t  AS ENUM ('mating', 'expected_kindling', 'kindling', 'weaning');
+CREATE TYPE rebreed_anchor_t   AS ENUM ('kindling', 'weaning');
+
 CREATE TYPE employee_role_t    AS ENUM ('owner', 'manager', 'caretaker', 'vet', 'accountant');
 CREATE TYPE employment_type_t  AS ENUM ('permanent', 'daily_wage', 'piece_rate', 'contract');
 CREATE TYPE attendance_status_t AS ENUM ('present', 'absent', 'leave', 'holiday', 'half_day');
 
 CREATE TYPE task_kind_t        AS ENUM ('palpate', 'recheck', 'nest_box', 'kindling_watch',
                                         'litter_check', 'creep_feed', 'wean', 'breed',
-                                        'vaccinate', 'treat', 'weigh', 'cull_review',
-                                        'clean', 'other');
+                                        'vaccinate', 'treat', 'medicate', 'weigh',
+                                        'cull_review', 'clean', 'other');
 CREATE TYPE task_status_t      AS ENUM ('open', 'done', 'skipped', 'cancelled');
 CREATE TYPE task_priority_t    AS ENUM ('low', 'medium', 'high', 'critical');
 
@@ -69,8 +75,13 @@ CREATE TABLE farm_settings (
     recheck_day                    int NOT NULL DEFAULT 28,
 
     rhythm                         rhythm_t NOT NULL DEFAULT 'semi_intensive',
-    rebreed_after_kindling_days    int NOT NULL DEFAULT 21,
-    wean_at_days                   int NOT NULL DEFAULT 32,
+    -- This farm counts the rebreed from WEANING, not from kindling:
+    -- kindling +30 -> separate the kits; weaning +3 -> back to the buck.
+    -- That works out to a ~33 day kindling-to-service interval.
+    rebreed_anchor                 rebreed_anchor_t NOT NULL DEFAULT 'weaning',
+    rebreed_after_weaning_days     int NOT NULL DEFAULT 3,
+    rebreed_after_kindling_days    int NOT NULL DEFAULT 21,  -- used only if anchor = 'kindling'
+    wean_at_days                   int NOT NULL DEFAULT 30,
     require_weaning_before_rebreed boolean NOT NULL DEFAULT false,
 
     after_failed_service_days      int NOT NULL DEFAULT 14,
@@ -310,6 +321,38 @@ CREATE TABLE weight_record (
 );
 
 -- ----------------------------------------------------------------------------
+-- Medication protocols
+--
+-- A protocol is a repeating course of doses defined once and then applied
+-- automatically to every doe who reaches the anchor event. The farm defines
+-- these; nothing here is hard-coded to a particular medicine.
+--
+-- The two courses this farm runs today (see the seed block at the end):
+--   "Hosto" pre-delivery   anchor expected_kindling, offset -5, 5 daily doses
+--   "Hosto" post-delivery  anchor kindling,          offset +1, 5 daily doses
+-- ----------------------------------------------------------------------------
+CREATE TABLE medication_protocol (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    farm_id           uuid NOT NULL REFERENCES farm(id) ON DELETE CASCADE,
+    name              text NOT NULL,
+    anchor            protocol_anchor_t NOT NULL,
+    start_offset_days int NOT NULL,          -- negative counts backwards from the anchor
+    doses             int NOT NULL DEFAULT 1,
+    interval_days     int NOT NULL DEFAULT 1,
+    dose_note         text,                  -- "1 ml in drinking water", etc.
+    applies_to        text NOT NULL DEFAULT 'doe',   -- doe | litter
+    -- If this is an antibiotic, meat from the animal must not be sold until
+    -- the withdrawal period has elapsed. The sale screen enforces it.
+    withdrawal_days   int,
+    notify            boolean NOT NULL DEFAULT true,
+    is_active         boolean NOT NULL DEFAULT true,
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (farm_id, name, anchor),
+    CONSTRAINT doses_positive    CHECK (doses BETWEEN 1 AND 60),
+    CONSTRAINT interval_positive CHECK (interval_days BETWEEN 1 AND 30)
+);
+
+-- ----------------------------------------------------------------------------
 -- Health (Phase 2, defined now because it gates the breeding queue)
 -- ----------------------------------------------------------------------------
 CREATE TABLE health_event (
@@ -318,10 +361,14 @@ CREATE TABLE health_event (
     rabbit_id         uuid REFERENCES rabbit(id) ON DELETE CASCADE,
     litter_id         uuid REFERENCES litter(id) ON DELETE CASCADE,
     occurred_on       date NOT NULL DEFAULT current_date,
-    category          text NOT NULL,          -- illness | injury | vaccination | treatment
+    category          text NOT NULL,          -- illness | injury | vaccination | medication
     diagnosis         text,
     medicine          text,
     dose              text,
+    -- Set when this dose was given against a scheduled protocol. This is what
+    -- takes the dose off the daily list; see v_medication_due.
+    protocol_id       uuid REFERENCES medication_protocol(id),
+    dose_number       int,
     -- Meat rabbits must not be sold during withdrawal. The sale screen checks this.
     withdrawal_until  date,
     blocks_breeding   boolean NOT NULL DEFAULT false,
@@ -426,6 +473,7 @@ base AS (
         ll.kindled_on,
         ll.weaned_on,
         (current_date - ll.kindled_on)                   AS days_since_last_kindling,
+        (current_date - ll.weaned_on)                    AS days_since_weaning,
         (current_date - lp.on_date)                      AS days_since_pseudopregnancy,
         (current_date - lf.on_date)                      AS days_since_failed_service,
         (r.date_of_birth IS NOT NULL
@@ -512,8 +560,13 @@ SELECT
     s.tag,
     s.state,
     s.days_since_last_kindling,
-    GREATEST(0, COALESCE(s.days_since_last_kindling, 999)
-                - fs.rebreed_after_kindling_days)  AS days_overdue,
+    s.days_since_weaning,
+    CASE fs.rebreed_anchor
+        WHEN 'weaning'  THEN GREATEST(0, COALESCE(s.days_since_weaning, 0)
+                                         - fs.rebreed_after_weaning_days)
+        WHEN 'kindling' THEN GREATEST(0, COALESCE(s.days_since_last_kindling, 0)
+                                         - fs.rebreed_after_kindling_days)
+    END AS days_overdue,
     rc.receptivity  AS last_observed_receptivity,
     rc.checked_on   AS receptivity_checked_on
 FROM v_doe_reproductive_state s
@@ -529,8 +582,17 @@ LEFT JOIN LATERAL (
 WHERE r.status = 'active'                       -- excludes quarantine
   AND r.role IN ('breeder', 'replacement')
   AND s.state IN ('READY', 'OPEN', 'RESTING', 'LACTATING')
-  AND (s.days_since_last_kindling IS NULL
-       OR s.days_since_last_kindling >= fs.rebreed_after_kindling_days)
+  -- Rest interval, counted from whichever anchor the farm uses. With the
+  -- 'weaning' anchor a nursing doe is excluded automatically, because she has
+  -- no weaning date yet.
+  AND (
+        s.kindled_on IS NULL                       -- maiden doe: no rest to serve
+     OR (fs.rebreed_anchor = 'kindling'
+         AND s.days_since_last_kindling >= fs.rebreed_after_kindling_days)
+     OR (fs.rebreed_anchor = 'weaning'
+         AND s.days_since_weaning IS NOT NULL
+         AND s.days_since_weaning >= fs.rebreed_after_weaning_days)
+      )
   AND (NOT fs.require_weaning_before_rebreed OR s.state <> 'LACTATING')
   AND (s.days_since_pseudopregnancy IS NULL
        OR s.days_since_pseudopregnancy >= fs.after_pseudopregnancy_days)
@@ -558,6 +620,112 @@ FROM rabbit r
 LEFT JOIN mating m ON m.buck_id = r.id
 WHERE r.sex = 'buck' AND r.status = 'active'
 GROUP BY r.id, r.farm_id, r.tag;
+
+
+-- Every dose every protocol calls for, expanded to individual dated doses.
+--
+-- The pre-delivery course anchors on EXPECTED kindling (service + 31), because
+-- the real kindling date is not known when the course has to start. Those rows
+-- disappear the moment a litter is recorded, which is exactly the cancellation
+-- behaviour wanted: if she kindles on day 29, the day 29 and 30 doses stop
+-- being due. Doses already given stay recorded in health_event, so a course cut
+-- short is still visible in her history.
+CREATE OR REPLACE VIEW v_medication_schedule AS
+WITH anchors AS (
+    SELECT m.farm_id, m.doe_id AS rabbit_id, NULL::uuid AS litter_id, m.id AS mating_id,
+           'expected_kindling'::protocol_anchor_t AS anchor,
+           (m.mated_at)::date + fs.gestation_expected_days AS anchor_date
+    FROM mating m
+    JOIN farm_settings fs ON fs.farm_id = m.farm_id
+    LEFT JOIN litter l    ON l.mating_id = m.id
+    WHERE l.id IS NULL
+      AND m.outcome NOT IN ('negative', 'pseudopregnant', 'aborted', 'terminated')
+  UNION ALL
+    SELECT m.farm_id, m.doe_id, NULL::uuid, m.id,
+           'mating'::protocol_anchor_t, (m.mated_at)::date
+    FROM mating m
+  UNION ALL
+    SELECT l.farm_id, l.doe_id, l.id, l.mating_id,
+           'kindling'::protocol_anchor_t, l.kindled_on
+    FROM litter l
+  UNION ALL
+    SELECT l.farm_id, l.doe_id, l.id, l.mating_id,
+           'weaning'::protocol_anchor_t, l.weaned_on
+    FROM litter l
+    WHERE l.weaned_on IS NOT NULL
+)
+SELECT
+    p.id            AS protocol_id,
+    p.name          AS protocol_name,
+    a.farm_id,
+    a.rabbit_id,
+    a.litter_id,
+    a.mating_id,
+    a.anchor,
+    a.anchor_date,
+    (n + 1)         AS dose_number,
+    p.doses         AS total_doses,
+    a.anchor_date + p.start_offset_days + (n * p.interval_days) AS due_on,
+    p.dose_note,
+    p.withdrawal_days,
+    p.notify
+FROM medication_protocol p
+JOIN anchors a
+      ON a.anchor = p.anchor
+     AND a.farm_id = p.farm_id
+CROSS JOIN generate_series(0, p.doses - 1) AS n
+WHERE p.is_active;
+
+
+-- Doses still outstanding: scheduled, but with no matching dose recorded.
+-- Recording the dose in health_event is what drops it off the list — this is
+-- the "mark done and it disappears" behaviour, with no separate done-flag to
+-- fall out of sync.
+CREATE OR REPLACE VIEW v_medication_due AS
+SELECT s.*,
+       (s.due_on - current_date) AS days_until_due
+FROM v_medication_schedule s
+WHERE NOT EXISTS (
+    SELECT 1 FROM health_event h
+    WHERE h.protocol_id = s.protocol_id
+      AND h.rabbit_id   = s.rabbit_id
+      AND h.dose_number = s.dose_number
+      AND h.occurred_on >= s.due_on - 2      -- tolerate a dose given a day early or late
+      AND h.occurred_on <= s.due_on + 2
+);
+
+
+-- The single feed behind the daily tab: everything a person must do today,
+-- medication and husbandry together, oldest overdue first.
+CREATE OR REPLACE VIEW v_daily_list AS
+SELECT
+    'medication'                          AS source,
+    md.protocol_id::text                  AS ref_id,
+    md.rabbit_id,
+    r.tag,
+    md.farm_id,
+    md.due_on,
+    md.protocol_name || ' — dose ' || md.dose_number || ' of ' || md.total_doses
+                                          AS title,
+    CASE WHEN md.due_on < current_date THEN 'critical' ELSE 'high' END AS urgency
+FROM v_medication_due md
+JOIN rabbit r ON r.id = md.rabbit_id
+WHERE md.notify
+  AND md.due_on <= current_date
+UNION ALL
+SELECT
+    'task',
+    t.id::text,
+    t.rabbit_id,
+    r.tag,
+    t.farm_id,
+    t.due_on,
+    t.title,
+    CASE WHEN t.due_on < current_date THEN 'critical' ELSE t.priority::text END
+FROM task t
+LEFT JOIN rabbit r ON r.id = t.rabbit_id
+WHERE t.status = 'open'
+  AND t.due_on <= current_date;
 
 
 -- The headline KPI: kits weaned per doe per year.

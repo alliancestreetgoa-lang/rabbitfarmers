@@ -16,9 +16,10 @@ currently in use are marked so the plan stays buildable either way.
 
 3. **Which breeds?** This sets the first-mating age gates and target weights.
 
-4. **Which breeding rhythm** — intensive (~11–14 days), semi-intensive (14–21) or
-   extensive (35–42)? Or is it currently ad-hoc?
-   *Assumed: semi-intensive, 21 days.*
+4. ~~**Which breeding rhythm?**~~ **Answered:** separate the kits at 30 days
+   after delivery, rebreed 3–4 days after separating. That is a ~33-day
+   kindling-to-service interval, roughly 5–6 litters per doe per year. Built as
+   the default; `rebreed_after_weaning_days` is set to 3 and adjustable to 4.
 
 5. **Do you want banded breeding** (all matings on one weekday) for easier labour
    planning?
@@ -28,6 +29,36 @@ currently in use are marked so the plan stays buildable either way.
 
 7. **How are rabbits identified** — ear tattoo, ear tag, or nothing yet? If
    nothing, adopting a tagging scheme is prerequisite work before any app helps.
+
+## Medication — Hosto
+
+These do not block anything structural; the protocol mechanism is built and the
+courses are seeded. But the details need confirming before the app is dosing
+real animals off them.
+
+21. **What exactly is Hosto — spelling, and is it an antibiotic, a supplement or
+    a calcium/energy tonic?** I have set it up as a farm-defined medicine, so the
+    app works either way. But if it is an antibiotic, its **withdrawal period**
+    must go in the settings, and the app will then block meat sales from a
+    treated animal until that period has elapsed. Ask your supplier or vet for
+    the withdrawal figure.
+
+22. **Dose and route** — how much, and given how (in drinking water, in feed, by
+    injection)? This becomes the reminder text a farm hand reads at the cage.
+
+23. **Does the post-delivery course start on the day she kindles, or the day
+    after?** *Assumed: the day after, so doses land on days 1–5.* Changing it to
+    days 0–4 is a one-field edit.
+
+24. **Does the doe get it, the kits, or both?** *Assumed: the doe.*
+
+25. **If she kindles early — say day 29 — should the remaining pre-delivery doses
+    be given anyway, or dropped?** *Assumed: dropped, since the course is
+    "before delivery" and delivery has happened.*
+
+26. **Are there other regular medicines** — dewormer, vaccine, coccidiostat,
+    vitamin — that should be set up as protocols now? Each is the same form,
+    no code change.
 
 ## Staff
 

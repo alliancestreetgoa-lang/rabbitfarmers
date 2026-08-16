@@ -129,6 +129,24 @@ data entry nobody will do. Litter-level counts carry the rest.
 When a kit is retained, it is **promoted** into a full `rabbit` row with
 `litter_id` pointing back.
 
+### `medication_protocol`
+A course of doses defined once and applied automatically to every doe reaching
+the anchor event.
+
+| Field | Purpose |
+|---|---|
+| `name` | e.g. "Hosto (pre-delivery)". Farm-defined; no medicine is hard-coded |
+| `anchor` | `mating` / `expected_kindling` / `kindling` / `weaning` |
+| `start_offset_days` | Negative counts backwards — `-5` from expected kindling |
+| `doses`, `interval_days` | 5 doses, 1 day apart |
+| `withdrawal_days` | If it is an antibiotic, blocks meat sale for this long |
+
+Doses are **not** stored as rows. They are expanded on read from
+(anchor date + offset + n × interval), so changing a protocol immediately
+corrects every future dose without a migration. A dose leaves the due list when
+a matching `health_event` exists — the same derive-don't-store rule as
+reproductive status.
+
 ### `employee`
 See [04-employee-module.md](04-employee-module.md).
 

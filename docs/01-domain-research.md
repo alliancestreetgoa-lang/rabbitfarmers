@@ -104,10 +104,23 @@ as a default and the app derives its whole task calendar from it.
 A commonly recommended commercial compromise is a **35-day breed-back**, which
 balances doe condition against output.
 
-**Design decision:** rebreed interval is a farm-level setting with a per-doe
-override. A doe in poor condition gets a longer rest; the app must allow that
-without a fight, and must record *why* (body condition) so the data explains the
-decision later.
+**This farm's rhythm:** kits separated at **30 days** after delivery, doe
+rebred **3–4 days** after separating. That is a ~33-day kindling-to-service
+interval and a ~64-day cycle, putting it between semi-intensive and extensive at
+roughly **5–6 litters per doe per year** — a rhythm that treats the doe gently
+and should give her a long productive life.
+
+Note this counts the rest from **weaning**, not from kindling. Most published
+schedules count from kindling, so the app makes the anchor a setting rather than
+assuming one. It matters: with a weaning anchor, a doe whose weaning is recorded
+late is *also* rebred late, so late data entry costs real production days. That
+is worth knowing, and it is a good argument for entering the separation on the
+day it happens.
+
+**Design decision:** rebreed interval and its anchor are farm-level settings with
+a per-doe override. A doe in poor condition gets a longer rest; the app must
+allow that without a fight, and must record *why* (body condition) so the data
+explains the decision later.
 
 **Design decision:** schedule on **7-day multiples** where possible. Commercial
 rabbitries breed on fixed weekdays because it makes labour planning and record

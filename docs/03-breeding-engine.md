@@ -24,9 +24,12 @@ pregnancy_check:
   first_check_window: [10, 14]
   recheck_day: 28             # before nest box, catches resorption
 
+# This farm counts the rebreed from WEANING, not from kindling.
 rhythm: semi_intensive        # intensive | semi_intensive | extensive
-rebreed_after_kindling_days: 21
-wean_at_days: 32
+rebreed_anchor: weaning       # kindling | weaning
+wean_at_days: 30              # "separate the bunnies"
+rebreed_after_weaning_days: 3 # 3-4 days after separating
+rebreed_after_kindling_days: 21   # used only when rebreed_anchor = kindling
 
 rest_periods:
   after_failed_service_days: 14
@@ -55,6 +58,19 @@ culling_flags:
 banding:
   enabled: false
   breeding_weekday: tuesday   # all matings on one weekday for labour planning
+
+# Medication courses. Farm-defined; nothing is hard-coded to a medicine name.
+medication_protocols:
+  - name: Hosto (pre-delivery)
+    anchor: expected_kindling   # service date + 31
+    start_offset_days: -5       # begins 5 days before expected kindling
+    doses: 5
+    interval_days: 1            # daily
+  - name: Hosto (post-delivery)
+    anchor: kindling            # the actual kindling date
+    start_offset_days: 1        # begins the day after she kindles
+    doses: 5
+    interval_days: 1
 ```
 
 Every one of these must be editable in the app by the owner. A farmer who cannot
@@ -124,8 +140,8 @@ A doe is eligible when **all** of these hold:
 | 3 | Age ≥ first-mating age for her breed size | Breeding too early damages the doe and the litter |
 | 4 | Not currently `MATED`, `PREGNANT`, `NEST_BOX` | She is already in a cycle |
 | 5 | Not within pseudopregnancy window (18 days from sterile mating) | She will refuse the buck; a wasted trip |
-| 6 | Days since last kindling ≥ `rebreed_after_kindling_days` | The rhythm setting |
-| 7 | If rhythm requires it: previous litter weaned | Extensive systems don't breed while nursing |
+| 6 | Rest interval served, counted from the configured anchor: days since **weaning** ≥ 3 (this farm), or days since kindling ≥ 21 | The rhythm setting |
+| 7 | Previous litter weaned | Implied by the weaning anchor — a nursing doe has no weaning date yet, so she cannot qualify |
 | 8 | Days since last failed service ≥ `after_failed_service_days` | Give her a receptivity wave to come round |
 | 9 | No open health hold (illness, treatment, withdrawal, poor body condition) | Never breed a sick doe |
 
@@ -248,8 +264,10 @@ This is what turns the app from a record book into a system that runs the farm.
 | Kindling recorded | **Count and check litter {id}** | day+1 | High |
 | Litter day 10 | **Kit eye check — litter {id}** | day 10 | Low |
 | Litter day 18 | **Start creep feed — litter {id}** | day 18 | Medium |
-| Litter at `wean_at_days` | **Wean litter {id}, record count and weight** | that day | High |
+| Litter at `wean_at_days` (day 30) | **Separate the kits — litter {id}**, record count and weight | that day | High |
+| Weaning + `rebreed_after_weaning_days` | **Rebreed doe {tag}** | day 33 from kindling | High |
 | Doe enters ready queue | **Breed doe {tag}** | that day | Medium |
+| Each scheduled medication dose | **{protocol} — dose N of M for {tag}** | that day | High |
 | Vaccination due | **Vaccinate {tags}** | due date | High |
 | 3 failed services | **Cull review: doe {tag}** | today | Medium |
 
@@ -260,14 +278,81 @@ that duplication is how these systems rot.
 
 ---
 
-## Rule 5 — Alerts (push notifications)
+---
+
+## Rule 5 — Medication protocols
+
+A protocol is a course of doses defined **once** and applied automatically to
+every doe who reaches the anchor event. The farm defines them; no medicine name
+is hard-coded anywhere in the app.
+
+```
+protocol = (name, anchor, start_offset_days, doses, interval_days)
+
+anchor ∈ { mating, expected_kindling, kindling, weaning }
+```
+
+### The two courses this farm runs
+
+| Course | Anchor | Offset | Doses | Falls on |
+|---|---|---|---|---|
+| **Hosto (pre-delivery)** | expected kindling | −5 | 5 daily | Service days 26, 27, 28, 29, 30 |
+| **Hosto (post-delivery)** | actual kindling | +1 | 5 daily | The 5 days after she kindles |
+
+### Why the two courses anchor differently
+
+This is the subtle part, and getting it wrong makes the pre-delivery course
+useless.
+
+The **post-delivery** course is easy: kindling already happened, so the date is
+known exactly, and the five doses are simply the next five days.
+
+The **pre-delivery** course has to start *before* the event it is counted from.
+Kindling is a window (day 28–34), not a date — so the course anchors on
+**expected** kindling, service date + 31, which is known from day 0. That places
+the last dose on day 30, the day before she is expected to kindle.
+
+Three consequences fall out of that, and all three are handled:
+
+1. **She kindles early.** If she kindles on day 29, the day 29 and 30 doses stop
+   being due the moment the kindling is recorded. Doses already given stay in
+   her health record, so a course cut short is still visible.
+2. **She is not actually pregnant.** Doses are only scheduled for cycles that
+   have not been ruled out. A doe palpated negative is never scheduled a
+   pre-delivery dose — which is a direct argument for palpating on day 12, since
+   an unpalpated doe will otherwise be dosed on a pregnancy that does not exist.
+3. **She kindles late.** Doses run out on day 30 and do not extend. The overdue
+   alert at day 35 is what catches her.
+
+### Marking a dose done
+
+Recording the dose **is** the completion. A dose disappears from the daily list
+because a matching `health_event` row exists for that protocol, doe and dose
+number — not because a separate done-flag was flipped. Same principle as
+reproductive status: no second copy of the truth to drift out of sync.
+
+A dose given a day early or late still counts, so a caretaker who does the round
+at 06:00 on Tuesday instead of 18:00 on Monday does not leave a phantom overdue
+dose on the list forever.
+
+> **If Hosto is an antibiotic**, set its `withdrawal_days` and the app will block
+> the sale of that animal for meat until the period has elapsed. Worth confirming
+> with whoever supplies it — the field exists either way, and leaving it empty is
+> a decision, not a default.
+
+---
+
+## Rule 6 — Alerts (push notifications)
 
 Keep these few. An app that notifies constantly gets muted, and then the one
 notification that mattered is missed too.
 
 | Alert | When | To whom |
 |---|---|---|
+| Medication dose due today | each dose day | Assigned caretaker |
 | Nest box due today | day 28 | Assigned caretaker + manager |
+| Separate the kits today | day 30 after kindling | Assigned caretaker |
+| Rebreed doe today | 3 days after separating | Assigned caretaker + manager |
 | Kindling window open | day 28–34, morning | Assigned caretaker |
 | Overdue pregnancy | day 35 | Manager |
 | Palpation window closing | day 14, unchecked | Assigned caretaker |
