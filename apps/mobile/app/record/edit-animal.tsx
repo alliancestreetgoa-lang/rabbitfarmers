@@ -60,7 +60,11 @@ export default function EditAnimal() {
         date_of_birth: dob.trim() || undefined,
         notes: notes.trim(),
         breed_id: breedId ?? undefined,
-        cage_code: cage.trim() || undefined,
+        // '' rather than undefined when it has been cleared: undefined omits the
+        // key entirely, so a farmer who empties the cage field silently changed
+        // nothing. An empty string is "no cage", which is a real answer — a
+        // rabbit moved out to a run has left its cage.
+        cage_code: cage.trim() === (a.cage ?? '') ? undefined : cage.trim(),
       });
       router.replace(`/(app)/animal?id=${a.id}`);
     } catch (err) {

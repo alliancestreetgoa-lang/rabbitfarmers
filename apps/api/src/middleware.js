@@ -121,6 +121,35 @@ export async function errorHandler(err, c) {
       detail: { constraint: err.constraint },
     }, 404);
   }
+  /*
+   * Postgres class 22 — data exception. A bad uuid, a date that is not a date,
+   * a number out of range, a value that is not in an enum.
+   *
+   * These were falling through to a 500, and a 500 is not just an ugly message.
+   * The offline outbox treats 4xx as permanent and parks the entry, but stops
+   * the whole queue on anything else, because a later write may depend on an
+   * earlier one. So one malformed value — a typo in a date, a corrupted
+   * payload — silently blocked every write behind it, for ever, while the app
+   * went on showing them as pending. That is the shape of losing a farmer's
+   * data, and it starts here.
+   *
+   * The whole class maps to 400 rather than a list of codes: every member of it
+   * is by definition a statement about the value that came in.
+   */
+  if (typeof err?.code === 'string' && err.code.startsWith('22')) {
+    // "invalid input syntax for type date" and "invalid input value for enum
+    // rabbit_role_t" are the two shapes; both name the thing that was wrong,
+    // which is the one useful part. The rest is internals and stays in the log.
+    const m = /for type (\w+)/.exec(err.message ?? '')
+      ?? /for enum \w*?_?(\w+?)_t\b/.exec(err.message ?? '');
+    const type = m?.[1];
+    console.error('[api] bad input', err.code, err.message);
+    return c.json({
+      error: type ? `That is not a valid ${type}` : 'One of those values is not valid',
+      detail: { code: err.code },
+    }, 400);
+  }
+
   console.error('[api]', err);
   return c.json({ error: 'Something went wrong on our side' }, 500);
 }

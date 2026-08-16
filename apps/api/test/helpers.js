@@ -54,6 +54,25 @@ export async function signupFarm(overrides = {}) {
     },
   });
   if (res.status !== 201) throw new Error(`signup failed: ${res.text}`);
+
+  /*
+   * Test farms run on UTC.
+   *
+   * Since migration 0020 the engine counts days in the farm's timezone, which
+   * is right — and it means a fixture that builds dates with toISOString (UTC)
+   * disagrees with the farm by one day for part of every day. The suite would
+   * pass at noon and fail at three in the morning, which is the worst kind of
+   * test.
+   *
+   * Pinning the fixture's timezone to UTC makes `dateAgo(n)` mean exactly n
+   * days on the farm, whenever the suite happens to run. The farm-local
+   * behaviour itself is covered deliberately, by a test that picks a timezone
+   * far from UTC on purpose.
+   */
+  if (!overrides.timezone) {
+    await adminQuery(`UPDATE farm SET timezone = 'UTC' WHERE id = $1`, [res.body.farm.id]);
+  }
+
   return { ...res.body, email };
 }
 

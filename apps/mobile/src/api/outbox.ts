@@ -3,6 +3,21 @@ import { ApiClient, ApiError, OfflineError } from './client.ts';
 
 const OUTBOX_KEY = 'rb.outbox';
 
+/**
+ * How many times one entry may fail with something that is neither offline nor
+ * a clear 4xx before it is parked.
+ *
+ * The queue is ordered and stops at the first entry it cannot send, because a
+ * later write can depend on an earlier one. That is right, and it means a
+ * single entry that fails forever blocks everything behind it forever — the
+ * farmer records five things, the first has a bad value, and the other four
+ * never leave the phone while the app cheerfully shows them as pending.
+ *
+ * A server-side error is worth retrying a few times: a deploy, a database
+ * waking up, a five-second blip. It is not worth retrying for ever.
+ */
+const MAX_ATTEMPTS = 5;
+
 export type OutboxKind =
   | 'animal' | 'mating' | 'pregnancy_check' | 'kindling' | 'weaning'
   | 'condition' | 'condition_check' | 'dose';
@@ -153,6 +168,13 @@ export class Outbox {
             }
           }
           entry.lastError = String((err as Error)?.message ?? err);
+          if (entry.attempts >= MAX_ATTEMPTS) {
+            // Park it rather than let it hold the queue shut. Everything behind
+            // it gets through, and this one is surfaced for a human.
+            entry.failed = true;
+            await this.persist();
+            continue;
+          }
           await this.persist();
           break;
         }

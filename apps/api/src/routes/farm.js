@@ -317,7 +317,7 @@ farmRoutes.post('/animals/:id/status', write, async (c) => {
         (id, farm_id, rabbit_id, from_status, to_status, changed_on, reason,
          sale_price_paise, recorded_by)
       VALUES (COALESCE($7::uuid, gen_random_uuid()), current_farm_id(), $1, $2, $3,
-              COALESCE($4::date, current_date), $5, $6, $8)
+              COALESCE($4::date, farm_today(current_farm_id())), $5, $6, $8)
       RETURNING id, from_status, to_status, changed_on`,
       [id, current[0].status, to, b.changed_on ?? null, reason || null,
        b.sale_price_paise ?? null, b.id ?? null, session.employeeId]);
@@ -607,7 +607,7 @@ farmRoutes.post('/pregnancy-checks', write, async (c) => {
     const { rows } = await client.query(`
       INSERT INTO pregnancy_check (id, mating_id, checked_on, method, result, checked_by, notes)
       VALUES (COALESCE($7::uuid, gen_random_uuid()),
-              $1, COALESCE($2::date, current_date),
+              $1, COALESCE($2::date, farm_today(current_farm_id())),
               COALESCE($3,'palpation')::check_method_t, $4::check_result_t, $5, $6)
       RETURNING id, checked_on, result`,
       [b.mating_id, b.checked_on ?? null, b.method ?? null, b.result,
@@ -639,7 +639,7 @@ farmRoutes.post('/litters', write, async (c) => {
       INSERT INTO litter (id, farm_id, mating_id, doe_id, nest_box_placed_on, kindled_on,
                           born_alive, born_dead, notes, recorded_by)
       VALUES (COALESCE($9::uuid, gen_random_uuid()),
-              current_farm_id(), $1, $2, $3, COALESCE($4::date, current_date),
+              current_farm_id(), $1, $2, $3, COALESCE($4::date, farm_today(current_farm_id())),
               COALESCE($5,0), COALESCE($6,0), $7, $8)
       RETURNING id, kindled_on, born_alive, born_dead`,
       [b.mating_id ?? null, b.doe_id, b.nest_box_placed_on ?? null, b.kindled_on ?? null,
@@ -913,7 +913,7 @@ farmRoutes.post('/litters/:id/wean', write, async (c) => {
   const row = await db(async (client) => {
     const { rows } = await client.query(`
       UPDATE litter
-         SET weaned_on = COALESCE($2::date, current_date),
+         SET weaned_on = COALESCE($2::date, farm_today(current_farm_id())),
              weaned_count = $3,
              avg_weaning_weight_g = $4
        WHERE id = $1
@@ -1051,7 +1051,10 @@ farmRoutes.get('/medication', async (c) => {
            r.name AS rabbit_name, r.tag
     FROM v_medication_due md
     JOIN rabbit r ON r.id = md.rabbit_id
-    WHERE md.due_on <= current_date + 2
+    -- farm_today, not current_date. The view moved to the farm's day in
+    -- migration 0019 and a window computed in the server's would quietly cut a
+    -- dose off the end for any farm not sitting on UTC.
+    WHERE md.due_on <= farm_today(md.farm_id) + 2
       AND r.status NOT IN ('sold', 'culled', 'dead')
       AND ($1 OR NOT md.lapsed)
     ORDER BY md.due_on, r.tag`, [includeLapsed])).rows);
@@ -1100,9 +1103,10 @@ farmRoutes.post('/medication', write, async (c) => {
                                 medicine, dose, protocol_id, dose_number,
                                 withdrawal_until, recorded_by)
       VALUES (COALESCE($8::uuid, gen_random_uuid()), current_farm_id(), $1,
-              COALESCE($2::date, current_date), 'medication', $3, $4, $5, $6,
+              COALESCE($2::date, farm_today(current_farm_id())), 'medication',
+              $3, $4, $5, $6,
               CASE WHEN $7::int IS NOT NULL
-                   THEN COALESCE($2::date, current_date) + $7::int END,
+                   THEN COALESCE($2::date, farm_today(current_farm_id())) + $7::int END,
               $9)
       RETURNING id, occurred_on, medicine, dose_number`,
       [b.rabbit_id, b.given_on ?? null, p[0].name, b.dose ?? null, b.protocol_id,

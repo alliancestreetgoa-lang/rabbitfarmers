@@ -992,3 +992,115 @@ describe('Ostovet', () => {
       'and the five after start');
   });
 });
+
+describe('bad input does not become a server error', () => {
+  /*
+   * Why this matters more than the status code.
+   *
+   * The offline outbox parks a 4xx and stops the whole queue on anything else,
+   * because a later write can depend on an earlier one. A 500 therefore meant
+   * one malformed value blocked every write behind it for ever, while the app
+   * went on showing them as pending. Each of these returned 500 before.
+   */
+  async function subject() {
+    const f = await signupFarm();
+    const doe = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Lakshmi', sex: 'doe', date_of_birth: dateAgo(400) },
+    })).body.animal.id;
+    const litter = (await api('POST', '/litters', {
+      token: f.token, body: { doe_id: doe, born_alive: 6 } })).body.litter.id;
+    return { ...f, doe, litter };
+  }
+
+  test('every shape of malformed input is a 4xx', async () => {
+    const f = await subject();
+    const cases = [
+      ['PATCH', `/animals/${f.doe}`, { role: 'wizard' }],
+      ['PATCH', `/animals/${f.doe}`, { date_of_birth: 'not-a-date' }],
+      ['PATCH', `/animals/${f.doe}`, { sex: 'doe', dam_id: 'nope' }],
+      ['PATCH', '/animals/not-a-uuid', { name: 'x' }],
+      ['GET', '/animals/not-a-uuid/history', undefined],
+      ['POST', '/medication', { rabbit_id: 'x', protocol_id: 'y', dose_number: 1 }],
+      ['POST', '/litters/not-a-uuid/kits', {}],
+      ['POST', `/litters/${f.litter}/wean`, { weaned_on: 'soon' }],
+      ['POST', `/litters/${f.litter}/wean`, { weaned_count: 'lots' }],
+      ['PATCH', `/litters/${f.litter}`, { kindled_on: 'yesterday-ish' }],
+      ['POST', `/animals/${f.doe}/status`, { status: 'dead', reason: 'x', changed_on: 'soon' }],
+      ['POST', '/conditions', { rabbit_id: 'not-a-uuid' }],
+      ['POST', '/matings', { doe_id: f.doe, mated_at: 'this morning' }],
+    ];
+
+    for (const [method, path, body] of cases) {
+      const res = await api(method, path, { token: f.token, body });
+      assert.ok(res.status >= 400 && res.status < 500,
+        `${method} ${path} ${JSON.stringify(body)} → ${res.status}, which stops the outbox`);
+      assert.ok(res.body?.error, 'and it has to say something');
+    }
+  });
+
+  test('the message names what was wrong', async () => {
+    const f = await subject();
+    const res = await api('PATCH', `/animals/${f.doe}`, {
+      token: f.token, body: { date_of_birth: 'not-a-date' } });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /date/i);
+  });
+});
+
+describe('the daily list belongs to the farm, not the server', () => {
+  test('a task due on the farm\'s today shows on the farm\'s today', async () => {
+    // Pick a timezone far enough from UTC that the two disagree for part of the
+    // day whatever time this test runs: Kiritimati is UTC+14, so its date is
+    // ahead of UTC for ten hours out of every twenty-four.
+    const f = await signupFarm();
+    await adminQuery(`UPDATE farm SET timezone = 'Pacific/Kiritimati' WHERE id = $1`,
+      [f.farm.id]);
+
+    const { rows } = await adminQuery(
+      `SELECT farm_today($1::uuid) AS farm_day, current_date AS server_day`, [f.farm.id]);
+    const { farm_day, server_day } = rows[0];
+
+    const doe = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Lakshmi', sex: 'doe', date_of_birth: dateAgo(400) },
+    })).body.animal.id;
+    await adminQuery(`
+      INSERT INTO task (farm_id, rabbit_id, kind, title, due_on, priority, generated_key)
+      VALUES ($1::uuid, $2, 'other', 'Feed the shed', $3, 'high', 'tz-test-' || $1::text)`,
+      [f.farm.id, doe, farm_day]);
+
+    const daily = await api('GET', '/daily', { token: f.token });
+    assert.ok(daily.body.items.some((i) => i.title === 'Feed the shed'),
+      farm_day === server_day
+        ? 'a task due today must show'
+        : `it is ${farm_day} on the farm and ${server_day} on the server — `
+          + 'the farm\'s day is the one that counts');
+  });
+});
+
+describe('a kit that dies is still a recorded kit', () => {
+  test('losing one does not invite a replacement record', async () => {
+    const f = await signupFarm();
+    const doe = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Radha', sex: 'doe', date_of_birth: dateAgo(400) },
+    })).body.animal.id;
+    const litter = (await api('POST', '/litters', {
+      token: f.token, body: { doe_id: doe, kindled_on: dateAgo(40), born_alive: 8 } })).body.litter.id;
+    await api('POST', `/litters/${litter}/wean`, {
+      token: f.token, body: { weaned_on: dateAgo(10), weaned_count: 8 } });
+
+    const kits = await api('POST', `/litters/${litter}/kits`, { token: f.token, body: {} });
+    assert.equal(kits.body.kits.length, 8);
+    assert.equal(kits.body.litter.not_yet_recorded, 0);
+
+    // One dies at six weeks.
+    await api('POST', `/animals/${kits.body.kits[0].id}/status`, {
+      token: f.token, body: { status: 'dead', reason: 'Found dead in the run' } });
+
+    const after = await api('GET', `/litters/${litter}/kits`, { token: f.token });
+    assert.equal(after.body.litter.recorded, 8,
+      'she is still recorded — dying does not un-record her');
+    assert.equal(after.body.litter.not_yet_recorded, 0,
+      'and the app must not offer to create a ninth rabbit that never existed');
+    assert.equal(after.body.litter.died, 1);
+  });
+});
