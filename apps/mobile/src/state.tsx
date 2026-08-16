@@ -33,9 +33,30 @@ function resolveApiUrl(): string {
   return 'http://localhost:3000';
 }
 
+/**
+ * A support session handed over by the admin console, in the URL fragment.
+ *
+ * A fragment, not a query string, and that is the whole reason it looks like
+ * this: `#support=…` is never sent to a server, so the token stays out of
+ * access logs, out of the Referer header and out of any proxy in between. It is
+ * taken out of the address bar the moment it is read, so a screenshot or a
+ * shoulder does not carry it either.
+ */
+function takeSupportToken(): string | null {
+  if (typeof window === 'undefined' || !window.location) return null;
+  const m = /(?:^#|[#&])support=([^&]+)/.exec(window.location.hash ?? '');
+  if (!m?.[1]) return null;
+  try {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  } catch { /* older browser, or no history API — the token still works */ }
+  return decodeURIComponent(m[1]);
+}
+
 interface AppState {
   ready: boolean;
   session: Session | null;
+  /** Support is looking. Every screen that writes refuses to open. */
+  readOnly: boolean;
   client: ApiClient;
   outbox: Outbox;
   pending: OutboxEntry[];
@@ -68,7 +89,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     (async () => {
-      setSession(await client.loadSession());
+      const handed = takeSupportToken();
+      if (handed) {
+        // A dead or already-ended link must leave the device as it found it —
+        // adoptSupportToken restores the previous session if the token does not
+        // resolve, so this falls through to whoever was already signed in.
+        try {
+          setSession(await client.adoptSupportToken(handed));
+        } catch {
+          setSession(await client.loadSession());
+        }
+      } else {
+        setSession(await client.loadSession());
+      }
       setPending(await outbox.load());
       setReady(true);
     })();
@@ -108,7 +141,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [outbox]);
 
   const value: AppState = {
-    ready, session, client, outbox, pending, offline,
+    ready, session, readOnly: !!session?.support, client, outbox, pending, offline,
     signIn, signUp, signOut, setOffline, refreshOutbox,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

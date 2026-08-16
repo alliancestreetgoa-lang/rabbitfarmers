@@ -423,3 +423,73 @@ describe('offline reads', () => {
       (e: unknown) => e instanceof OfflineError);
   });
 });
+
+/**
+ * The support handover.
+ *
+ * The admin console mints a farm session bound to a time-boxed, read-only
+ * impersonation record and hands the token over in a URL fragment. This is the
+ * app's end of it — needs an admin, so it stands down when none is configured
+ * rather than failing a run that never had one.
+ */
+describe('support access', () => {
+  const email = process.env.ADMIN_EMAIL;
+  const password = process.env.ADMIN_PASSWORD;
+  const configured = !!(email && password);
+
+  test('adopts a support token, read-only, and says so', { skip: !configured }, async () => {
+    const farm = await freshFarm();
+    await farm.client.addAnimal({ name: 'Gauri', sex: 'doe' });
+
+    const login = await fetch(`${API_URL}/admin/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const { token: adminToken } = await login.json() as { token: string };
+
+    const me = await farm.client.me();
+    const started = await fetch(`${API_URL}/admin/api/impersonate/${me.farm.id}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: 'they cannot find a litter' }),
+    });
+    assert.equal(started.status, 200);
+    const handed = await started.json() as { token: string; url: string };
+    // A fragment, never a query string: it is not sent to a server and does not
+    // reach an access log.
+    assert.match(handed.url, /^\/#support=/);
+
+    // A support person opening the link in a browser that has never seen this
+    // farm: a fresh device, one token, nothing else.
+    const storage = new MemoryStorage();
+    const support = new ApiClient({ baseUrl: API_URL, storage });
+    const session = await support.adoptSupportToken(handed.token);
+
+    assert.equal(session.support?.read_only, true);
+    assert.ok(session.support?.by, 'the app has to be able to name who is looking');
+    assert.equal((await support.animals()).animals[0]!.name, 'Gauri');
+
+    // And the write refused, at the server, whatever the app chose to render.
+    await assert.rejects(
+      () => support.addAnimal({ name: 'Not mine to add', sex: 'doe' }),
+      (e: unknown) => e instanceof ApiError && e.status === 403);
+  });
+
+  test('a dead support link leaves the device signed in', { skip: !configured }, async () => {
+    const farm = await freshFarm();
+    const storage = (farm.client as any).storage as MemoryStorage;
+
+    const client = new ApiClient({ baseUrl: API_URL, storage });
+    await client.loadSession();
+
+    await assert.rejects(
+      () => client.adoptSupportToken('not-a-real-token'),
+      (e: unknown) => e instanceof ApiError && e.status === 401);
+
+    // The farmer was using this phone. A stale link must not sign them out.
+    const revived = new ApiClient({ baseUrl: API_URL, storage });
+    assert.ok(await revived.loadSession(), 'the session on the device should survive');
+    assert.equal((await revived.animals()).animals.length, 0);
+  });
+});

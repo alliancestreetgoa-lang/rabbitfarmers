@@ -2,13 +2,13 @@ import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
-import { Button, Field, H1, Muted, Screen } from '../../src/ui/components';
+import { Button, Field, H1, Muted, Screen, SupportReadOnly } from '../../src/ui/components';
 import { sexLabel, sexLabelFull, sexTerm } from '../../src/ui/labels';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 
 /** Name and sex are the only required fields. Everything else can wait. */
 export default function AddAnimal() {
-  const { client, outbox, refreshOutbox } = useApp();
+  const { client, outbox, refreshOutbox, readOnly, session } = useApp();
   const [name, setName] = useState('');
   const [sex, setSex] = useState<'doe' | 'buck' | null>(null);
   const [dob, setDob] = useState('');
@@ -51,6 +51,10 @@ export default function AddAnimal() {
     setBreed(breed?.id === b.id ? null : { id: b.id, name: b.name });
     setNewBreed('');
   };
+
+  // Support is looking, not touching. The server refuses the write too — this
+  // is so the refusal arrives before the typing rather than after it.
+  if (readOnly) return <SupportReadOnly by={session?.support?.by} />;
 
   return (
     <Screen>

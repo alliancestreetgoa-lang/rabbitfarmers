@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
-import { Button, Field, H1, Loading, Muted, Screen } from '../../src/ui/components';
+import {
+  Button, Field, H1, Loading, Muted, Screen, SupportReadOnly,
+} from '../../src/ui/components';
 import { colors, space, type as t } from '../../src/ui/theme';
 
 /**
@@ -15,7 +17,7 @@ import { colors, space, type as t } from '../../src/ui/theme';
  */
 export default function RecordWeaning() {
   const { litter: litterId } = useLocalSearchParams<{ litter: string }>();
-  const { client, outbox, refreshOutbox } = useApp();
+  const { client, outbox, refreshOutbox, readOnly, session } = useApp();
 
   const { data } = useQuery(`litter:${litterId}`, () => client.litter(litterId), [litterId]);
   const l = data?.litter;
@@ -55,6 +57,10 @@ export default function RecordWeaning() {
       setError((err as Error).message);
     } finally { setBusy(false); }
   };
+
+  // Support is looking, not touching. The server refuses the write too — this
+  // is so the refusal arrives before the typing rather than after it.
+  if (readOnly) return <SupportReadOnly by={session?.support?.by} />;
 
   return (
     <Screen>

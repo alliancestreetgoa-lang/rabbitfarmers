@@ -10,7 +10,7 @@ import { STATE_LABEL, colors, radius, space, type as t } from '../../src/ui/them
 const GONE = ['sold', 'culled', 'dead'];
 
 export default function Herd() {
-  const { client } = useApp();
+  const { client, readOnly } = useApp();
   const [q, setQ] = useState('');
   // The herd you are standing in front of, or the ones who have left it.
   // Nothing is ever deleted, so "past" is a filter, not an archive.
@@ -86,7 +86,7 @@ export default function Herd() {
           </Pressable>
         ))}
 
-        {!past && (
+        {!past && !readOnly && (
           <>
             <View style={{ height: space.lg }} />
             <Pressable style={s.action} onPress={() => router.push('/record/animal')}

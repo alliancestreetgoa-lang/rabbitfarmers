@@ -20,7 +20,7 @@ const MONTH = ['January', 'February', 'March', 'April', 'May', 'June',
  * If a farm hand has to hunt for today's jobs they will use the paper card.
  */
 export default function Daily() {
-  const { client, outbox, refreshOutbox } = useApp();
+  const { client, outbox, refreshOutbox, readOnly } = useApp();
   const { data, loading, stale, reload } = useQuery('daily', () => client.daily());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [done, setDone] = useState<Record<string, { at: string; title: string }>>({});
@@ -115,6 +115,7 @@ export default function Daily() {
                 item={i}
                 busy={busyId === i.ref_id}
                 answeredAt={answered[i.ref_id]}
+                readOnly={readOnly}
                 onStillGoing={() => answerCondition(i, 'ongoing')}
                 onStopped={() => answerCondition(i, 'stopped')}
               />
@@ -127,7 +128,7 @@ export default function Daily() {
             <SectionTitle text="Medicine round" count={doses.length} />
             {doses.map((i) => (
               <DoseRow key={i.ref_id} item={i} busy={busyId === i.ref_id}
-                       onGiven={() => giveDose(i)} />
+                       readOnly={readOnly} onGiven={() => giveDose(i)} />
             ))}
           </>
         )}
@@ -199,8 +200,8 @@ function TaskRow({ item }: { item: DailyItem }) {
  * the whole reminder loop: five days before she kindles, five days after, and
  * nothing to remember.
  */
-function DoseRow({ item, busy, onGiven }: {
-  item: DailyItem; busy: boolean; onGiven: () => void;
+function DoseRow({ item, busy, readOnly, onGiven }: {
+  item: DailyItem; busy: boolean; readOnly?: boolean; onGiven: () => void;
 }) {
   return (
     <View style={[s.row, { alignItems: 'center' }]} testID={`dose-${item.ref_id}`}>
@@ -208,16 +209,20 @@ function DoseRow({ item, busy, onGiven }: {
         <Text style={s.rowTitle}>{item.title}</Text>
         {!!item.tag && <Text style={s.rowMeta}>{item.tag}</Text>}
       </View>
-      <Pressable
-        testID={`given-${item.ref_id}`}
-        style={[s.smallBtn, { backgroundColor: colors.accent, borderColor: colors.accent }]}
-        onPress={onGiven}
-        disabled={busy}
-      >
-        <Text style={[s.smallBtnText, { color: colors.white }]}>
-          {busy ? 'Saving…' : 'Given'}
-        </Text>
-      </Pressable>
+      {/* No button at all for a support session, rather than a button that
+          fails. The work is the farm's to record. */}
+      {!readOnly && (
+        <Pressable
+          testID={`given-${item.ref_id}`}
+          style={[s.smallBtn, { backgroundColor: colors.accent, borderColor: colors.accent }]}
+          onPress={onGiven}
+          disabled={busy}
+        >
+          <Text style={[s.smallBtnText, { color: colors.white }]}>
+            {busy ? 'Saving…' : 'Given'}
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -227,8 +232,8 @@ function DoseRow({ item, busy, onGiven }: {
  * going, or stopped?" so the answer has to be one tap away, not three screens
  * deep.
  */
-function ConditionRow({ item, busy, answeredAt, onStillGoing, onStopped }: {
-  item: DailyItem; busy: boolean; answeredAt?: string;
+function ConditionRow({ item, busy, answeredAt, readOnly, onStillGoing, onStopped }: {
+  item: DailyItem; busy: boolean; answeredAt?: string; readOnly?: boolean;
   onStillGoing: () => void; onStopped: () => void;
 }) {
   return (
@@ -242,6 +247,9 @@ function ConditionRow({ item, busy, answeredAt, onStillGoing, onStopped }: {
             next reminder
           </Text>
         )}
+        {/* Support sees the case and the clock, and answers nothing on the
+            farm's behalf. */}
+        {!readOnly && (
         <View style={s.actions}>
           {/*
             "Still going" is a real answer, not a dismissal. It records the
@@ -269,6 +277,7 @@ function ConditionRow({ item, busy, answeredAt, onStillGoing, onStopped }: {
             </Text>
           </Pressable>
         </View>
+        )}
       </View>
     </View>
   );

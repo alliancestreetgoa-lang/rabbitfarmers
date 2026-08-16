@@ -83,8 +83,24 @@ authRoutes.post('/signin', async (c) => {
 authRoutes.post('/signout', async (c) => {
   const token = readToken(c);
   if (token) {
-    const all = c.req.query('all') === '1';
-    await appQuery('SELECT auth_revoke_session($1,$2)', [hashToken(token), all]);
+    const hash = hashToken(token);
+
+    /*
+     * A support session ends differently, and `?all=1` is why.
+     *
+     * Impersonation runs on an ordinary farm session belonging to the owner, so
+     * "sign out everywhere" from inside one would sign the farmer's own phone
+     * out — support closing their tab, and a farmer in a shed suddenly at a
+     * login screen with no idea why. Ending impersonation ends impersonation:
+     * the record is closed and only the sessions it minted are revoked.
+     */
+    const { rows } = await appQuery('SELECT * FROM auth_resolve_session($1)', [hash]);
+    if (rows[0]?.impersonation_id) {
+      await appQuery('SELECT auth_end_impersonation($1)', [rows[0].impersonation_id]);
+    } else {
+      const all = c.req.query('all') === '1';
+      await appQuery('SELECT auth_revoke_session($1,$2)', [hash, all]);
+    }
   }
   c.header('Set-Cookie', clearCookie());
   return c.json({ ok: true });
@@ -119,6 +135,20 @@ authRoutes.get('/me', requireAuth, async (c) => {
       name: session.fullName,
       role: session.role,
     },
+    /*
+     * Present only when somebody from support is on the other end of this
+     * session. The app reads it to put a strip across the top and to stop
+     * offering buttons that will be refused anyway — but the honest reason it
+     * is here is that the farmer is entitled to know, and the notification the
+     * console writes can be missed while a live banner cannot.
+     */
+    support: session.impersonation
+      ? {
+          by: session.impersonation.by,
+          expires_at: session.impersonation.expires_at,
+          read_only: true,
+        }
+      : null,
     ...data,
   });
 });

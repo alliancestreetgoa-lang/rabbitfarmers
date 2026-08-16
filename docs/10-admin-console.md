@@ -112,7 +112,7 @@ thing you will do all week.
 | Refund | Through Razorpay, recorded here |
 | Resend an invoice | GST invoices get lost; this is a weekly request |
 | Export a farm's data | For a customer asking, or a cancellation |
-| Impersonate ("view as") | Support only. Time-boxed, reason required, logged |
+| Impersonate ("view as") | Support only. Time-boxed, reason required, logged, visible to the farm |
 | Delete a farm | Superadmin only, typed confirmation, soft delete first |
 
 ### Roles
@@ -138,14 +138,41 @@ later.
 ### Impersonation, carefully
 
 Being able to see a farm as its owner sees it turns a twenty-minute support call
-into a two-minute one. It is also, in effect, a master key.
+into a two-minute one. It is also, in effect, a master key. **Built** — the farm
+page has a *View this farm* button for `superadmin` and `support`.
 
-- **Read-only by default.** Write access is a separate, deliberate switch.
-- **Time-boxed** — expires after an hour, not when someone remembers to log out.
-- **Reason required**, stored on the session.
-- **Visible to the farm owner.** A line in their activity log saying support
-  viewed their account, and when. If you would be uncomfortable with them seeing
-  that, you should not be in there.
+How it works, because the mechanism is the safety:
+
+Support does not get a special kind of access. The console mints an **ordinary
+farm session** on the owner's employee row, bound to a row in
+`admin_impersonation`, and hands the token over in a **URL fragment** — never a
+query string, so it is not sent to a server and never reaches an access log.
+Everything hangs off that binding:
+
+- **Read-only, always.** Not a switch. Enforced in `requireAuth` as a blanket
+  rule on the HTTP method, not a guard bolted onto the write routes — because
+  the write routes are not the whole set. Marking a notification read, changing
+  a password and signing every device out carry no write guard, and the last two
+  are exactly the ones support must never reach.
+- **Time-boxed to an hour**, checked on *every request* against the
+  impersonation record rather than at the token's own expiry. Ending it in the
+  console shuts the door on the next request.
+- **Reason required**, in `admin_audit_log` and in what the farmer is told.
+- **Visible to the farm.** A `support_access` notification naming the support
+  person and the reason, *and* the session itself in the farmer's signed-in
+  devices list as "Rabbitry support · Sam Support". The app carries a strip
+  across the bottom of every screen for as long as it is live.
+- **Endable from either side.** Support signs out; the admin clicks *End this
+  session now*; the farmer changes their password, which revokes every session
+  on the farm including this one. `?all=1` from inside a support session is
+  deliberately *not* honoured — it would sign the farmer's own phone out.
+
+`test/impersonation.test.js` is a test per clause of that list.
+
+**Scoping is unchanged.** A support session goes through the same RLS as the
+farmer's phone, so "read-only" and "this farm only" are enforced in two
+different places by two different mechanisms, neither of which is application
+code remembering to check.
 
 ### The revenue screen
 

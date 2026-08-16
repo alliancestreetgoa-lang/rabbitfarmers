@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
-import { Button, H1, Loading, Muted, Screen } from '../../src/ui/components';
+import {
+  Button, H1, Loading, Muted, Screen, SupportReadOnly,
+} from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 
 const SEVERITY = ['mild', 'moderate', 'severe'] as const;
@@ -13,7 +15,7 @@ const SEVERITY = ['mild', 'moderate', 'severe'] as const;
  */
 export default function ReportCondition() {
   const { rabbit } = useLocalSearchParams<{ rabbit?: string }>();
-  const { client, outbox, refreshOutbox } = useApp();
+  const { client, outbox, refreshOutbox, readOnly, session } = useApp();
   const [rabbitId, setRabbitId] = useState<string | undefined>(rabbit);
   const [severity, setSeverity] = useState<typeof SEVERITY[number]>('moderate');
   const [busy, setBusy] = useState(false);
@@ -34,6 +36,10 @@ export default function ReportCondition() {
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   };
+
+  // Support is looking, not touching. The server refuses the write too — this
+  // is so the refusal arrives before the typing rather than after it.
+  if (readOnly) return <SupportReadOnly by={session?.support?.by} />;
 
   return (
     <Screen>

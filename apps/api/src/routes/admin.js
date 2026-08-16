@@ -3,7 +3,7 @@ import { adminQuery } from '../db.js';
 import {
   hashPassword, verifyPassword, newSessionToken, hashToken, HttpError,
 } from '../auth.js';
-import { renderLogin, renderFarms, renderFarm } from '../admin-ui.js';
+import { renderLogin, renderFarms, renderFarm, renderImpersonation } from '../admin-ui.js';
 
 export const adminRoutes = new Hono();
 
@@ -332,6 +332,36 @@ adminRoutes.post('/farms/:id/delete', requireAdminRole('superadmin'), async (c) 
   return c.redirect('/admin/farms');
 });
 
+/**
+ * The console's "view this farm" button.
+ *
+ * Registered above /farms/:id/:action, like delete and reset_password. Hono
+ * matches in registration order; below the wildcard this would answer
+ * `Unknown action "impersonate"` and the role check would never run. That has
+ * happened twice already, which is why there is a test for it.
+ *
+ * The work is in startImpersonation, further down.
+ */
+adminRoutes.post('/farms/:id/impersonate',
+  requireAdminRole('superadmin', 'support'), async (c) => {
+    const ct = c.req.header('content-type') ?? '';
+    const body = ct.includes('application/json')
+      ? await c.req.json().catch(() => ({}))
+      : Object.fromEntries(await c.req.formData());
+
+    const started = await startImpersonation(
+      c, c.req.param('id'), String(body.reason ?? '').trim());
+
+    if (ct.includes('application/json')) {
+      return c.json({
+        impersonation: started.impersonation,
+        token: started.token,
+        url: `/#support=${started.token}`,
+      });
+    }
+    return c.html(renderImpersonation(started));
+  });
+
 adminRoutes.post('/farms/:id/:action', async (c) => {
   const admin = c.get('admin');
   const farmId = c.req.param('id');
@@ -371,26 +401,122 @@ adminRoutes.post('/farms/:id/:action', async (c) => {
   return c.redirect(`/admin/farms/${farmId}`);
 });
 
-/** Time-boxed, reason-tagged, read-only by default, and visible to the farm. */
-adminRoutes.post('/api/impersonate/:id', requireAdminRole('superadmin', 'support'), async (c) => {
+/**
+ * Start a support session on a farm.
+ *
+ * The record has existed since the first migration and granted nothing. What
+ * actually lets support see the farm is the last step here: an ordinary farm
+ * session, on the owner's employee row, bound to the impersonation record. It
+ * goes through the same RLS as the farmer's own phone, which is the point —
+ * support sees exactly what the farmer sees, no more, through no special path.
+ *
+ * Four things constrain it, and none of them are optional:
+ *
+ *   a reason, refused without one, in the audit log
+ *   one hour, checked on every request rather than at token expiry
+ *   read-only, enforced in requireAuth for every method that is not a read
+ *   visible — a notification to the farm, and the support session shows up in
+ *   the farmer's own list of signed-in devices with the admin's name on it
+ *
+ * The token is returned, never set as a cookie. The console hands it over in a
+ * URL fragment, which browsers do not send to servers and proxies do not log.
+ */
+async function startImpersonation(c, farmId, reason) {
   const admin = c.get('admin');
-  const farmId = c.req.param('id');
-  const body = await c.req.json().catch(() => ({}));
-  const reason = String(body.reason ?? '').trim();
   if (!reason) throw new HttpError(400, 'A reason is required to view a farm');
+
+  const { rows: owner } = await adminQuery(`
+    SELECT e.id, e.full_name, f.name AS farm_name
+    FROM employee e JOIN farm f ON f.id = e.farm_id
+    WHERE e.farm_id = $1 AND e.role = 'owner' AND e.is_active
+    ORDER BY e.created_at LIMIT 1`, [farmId]);
+  // Not "farm not found": a farm whose owner has been deactivated exists and
+  // cannot be viewed, and saying so is the difference between a support person
+  // retrying and a support person escalating.
+  if (!owner.length) throw new HttpError(404, 'That farm has no active owner to view it as');
 
   const { rows } = await adminQuery(`
     INSERT INTO admin_impersonation (admin_id, farm_id, reason, expires_at, read_only)
     VALUES ($1,$2,$3, now() + interval '1 hour', $4)
-    RETURNING id, expires_at, read_only`,
+    RETURNING id, started_at, expires_at, read_only`,
     // Always read-only. It used to be caller-controlled, which would have been
     // a footgun the moment somebody wired the consumer up: the docs promise
     // impersonation is read-only, and an API that lets the caller opt out of
     // that promise is not read-only.
     [admin.id, farmId, reason, true]);
+  const imp = rows[0];
 
-  await audit(admin, 'impersonate', farmId, null, { reason }, reason, null);
-  return c.json({ impersonation: rows[0] });
+  const { token, hash } = newSessionToken();
+  await adminQuery(`
+    INSERT INTO user_session (employee_id, token_hash, expires_at, device,
+                              impersonation_id, ip)
+    VALUES ($1, $2, $3, $4, $5, $6)`,
+    [owner[0].id, hash, imp.expires_at,
+     `Rabbitry support · ${admin.full_name}`, imp.id,
+     c.req.header('x-forwarded-for') || null]);
+
+  /*
+   * Tell the farm. Not by email — there is no sender — but into the same list
+   * the nest-box reminders arrive in, which is the one place a farmer already
+   * looks. Written after the session so a failure here cannot leave an admin
+   * holding a token nobody was told about; if the insert throws, the whole
+   * request fails and support tries again.
+   */
+  await adminQuery(`
+    INSERT INTO notification (farm_id, kind, title, body, urgency, dedupe_key)
+    VALUES ($1, 'support_access', $2, $3, 'medium', $4)`,
+    [farmId,
+     `${admin.full_name} from Rabbitry support opened your farm`,
+     `They can see your records for one hour and cannot change anything. `
+     + `Reason given: "${reason}". If you did not ask for help, change your `
+     + `password from More — that ends every session on this farm, including theirs.`,
+     `support-access:${imp.id}`]);
+
+  await audit(admin, 'impersonate', farmId, null,
+    { reason, expires_at: imp.expires_at }, reason,
+    c.req.header('x-forwarded-for') ?? null, 'admin_impersonation');
+
+  return { impersonation: imp, token, farm_name: owner[0].farm_name, admin };
+}
+
+/** The same thing for anything driving the console over JSON. */
+adminRoutes.post('/api/impersonate/:id', requireAdminRole('superadmin', 'support'), async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const started = await startImpersonation(
+    c, c.req.param('id'), String(body.reason ?? '').trim());
+  return c.json({
+    impersonation: started.impersonation,
+    token: started.token,
+    url: `/#support=${started.token}`,
+  });
+});
+
+/** End it early. Closing the tab is not ending it; this is. */
+adminRoutes.post('/api/impersonate/:id/end',
+  requireAdminRole('superadmin', 'support'), async (c) => {
+    const id = c.req.param('id');
+    const { rows } = await adminQuery(
+      `UPDATE admin_impersonation SET ended_at = now()
+        WHERE id = $1 AND ended_at IS NULL
+        RETURNING farm_id`, [id]);
+    // The session goes too. "Ended" and "still usable" disagreeing is the one
+    // outcome that would make the audit log a lie.
+    await adminQuery(
+      `UPDATE user_session SET revoked_at = now(),
+                               revoked_reason = 'support access ended'
+        WHERE impersonation_id = $1 AND revoked_at IS NULL`, [id]);
+
+    if (c.req.header('accept')?.includes('text/html')) {
+      return c.redirect(rows[0]?.farm_id ? `/admin/farms/${rows[0].farm_id}` : '/admin/farms');
+    }
+    return c.json({ ok: true, ended: rows.length > 0 });
+  });
+
+/** Who is inside a customer's farm right now. */
+adminRoutes.get('/api/impersonations', async (c) => {
+  const { rows } = await adminQuery(
+    'SELECT * FROM v_active_impersonation ORDER BY started_at DESC');
+  return c.json({ active: rows });
 });
 
 adminRoutes.get('/api/summary', async (c) => {

@@ -156,6 +156,54 @@ export function renderFarms({ farms, summary, q, status, admin }) {
       in two weeks is churning whether or not it is still paying.</p>`);
 }
 
+/**
+ * Handing a support session over to the app.
+ *
+ * The token goes in the URL *fragment*, not the query string. A fragment is
+ * never sent to a server, so it stays out of access logs, out of the Referer
+ * header and out of Netlify's edge — which matters more than usual here,
+ * because this particular token opens a paying customer's farm.
+ */
+export function renderImpersonation({ impersonation, token, farm_name, admin }) {
+  const ends = new Date(impersonation.expires_at);
+  const mins = Math.max(0, Math.round((ends - Date.now()) / 60000));
+
+  return page(`Viewing ${farm_name}`, `
+    <header>
+      <h1>Viewing ${esc(farm_name)}</h1>
+      <div class="muted"><a href="/admin/farms">← All farms</a></div>
+    </header>
+
+    <div class="action" style="max-width:620px">
+      <h3>Open the farm</h3>
+      <p>Their screens, exactly as they see them. Read-only — every button that
+         writes will be refused, including changing their password.</p>
+      <p><a href="/#support=${esc(token)}" target="_blank" rel="noopener"
+            style="font-size:18px">Open ${esc(farm_name)} in the app →</a></p>
+    </div>
+
+    <h2>What ${esc(admin.full_name)} can and cannot do</h2>
+    <div class="tw"><table style="min-width:0">
+      <tbody>
+        <tr><td>Ends</td><td>${esc(ends.toISOString().slice(0, 16).replace('T', ' '))} UTC
+            — in about ${mins} minutes</td></tr>
+        <tr><td>Writes</td><td>Refused. Not a hidden button: the server says no.</td></tr>
+        <tr><td>The farmer</td><td>Has been sent a notification naming you and the
+            reason, and sees this session in their signed-in devices list.</td></tr>
+        <tr><td>Ending early</td><td>Sign out inside the app, or the button below.</td></tr>
+      </tbody>
+    </table></div>
+
+    <form method="post" action="/admin/api/impersonate/${esc(impersonation.id)}/end"
+          style="margin-top:18px">
+      <button type="submit">End this session now</button>
+    </form>
+
+    <p class="muted" style="margin-top:18px;max-width:620px">
+      Closing the tab does not end it — the session stays live until the hour is
+      up. End it when you are done; the customer can see that you did.</p>`);
+}
+
 export function renderFarm({ farm, audit, subscription, admin }) {
   const canBill = ['superadmin', 'billing'].includes(admin.role);
   const canComp = admin.role === 'superadmin';
@@ -215,6 +263,14 @@ export function renderFarm({ farm, audit, subscription, admin }) {
         is the only way back in for someone locked out of their own farm, which
         is why it is here rather than left to a database prompt.
       */ ''}
+      ${/*
+        Read-only, one hour, and the farmer is told. The reason box is not a
+        formality: it is the only thing that makes the audit line readable to
+        the customer a year later when they ask who opened their farm.
+      */ ''}
+      ${action('impersonate', 'View this farm',
+        'Their screens, read-only, for one hour. They are told it happened.',
+        '', admin.role === 'superadmin' || admin.role === 'support')}
       ${action('reset_password', 'Reset password',
         'They are locked out. Sets a temporary one and signs every device out.',
         '', admin.role === 'superadmin' || admin.role === 'support')}

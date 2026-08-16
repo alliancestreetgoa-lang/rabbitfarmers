@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
-import { Button, Field, H1, Loading, Muted, Screen } from '../../src/ui/components';
+import {
+  Button, Field, H1, Loading, Muted, Screen, SupportReadOnly,
+} from '../../src/ui/components';
 import { sexLabel } from '../../src/ui/labels';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 
@@ -18,7 +20,7 @@ type Sex = 'unknown' | 'doe' | 'buck';
  */
 export default function AddKits() {
   const { litter: litterId } = useLocalSearchParams<{ litter: string }>();
-  const { client } = useApp();
+  const { client, readOnly, session } = useApp();
 
   const { data, loading, reload } = useQuery(
     `kits:${litterId}`, () => client.kits(litterId), [litterId]);
@@ -55,6 +57,10 @@ export default function AddKits() {
       setError((err as Error).message);
     } finally { setBusy(false); }
   };
+
+  // Support is looking, not touching. The server refuses the write too — this
+  // is so the refusal arrives before the typing rather than after it.
+  if (readOnly) return <SupportReadOnly by={session?.support?.by} />;
 
   return (
     <Screen>

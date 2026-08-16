@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
-import { Button, Field, H1, Loading, Muted, Screen } from '../../src/ui/components';
+import {
+  Button, Field, H1, Loading, Muted, Screen, SupportReadOnly,
+} from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 
 /**
@@ -17,7 +19,7 @@ export default function RecordKindling() {
     useLocalSearchParams<{ doe?: string; litter?: string }>();
   const editing = !!litterId;
 
-  const { client, outbox, refreshOutbox } = useApp();
+  const { client, outbox, refreshOutbox, readOnly, session } = useApp();
   const [doeId, setDoeId] = useState<string | undefined>(doeParam);
   const [alive, setAlive] = useState('');
   const [dead, setDead] = useState('');
@@ -78,6 +80,10 @@ export default function RecordKindling() {
   };
 
   const total = (Number(alive || 0) + Number(dead || 0)) || 0;
+
+  // Support is looking, not touching. The server refuses the write too — this
+  // is so the refusal arrives before the typing rather than after it.
+  if (readOnly) return <SupportReadOnly by={session?.support?.by} />;
 
   return (
     <Screen>

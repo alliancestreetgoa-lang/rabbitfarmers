@@ -4,7 +4,7 @@ import type {
   Animal, Breed, BuckSuggestion, Cage, DailyItem, HistoryEvent, Litter, MatingSchedule,
   MedicationDose, OpenCondition, PregnancySummary, PregnantDoe, RabbitLifetime,
   ReadyDoe,
-  Session, Subscription,
+  Session, Subscription, SupportAccess,
 } from './types.ts';
 
 const TOKEN_KEY = 'rb.token';
@@ -179,7 +179,50 @@ export class ApiClient {
       user: { id: string; name: string; role: string };
       farm: { id: string; name: string; timezone: string };
       subscription: Subscription;
+      support: SupportAccess | null;
     }>('GET', '/auth/me');
+  }
+
+  /**
+   * Take over a session minted by the admin console.
+   *
+   * Support does not sign in as the farmer — there is no password to type and
+   * nobody would want there to be. The console mints a real farm session bound
+   * to a time-boxed, audited impersonation record and hands the token over in a
+   * URL fragment; this is the app end of that handover.
+   *
+   * The token is proved before it is stored. A stale or already-ended one must
+   * leave the app exactly as it found it, rather than replacing whatever
+   * session was on the device with a dead one.
+   */
+  async adoptSupportToken(token: string): Promise<Session> {
+    // Both, and read before anything is overwritten. A 401 inside request()
+    // clears the stored session, so a dead support link would otherwise sign
+    // out whoever was already using the device.
+    const previousToken = this.token;
+    const previousSession = await this.storage.get(SESSION_KEY);
+    this.token = token;
+    try {
+      const me = await this.request<{
+        user: { id: string; name: string; role: string };
+        farm: { id: string; name: string };
+        support: SupportAccess | null;
+      }>('GET', '/auth/me');
+
+      const session: Session = {
+        token,
+        farm: { id: me.farm.id, name: me.farm.name },
+        user: { id: me.user.id, name: me.user.name, role: me.user.role },
+        support: me.support,
+      };
+      await this.setSession(session);
+      return session;
+    } catch (err) {
+      this.token = previousToken;
+      if (previousToken) await this.storage.set(TOKEN_KEY, previousToken);
+      if (previousSession) await this.storage.set(SESSION_KEY, previousSession);
+      throw err;
+    }
   }
 
   /* ------------------------------------------------------------------ read */

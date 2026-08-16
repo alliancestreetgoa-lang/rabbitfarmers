@@ -46,7 +46,7 @@ GRANT rabbitry_admin TO admin_login;
 npm test
 ```
 
-70 tests against a real database — no mocks, because the parts most worth
+139 tests against a real database — no mocks, because the parts most worth
 testing here (RLS, view security, the derived breeding state) only exist in
 Postgres. They create and clean up their own data, scoped by process id so the
 files can run concurrently.
@@ -97,6 +97,14 @@ litter. There is a test asserting this.
 **Calendar dates stay strings.** `DATE` columns are parsed as `YYYY-MM-DD`
 rather than `Date` objects. A kindling date is a day on the farm, not an
 instant, and converting it attaches the server's timezone to it.
+
+**Support impersonation is an ordinary farm session.** `POST
+/admin/farms/:id/impersonate` mints a session on the owner's employee row bound
+to a row in `admin_impersonation`, so RLS scopes it exactly like the farmer's
+phone. Read-only is enforced in `requireAuth` as a blanket rule on the HTTP
+method rather than a guard on the write routes — `/auth/password`,
+`/auth/signout` and `/notifications/read` carry no write guard, and those are
+precisely the ones that must not be reachable. See `test/impersonation.test.js`.
 
 **The scheduler runs from outside the database.** `src/scheduler.js` generates
 tasks and notifications; Netlify's scheduled function calls it every 15 minutes.

@@ -173,27 +173,8 @@ describe('admin CRM', () => {
     assert.equal(res.body.subscription.locked_price_yearly_paise, 0);
   });
 
-  test('impersonation is time-boxed, read-only and logged', async () => {
-    const f = await signupFarm();
-    const admin = await makeAdmin('support');
-
-    const noReason = await api('POST', `/admin/api/impersonate/${f.farm.id}`, {
-      token: admin.token, body: {},
-    });
-    assert.equal(noReason.status, 400);
-
-    const res = await api('POST', `/admin/api/impersonate/${f.farm.id}`, {
-      token: admin.token, body: { reason: 'customer reports a missing litter' },
-    });
-    assert.equal(res.status, 200);
-    assert.equal(res.body.impersonation.read_only, true);
-    assert.ok(new Date(res.body.impersonation.expires_at) - Date.now() <= 3600_000);
-
-    const { rows } = await adminQuery(
-      `SELECT count(*)::int AS n FROM admin_audit_log
-       WHERE target_farm_id = $1 AND action = 'impersonate'`, [f.farm.id]);
-    assert.equal(rows[0].n, 1);
-  });
+  // Impersonation has a file of its own — test/impersonation.test.js — because
+  // "time-boxed, read-only and logged" is five behaviours, not one.
 
   test('revenue summary excludes trials from MRR', async () => {
     const f = await signupFarm();
@@ -439,7 +420,7 @@ describe('specific admin routes are not swallowed by the wildcard', () => {
     const f = await signupFarm();
     const admin = await makeAdmin('superadmin');
 
-    for (const action of ['delete', 'reset_password']) {
+    for (const action of ['delete', 'reset_password', 'impersonate']) {
       const res = await api('POST', `/admin/farms/${f.farm.id}/${action}`, {
         token: admin.token, body: {} });
       assert.ok(!/Unknown action/.test(res.body?.error ?? ''),

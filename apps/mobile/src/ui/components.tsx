@@ -120,6 +120,29 @@ export function Banner({ text, tone = 'high' }: { text: string; tone?: string })
   );
 }
 
+/**
+ * What a support session sees instead of a screen that writes.
+ *
+ * The server refuses the write anyway — every method that is not a read is
+ * blocked for an impersonated session. This exists so the refusal arrives
+ * before the typing rather than after it, and so the reason is a sentence
+ * rather than an error code.
+ */
+export function SupportReadOnly({ by }: { by?: string | null }) {
+  return (
+    <View style={s.screen}>
+      <View style={{ padding: space.xl, gap: space.md }}>
+        <Text style={s.h1}>Read-only</Text>
+        <Text style={s.muted} testID="support-read-only">
+          {by ? `${by} is` : 'You are'} viewing this farm to help with a support
+          request. Nothing here can be changed — not a mating, not a weight, not
+          a password. Ask the farmer to record it, or talk them through it.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export function Empty({ text }: { text: string }) {
   return <View style={s.empty}><Text style={s.emptyText}>{text}</Text></View>;
 }

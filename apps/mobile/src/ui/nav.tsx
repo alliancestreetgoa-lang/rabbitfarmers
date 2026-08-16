@@ -18,11 +18,25 @@ const TABS = [
  */
 export function TabBar() {
   const path = usePathname();
-  const { pending, offline } = useApp();
+  const { pending, offline, session } = useApp();
   const queued = pending.filter((p) => !p.failed).length;
+  const support = session?.support ?? null;
 
   return (
     <View>
+      {/*
+        A stranger is looking at this farm. It says so on every screen, for as
+        long as it is true, in the place the farmer's eye already goes for the
+        sync status. The notification the console writes can be missed; a strip
+        across the bottom of every screen cannot.
+      */}
+      {support && (
+        <View style={[s.strip, s.stripSupport]}>
+          <Text style={s.stripText} testID="support-strip">
+            Support view · {support.by} · read-only
+          </Text>
+        </View>
+      )}
       {(offline || queued > 0) && (
         <View style={[s.strip, offline ? s.stripOffline : s.stripQueued]}>
           <Text style={s.stripText} testID="sync-strip">
@@ -73,5 +87,6 @@ const s = StyleSheet.create({
   strip: { paddingVertical: space.sm, paddingHorizontal: space.lg },
   stripOffline: { backgroundColor: colors.warnSoft },
   stripQueued: { backgroundColor: colors.accentSoft },
+  stripSupport: { backgroundColor: colors.critSoft },
   stripText: { ...t.small, fontWeight: '600', color: colors.ink, textAlign: 'center' },
 });

@@ -8,10 +8,26 @@ export type ReproductiveState =
   | 'GROWING' | 'READY' | 'MATED' | 'PREGNANT' | 'NEST_BOX'
   | 'LACTATING' | 'PSEUDOPREGNANT' | 'OPEN' | 'RESTING' | 'OVERDUE';
 
+/**
+ * Somebody from Rabbitry support is on the other end of this session.
+ *
+ * Present only on a session handed over by the admin console. The app shows it
+ * and refuses to open any screen that writes — not because the server would
+ * allow it (it refuses too) but because the farmer is entitled to see, on their
+ * own screen, that a stranger is looking.
+ */
+export interface SupportAccess {
+  /** The support person's name, as it appears in the audit log. */
+  by: string;
+  expires_at: string;
+  read_only: boolean;
+}
+
 export interface Session {
   token: string;
   farm: { id: string; name?: string };
   user: { id: string; name: string; email?: string; role: string };
+  support?: SupportAccess | null;
 }
 
 export interface Animal {

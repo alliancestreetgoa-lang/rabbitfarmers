@@ -36,8 +36,9 @@ with grandfathering enforced in the schema.
 | Rabbit history, corrections, animals leaving the herd | Built, 12 tests |
 | Subscriptions, trial, grace, entitlements | Built, 4 tests |
 | Super-admin CRM with audit trail | Built, 25 tests |
+| Support impersonation — read-only, an hour, visible to the farm | Built, 13 tests |
 | Scheduler (task generation, 2-hourly reminders, heartbeat) | Built, 25 tests |
-| Expo app — Today, Breeding, Herd, recording, offline outbox | Built, 18 tests against the real API |
+| Expo app — Today, Breeding, Herd, recording, offline outbox | Built, 20 tests against the real API |
 | Netlify deployment | Configured and deployment-ready, **not deployed** |
 | Razorpay billing | Not started — deliberately deferred |
 
@@ -48,7 +49,7 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 127 API tests, then boots the server and hits real endpoints over HTTP —
+the 139 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.
@@ -72,11 +73,6 @@ a deploy would answer with.
 Deploying is [docs/11-deploying-to-netlify.md](docs/11-deploying-to-netlify.md).
 
 ### The next thing to build
-
-**Impersonation is not wired up.** `POST /admin/api/impersonate/:id` writes an
-audited, time-boxed, read-only record and nothing consumes it, so support cannot
-actually see a farm's screens. The console does not offer it, which is why this
-is a gap rather than a lie.
 
 **Employees.** The tables are there — staff, sections, attendance — and nothing
 is exposed. Every farm is a single owner account, so a farm hand cannot be given

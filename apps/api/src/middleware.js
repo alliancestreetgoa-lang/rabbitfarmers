@@ -45,15 +45,47 @@ export async function requireAuth(c, next) {
   if (!rows.length) throw new HttpError(401, 'Your session has expired. Sign in again.');
 
   const s = rows[0];
+  const impersonation = s.impersonation_id
+    ? {
+        id: s.impersonation_id,
+        by: s.impersonated_by,
+        expires_at: s.impersonation_expires_at,
+      }
+    : null;
+
   c.set('session', {
     sessionId: s.session_id,
     employeeId: s.employee_id,
     farmId: s.farm_id,
     fullName: s.full_name,
     role: s.role,
+    impersonation,
     token,
   });
   c.set('db', (fn) => withFarm(s.farm_id, fn));
+
+  /*
+   * Support is looking, not touching.
+   *
+   * This is a blanket rule on the method rather than a guard bolted onto the
+   * write routes, because the write routes are not the whole set. Marking a
+   * notification read, changing a password, signing every device out — none of
+   * those carry requireWriteAccess, and the last two are precisely the ones
+   * that must never be available to somebody who is not the farmer. A rule that
+   * has to be remembered on each new endpoint is a rule that will be forgotten
+   * on the twentieth.
+   *
+   * So: an impersonated session may read. That is all. Ending it goes through
+   * POST /auth/signout, which resolves the token itself and never reaches here.
+   */
+  if (impersonation && !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
+    throw new HttpError(403, 'Support access is read-only', {
+      impersonation: true,
+      by: impersonation.by,
+      message: `${impersonation.by} is viewing this farm to help with a support request and cannot change anything.`,
+    });
+  }
+
   await next();
 }
 

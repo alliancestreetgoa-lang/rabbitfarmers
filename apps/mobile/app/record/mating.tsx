@@ -3,14 +3,14 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
 import {
-  Banner, Button, Card, H1, Loading, Muted, Pill, Screen,
+  Banner, Button, Card, H1, Loading, Muted, Pill, Screen, SupportReadOnly,
 } from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 import type { BuckSuggestion } from '../../src/api/types';
 
 export default function RecordMating() {
   const { doe: doeParam } = useLocalSearchParams<{ doe?: string }>();
-  const { client, outbox, refreshOutbox } = useApp();
+  const { client, outbox, refreshOutbox, readOnly, session } = useApp();
 
   const [doeId, setDoeId] = useState<string | undefined>(doeParam);
   const [buckId, setBuckId] = useState<string | undefined>();
@@ -65,6 +65,10 @@ export default function RecordMating() {
       </Screen>
     );
   }
+
+  // Support is looking, not touching. The server refuses the write too — this
+  // is so the refusal arrives before the typing rather than after it.
+  if (readOnly) return <SupportReadOnly by={session?.support?.by} />;
 
   return (
     <Screen>

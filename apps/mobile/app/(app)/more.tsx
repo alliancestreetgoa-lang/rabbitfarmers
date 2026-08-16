@@ -7,7 +7,7 @@ import { Card, H1, Muted, Pill, Screen } from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 
 export default function More() {
-  const { client, session, signOut, pending } = useApp();
+  const { client, session, signOut, pending, readOnly } = useApp();
   const { data } = useQuery('me', () => client.me());
   const sub = data?.subscription;
   const failed = pending.filter((p) => p.failed);
@@ -55,16 +55,22 @@ export default function More() {
           </Card>
         )}
 
-        <Pressable style={s.action} onPress={() => router.push('/record/condition')}
-                   testID="report-problem">
-          <Text style={s.actionText}>Report a sick rabbit</Text>
-        </Pressable>
+        {!readOnly && (
+          <Pressable style={s.action} onPress={() => router.push('/record/condition')}
+                     testID="report-problem">
+            <Text style={s.actionText}>Report a sick rabbit</Text>
+          </Pressable>
+        )}
 
         <View style={{ height: space.lg }} />
         <Pressable style={[s.action, { borderColor: colors.crit }]}
                    onPress={async () => { await signOut(); router.replace('/(auth)/sign-in'); }}
                    testID="signout">
-          <Text style={[s.actionText, { color: colors.crit }]}>Sign out</Text>
+          <Text style={[s.actionText, { color: colors.crit }]}>
+            {/* Same button, honest label. Support signing out ends the support
+                view; it does not sign the farmer's own devices out. */}
+            {readOnly ? 'End support view' : 'Sign out'}
+          </Text>
         </Pressable>
       </ScrollView>
       <TabBar />

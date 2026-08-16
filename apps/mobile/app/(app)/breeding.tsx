@@ -10,7 +10,7 @@ import { colors, radius, relativeDay, space, type as t } from '../../src/ui/them
  * The two questions the whole app exists to answer, on one screen.
  */
 export default function Breeding() {
-  const { client } = useApp();
+  const { client, readOnly } = useApp();
   const preg = useQuery('pregnant', () => client.pregnant());
   const ready = useQuery('ready', () => client.readyToMate());
 
@@ -100,14 +100,19 @@ export default function Breeding() {
         ))}
 
         <View style={{ height: space.xl }} />
-        <Pressable style={s.action} onPress={() => router.push('/record/mating')}
-                   testID="record-mating">
-          <Text style={s.actionText}>Record a mating</Text>
-        </Pressable>
-        <Pressable style={s.action} onPress={() => router.push('/record/kindling')}
-                   testID="record-kindling">
-          <Text style={s.actionText}>Record a kindling</Text>
-        </Pressable>
+        {/* Support can read the queue; recording against it is the farm's. */}
+        {!readOnly && (
+          <>
+            <Pressable style={s.action} onPress={() => router.push('/record/mating')}
+                       testID="record-mating">
+              <Text style={s.actionText}>Record a mating</Text>
+            </Pressable>
+            <Pressable style={s.action} onPress={() => router.push('/record/kindling')}
+                       testID="record-kindling">
+              <Text style={s.actionText}>Record a kindling</Text>
+            </Pressable>
+          </>
+        )}
         <View style={{ height: space.md }} />
         <Muted>Always take the doe to the buck, never the buck to the doe.</Muted>
       </ScrollView>

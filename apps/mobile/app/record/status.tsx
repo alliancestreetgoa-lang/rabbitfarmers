@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
-import { Button, Field, H1, Loading, Muted, Screen } from '../../src/ui/components';
+import {
+  Button, Field, H1, Loading, Muted, Screen, SupportReadOnly,
+} from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 
 type Status = 'sold' | 'culled' | 'dead' | 'quarantine' | 'active';
@@ -23,7 +25,7 @@ const CHOICES: { value: Status; label: string; blurb: string }[] = [
  */
 export default function ChangeStatus() {
   const { rabbit } = useLocalSearchParams<{ rabbit: string }>();
-  const { client } = useApp();
+  const { client, readOnly, session } = useApp();
   const { data, loading } = useQuery(`history:${rabbit}`, () => client.history(rabbit), [rabbit]);
 
   const [status, setStatus] = useState<Status | null>(null);
@@ -61,6 +63,10 @@ export default function ChangeStatus() {
       setError((err as Error).message);
     } finally { setBusy(false); }
   };
+
+  // Support is looking, not touching. The server refuses the write too — this
+  // is so the refusal arrives before the typing rather than after it.
+  if (readOnly) return <SupportReadOnly by={session?.support?.by} />;
 
   return (
     <Screen>
