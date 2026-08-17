@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+/*
+ * Tailwind v4 — configuration lives here, not in a tailwind.config.js.
+ *
+ * The `farm-*` tokens are lifted from apps/mobile/src/ui/theme.ts so the web app
+ * and the phone app cannot drift into two different greens. That file's comment
+ * explains the choice: "a green-biased neutral rather than a pure grey so the
+ * palette reads as chosen."
+ */
+@theme {
+  --color-farm-ground: #f6f8f4;
+  --color-farm-surface: #ffffff;
+  --color-farm-surface-alt: #edf1ea;
+  --color-farm-ink: #1b211d;
+  --color-farm-ink-soft: #4a554d;
+  --color-farm-muted: #6e7a72;
+  --color-farm-rule: #d3dbd2;
+  --color-farm-accent: #2c5f53;
+  --color-farm-accent-deep: #1e3f37;
+  --color-farm-accent-soft: #dce9e3;
+  --color-farm-warn: #8a6510;
+  --color-farm-crit: #8c332b;
+  --color-farm-crit-soft: #f5dfdc;
+
+  --font-display: Georgia, "Times New Roman", serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-farm-ground);
+  color: var(--color-farm-ink);
+  -webkit-font-smoothing: antialiased;
+}

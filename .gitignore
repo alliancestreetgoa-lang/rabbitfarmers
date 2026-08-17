@@ -7,6 +7,9 @@ node_modules/
 apps/mobile/dist/
 .expo/
 
+# Same for the web dashboard's build output.
+apps/web/dist/
+
 # Native projects are generated from app.config.js by `expo prebuild`, not
 # authored. Committing them means the next prebuild silently discards whatever
 # was edited by hand, and two people's builds drift apart with nothing in the
