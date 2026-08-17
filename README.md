@@ -43,7 +43,7 @@ with grandfathering enforced in the schema.
 | Expo app — Today, Breeding, Herd, Team, Billing, recording, offline outbox | Built, 33 tests — 22 against the real API |
 | Android / iOS binaries | Icons, native config and EAS profiles ready. **No APK built** — needs the Android SDK and a signing key |
 | Netlify deployment | Configured and deployment-ready, **not deployed** |
-| Razorpay billing — payment links, signed webhooks, GST invoices | Built, 25 tests against a stub gateway. Recurring mandates deferred |
+| Razorpay billing — payment links, signed webhooks, GST invoices | Built, 25 tests against a stub gateway, plus a 27-check browser pass. Recurring mandates deferred |
 
 ### Verify it yourself
 
@@ -52,7 +52,7 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 209 API tests, then boots the server and hits real endpoints over HTTP —
+the 214 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.

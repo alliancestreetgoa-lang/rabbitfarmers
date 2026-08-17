@@ -41,7 +41,15 @@ const TYPES = {
   '.map': 'application/json',
 };
 
-function isApi(pathname) {
+/**
+ * Does this path belong to the function rather than the app?
+ *
+ * Exported so a test can check it agrees with netlify.toml. The claim this
+ * whole script rests on is "running on one origin locally proves what a deploy
+ * would answer", and that claim is only true while these two tables say the
+ * same thing. See apps/api/test/routing.test.js.
+ */
+export function isApi(pathname) {
   return API_EXACT.includes(pathname)
     || API_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
@@ -117,9 +125,13 @@ const server = createServer(async (req, res) => {
   res.end(`Nothing built yet. Run: npm --prefix apps/mobile run build:web\n`);
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`site      http://localhost:${PORT}`);
-  console.log(`admin     http://localhost:${PORT}/admin/login`);
-  console.log(`api       proxied to ${API}`);
-  console.log(`serving   ${DIST}`);
-});
+// Only when run as a command. Importing this to check the routing table must
+// not start a server on a port somebody else is using.
+if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`site      http://localhost:${PORT}`);
+    console.log(`admin     http://localhost:${PORT}/admin/login`);
+    console.log(`api       proxied to ${API}`);
+    console.log(`serving   ${DIST}`);
+  });
+}

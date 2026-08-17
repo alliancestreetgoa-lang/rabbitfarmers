@@ -46,7 +46,7 @@ GRANT rabbitry_admin TO admin_login;
 npm test
 ```
 
-209 tests against a real database — no mocks, because the parts most worth
+214 tests against a real database — no mocks, because the parts most worth
 testing here (RLS, view security, the derived breeding state) only exist in
 Postgres. They create and clean up their own data, scoped by process id so the
 files can run concurrently.
@@ -121,6 +121,13 @@ phone. Read-only is enforced in `requireAuth` as a blanket rule on the HTTP
 method rather than a guard on the write routes — `/auth/password`,
 `/auth/signout` and `/notifications/read` carry no write guard, and those are
 precisely the ones that must not be reachable. See `test/impersonation.test.js`.
+
+**The redirect table is tested against itself.** `netlify.toml` and
+`scripts/dev-site.mjs` describe the same routing, and the whole value of serving
+on one port locally is that a local run proves what a deploy would answer — a
+claim that is only true while the two agree. They drifted the moment billing was
+added, and Razorpay would have been handed `index.html` with a 200 for every
+webhook. `test/routing.test.js` compares them path by path now.
 
 **The webhook is the one route an anonymous caller can reach that moves money's
 worth of state.** Its signature is checked over the *raw request bytes* —
