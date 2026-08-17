@@ -47,11 +47,19 @@ jobs:
 
       # Fail here rather than four minutes in, with a sentence that says what
       # to do about it.
+      #
+      # Through `env:`, not interpolated into the script. A secret substituted
+      # straight into a `run:` block becomes part of the command line — it
+      # survives in the shell's own tracing, and a token containing a quote
+      # would rewrite the test into something that passes.
       - name: Check the secrets are set
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
         run: |
           missing=
-          [ -n "${{ secrets.EXPO_TOKEN }}" ]     || missing="$missing EXPO_TOKEN"
-          [ -n "${{ secrets.EAS_PROJECT_ID }}" ] || missing="$missing EAS_PROJECT_ID"
+          [ -n "$EXPO_TOKEN" ]     || missing="$missing EXPO_TOKEN"
+          [ -n "$EAS_PROJECT_ID" ] || missing="$missing EAS_PROJECT_ID"
           if [ -n "$missing" ]; then
             echo "::error::Missing repository secret(s):$missing"
             echo "Add them under Settings → Secrets and variables → Actions."
@@ -73,12 +81,44 @@ jobs:
 
       - run: npm ci
 
+      # The API address has to be written into eas.json, not just exported here.
+      #
+      # The build runs on Expo's machines. This runner's environment is not sent
+      # to them: eas.json's `env` block is, because eas.json is uploaded with the
+      # project. Setting EXPO_PUBLIC_API_URL on the `eas build` step alone looks
+      # exactly like it works and produces an APK that ignores it — a silent
+      # wrong answer, which is the only kind worth writing a step for.
+      - name: Write the API address into eas.json
+        if: inputs.api_url != ''
+        env:
+          API_URL: ${{ inputs.api_url }}
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const eas = JSON.parse(fs.readFileSync("eas.json", "utf8"));
+            const profile = eas.build[process.env.PROFILE];
+            if (!profile) throw new Error(`no build profile "${process.env.PROFILE}" in eas.json`);
+            profile.env = { ...profile.env, EXPO_PUBLIC_API_URL: process.env.API_URL };
+            fs.writeFileSync("eas.json", JSON.stringify(eas, null, 2) + "\n");
+          '
+          node -e '
+            const eas = JSON.parse(require("fs").readFileSync("eas.json", "utf8"));
+            console.log(`${process.env.PROFILE} will build against`,
+                        eas.build[process.env.PROFILE].env.EXPO_PUBLIC_API_URL);
+          '
+
       # Bundling is where a build fails for a reason in this repository rather
       # than a reason on Expo's side — a bad import, a version mismatch, an
       # asset that is not where the config says. Catching it here costs seconds;
       # catching it on EAS costs a twenty-minute queue.
+      # --clear is not belt and braces. EXPO_PUBLIC_* values are substituted
+      # into the JavaScript at transform time, and Metro's transform cache is
+      # not keyed on them: a rebuild with a different address reuses the old
+      # one and says nothing. On a fresh runner there is no cache to reuse, but
+      # this step is also the thing people copy when building by hand.
       - name: Bundle for Android first
-        run: npx expo export --platform android --output-dir /tmp/preflight
+        run: npx expo export --clear --platform android --output-dir /tmp/preflight
         env:
           EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
           EXPO_PUBLIC_API_URL: ${{ inputs.api_url }}
@@ -95,7 +135,16 @@ jobs:
 
       - name: Fetch the binary
         run: |
-          url=$(node -e "process.stdout.write(require('./build.json')[0].artifacts.buildUrl)")
+          url=$(node -e '
+            const b = JSON.parse(require("fs").readFileSync("build.json", "utf8"));
+            const url = b?.[0]?.artifacts?.buildUrl;
+            if (!url) {
+              console.error("No buildUrl in the EAS output. It said:");
+              console.error(JSON.stringify(b, null, 2).slice(0, 2000));
+              process.exit(1);
+            }
+            process.stdout.write(url);
+          ')
           echo "Built: $url"
           curl -fsSL -o "rabbitry-${{ inputs.profile }}.${{ inputs.profile == 'production' && 'aab' || 'apk' }}" "$url"
 

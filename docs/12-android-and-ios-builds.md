@@ -36,6 +36,34 @@ answering when an installed app looks broken.
 Do not ship a build that asks. It is there so a build made before you had a URL
 is testable rather than inert.
 
+### Two traps, both silent
+
+**The value has to reach the machine that builds.** `eas build` runs on Expo's
+servers. Exporting `EXPO_PUBLIC_API_URL` in your own shell does not send it
+there — only `eas.json`'s `env` block travels with the project. Set it in
+`eas.json` (the GitHub workflow writes it in for you) rather than only on the
+command line, or you get an APK that quietly ignores the address you gave it.
+
+**Changing it needs the cache cleared.** The value is substituted into the
+JavaScript at transform time and Metro's transform cache is not keyed on it. A
+second build with a different address reuses the first one and says nothing —
+an app pointed at somebody else's server, with nothing in the log about it. Use
+`--clear`:
+
+```bash
+npx expo export --clear --platform android
+```
+
+EAS builds on a fresh machine each time, so this only bites locally. It bites
+hard, though: both of these were found by grepping the compiled bundle for the
+address, which is the only way to actually know.
+
+```bash
+# what "actually know" looks like
+npx expo export --clear --platform android --output-dir /tmp/check
+grep -c 'yourfarm.netlify.app' /tmp/check/_expo/static/js/android/*.hbc
+```
+
 ---
 
 ## Build it from GitHub (nothing installed at all)

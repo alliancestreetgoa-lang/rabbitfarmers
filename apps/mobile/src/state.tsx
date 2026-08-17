@@ -21,10 +21,27 @@ const trimUrl = (u: string) => u.trim().replace(/\/+$/, '');
 /**
  * Baked in at build time. An absolute URL wins outright: it is how a native
  * build finds the server, and how a developer points a web build at localhost.
+ *
+ * Two sources, and the order matters.
+ *
+ * `process.env.EXPO_PUBLIC_API_URL` is substituted into the JavaScript by Metro
+ * when the bundle is built, so it travels *in the bundle*. It has to be written
+ * out in full like this — Metro matches the literal expression, and any
+ * indirection reads back undefined.
+ *
+ * `Constants.expoConfig.extra` does not travel in the bundle on native. It
+ * comes from an app.config embedded during the native build, which for an EAS
+ * build happens on Expo's machines — so it only carries a value if eas.json's
+ * `env` had one. Both paths are needed: the second is what a `expo start`
+ * session and the web build use, the first is what makes an APK independent of
+ * how the native half was configured.
  */
 function bakedApiUrl(): string | null {
-  const configured = (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl;
-  return configured?.startsWith('http') ? trimUrl(configured) : null;
+  const fromBundle = process.env.EXPO_PUBLIC_API_URL;
+  if (fromBundle?.startsWith('http')) return trimUrl(fromBundle);
+
+  const fromConfig = (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl;
+  return fromConfig?.startsWith('http') ? trimUrl(fromConfig) : null;
 }
 
 /**
