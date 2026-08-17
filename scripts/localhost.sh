@@ -32,6 +32,34 @@ ok()   { printf '%s  ✓ %s%s\n' "$green" "$1" "$reset"; }
 info() { printf '%s    %s%s\n' "$dim" "$1" "$reset"; }
 die()  { printf '%s  ✗ %s%s\n' "$red" "$1" "$reset"; exit 1; }
 
+# A failure that has a log already written for it. Print the thing rather than
+# the path to the thing: "see .localhost-api.log" makes somebody run a second
+# command to find out what happened, and the answer is almost always on the
+# last line.
+die_log() {
+  printf '%s  ✗ %s%s\n' "$red" "$1" "$reset"
+  if [ -s "$2" ]; then
+    printf '\n%s  last lines of %s:%s\n' "$dim" "$(basename "$2")" "$reset"
+    sed 's/^/     /' "$2" | tail -20
+  else
+    printf '%s     (%s is empty — it did not get far enough to say why)%s\n' \
+      "$dim" "$(basename "$2")" "$reset"
+  fi
+  exit 1
+}
+
+# Is somebody already on this port? The commonest way this script fails on a
+# laptop, and the least obvious: another server answers the health check with a
+# 404 and the only symptom is "the API did not come up".
+port_taken() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    # No lsof: settle for "something accepted a connection".
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1
+  fi
+}
+
 FRESH=0; REBUILD=0; DEMO=1
 for arg in "$@"; do
   case "$arg" in
@@ -195,6 +223,16 @@ fi
 
 # ------------------------------------------------------------ the API up ----
 step "Starting"
+
+# Said before starting rather than after failing. A laptop has a lot of things
+# on :3000, and every one of them makes the health check below fail in a way
+# that looks like this project's fault.
+for taken in "$API_PORT:API_PORT" "$SITE_PORT:PORT"; do
+  p=${taken%%:*}; var=${taken##*:}
+  port_taken "$p" && die "port ${p} is already in use by something else.
+     Stop it, or run with a different one:  ${var}=$((p + 5)) ./scripts/localhost.sh"
+done
+
 (cd "$API_DIR" && node src/server.js > "$ROOT/.localhost-api.log" 2>&1) &
 API_PID=$!
 for _ in $(seq 1 60); do
@@ -202,7 +240,7 @@ for _ in $(seq 1 60); do
   sleep 0.5
 done
 curl -fsS "http://localhost:${API_PORT}/health" >/dev/null 2>&1 \
-  || die "the API did not come up. See .localhost-api.log"
+  || die_log "the API did not come up." "$ROOT/.localhost-api.log"
 ok "API on :${API_PORT}"
 
 PORT="$SITE_PORT" node "$ROOT/scripts/dev-site.mjs" > "$ROOT/.localhost-site.log" 2>&1 &
@@ -212,7 +250,7 @@ for _ in $(seq 1 40); do
   sleep 0.25
 done
 curl -fsS "http://localhost:${SITE_PORT}/" >/dev/null 2>&1 \
-  || die "the site did not come up. See .localhost-site.log"
+  || die_log "the site did not come up." "$ROOT/.localhost-site.log"
 ok "site on :${SITE_PORT}"
 
 # -------------------------------------------------------------- demo farm --
