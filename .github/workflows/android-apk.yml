@@ -68,9 +68,13 @@ jobs:
             exit 1
           fi
 
+      # 22, matching the Node this project is developed and tested against.
+      # (Unrelated to the runner's own deprecation notice about Node 20 — that
+      # is the JavaScript the `actions/*` steps themselves run on, and it moves
+      # when their major versions do.)
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: apps/mobile/package-lock.json
 
