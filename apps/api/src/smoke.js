@@ -47,25 +47,43 @@ await check('GET /health reaches the database', async () => {
   }
 });
 
-await check('GET /plans serves the live price list', async () => {
-  const { json } = await get('/plans');
-  const plan = json?.plans?.[0];
-  if (!plan) throw new Error('no plan on sale — did db/seed.sql run?');
-  if (plan.price_monthly_paise !== 9900 || plan.price_yearly_paise !== 99900) {
-    throw new Error(`expected ₹99/₹999, got ${plan.price_monthly_paise}/${plan.price_yearly_paise} paise`);
+await check('nothing serves a price — the product is free', async () => {
+  /*
+   * Checked against a DEPLOY, so this is where a half-shipped revert shows up: a
+   * build still carrying the old endpoint would quote ₹99 to real farmers on a
+   * product that never charges them.
+   *
+   * Asserted on the CONTENT rather than the status, because /plans is no longer
+   * in netlify.toml's redirect table and an unrouted path is the app's — so a
+   * deploy answers 200 with the SPA shell, not a 404. Checking `res.ok` here
+   * would fail on a perfectly correct deploy.
+   */
+  const { json, text } = await get('/plans');
+  if (json?.plans || text.includes('price_monthly_paise')) {
+    throw new Error('something is still serving a price list; it went in migration 0031');
   }
-  if (!plan.is_introductory) throw new Error('plan is not flagged introductory');
 });
 
 await check('the admin console renders', async () => {
   const { res, text } = await get('/admin/login');
-  if (!res.ok || !text.includes('Rabbitry admin')) {
+  if (!res.ok || !text.includes('rabbitfarmers admin')) {
     throw new Error(`got ${res.status}`);
   }
 });
 
 await check('farm endpoints reject an unauthenticated caller', async () => {
-  const { res } = await get('/animals');
+  /*
+   * `/api/animals`, not `/animals`.
+   *
+   * This asked for `/animals` and expected a 401, which only holds when pointed
+   * straight at the API process. On a deploy — what this script is for —
+   * `/animals` is a SCREEN: netlify.toml sends farm endpoints to the function
+   * under /api and everything unrouted to the app, so `/animals` returned the SPA
+   * shell with a 200 and this check reported a broken auth guard on a healthy
+   * site. apps/api/test/routing.test.js has asserted `'/animals': 'app'` all
+   * along; the two disagreed and nothing compared them.
+   */
+  const { res } = await get('/api/animals');
   if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
 });
 

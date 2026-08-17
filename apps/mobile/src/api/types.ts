@@ -9,7 +9,7 @@ export type ReproductiveState =
   | 'LACTATING' | 'PSEUDOPREGNANT' | 'OPEN' | 'RESTING' | 'OVERDUE';
 
 /**
- * Somebody from Rabbitry support is on the other end of this session.
+ * Somebody from rabbitfarmers support is on the other end of this session.
  *
  * Present only on a session handed over by the admin console. The app shows it
  * and refuses to open any screen that writes — not because the server would

@@ -96,10 +96,10 @@ export function validateServerUrl(input: string): string {
   // them before the scheme is checked turns "https://" into "https:", and the
   // farmer gets told to start the address with the thing they did start it with.
   const raw = (input ?? '').trim();
-  if (!raw) throw new Error('Type the address of your Rabbitry site');
+  if (!raw) throw new Error('Type the address of your rabbitfarmers site');
 
   if (!/^https?:\/\//i.test(raw)) {
-    throw new Error('That should start with https:// and be the address of your Rabbitry site');
+    throw new Error('That should start with https:// and be the address of your rabbitfarmers site');
   }
 
   let parsed: URL;

@@ -9,11 +9,11 @@
  */
 module.exports = {
   expo: {
-    name: 'Rabbitry',
-    slug: 'rabbitry',
+    name: 'rabbitfarmers',
+    slug: 'rabbitfarmers',
     version: '0.1.0',
     orientation: 'portrait',
-    scheme: 'rabbitry',
+    scheme: 'rabbitfarmers',
     userInterfaceStyle: 'automatic',
     newArchEnabled: true,
     icon: './assets/icon.png',
@@ -25,7 +25,14 @@ module.exports = {
       resizeMode: 'contain',
     },
     android: {
-      package: 'in.rabbitry.app',
+      /*
+       * Renamed with the app. This is the one identifier that can never change
+       * again: once an APK with this package is on a phone or in Play, a
+       * different package is a different app — no update path, no carrying the
+       * listing across. Nothing has been published yet, so this was the only
+       * free moment to do it.
+       */
+      package: 'in.rabbitfarmers.app',
       // Bump on every build uploaded anywhere. Play refuses a repeat, and two
       // different APKs sharing a versionCode is how a phone ends up refusing an
       // update with no useful message.
@@ -41,7 +48,7 @@ module.exports = {
     },
     ios: {
       supportsTablet: false,
-      bundleIdentifier: 'in.rabbitry.app',
+      bundleIdentifier: 'in.rabbitfarmers.app',
       buildNumber: '1',
     },
     web: {

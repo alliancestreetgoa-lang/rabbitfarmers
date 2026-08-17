@@ -128,7 +128,7 @@ describe('support impersonation', () => {
     // list as the farmer's own phone, with a name on it.
     const me = await api('GET', '/auth/me', { token: f.token });
     const devices = me.body.active_sessions.map((s) => s.device ?? '');
-    assert.ok(devices.some((d) => d.includes('Rabbitry support')),
+    assert.ok(devices.some((d) => d.includes('rabbitfarmers support')),
       `support access should be visible in ${JSON.stringify(devices)}`);
     // The farmer's own session is not flagged as support.
     assert.equal(me.body.support, null);

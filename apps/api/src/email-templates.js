@@ -45,7 +45,7 @@ const esc = (v) => String(v ?? '')
   .replace(/"/g, '&quot;');
 
 const appUrl = () => (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
-const support = () => process.env.SUPPORT_EMAIL ?? 'support@rabbitry.app';
+const support = () => process.env.SUPPORT_EMAIL ?? 'support@rabbitfarmers.app';
 
 /**
  * The one line every message ends with.
@@ -58,7 +58,7 @@ function footer(context) {
   return [
     '',
     '—',
-    `You are getting this because you run ${context.farm_name ?? 'a farm'} on Rabbitry.`,
+    `You are getting this because you run ${context.farm_name ?? 'a farm'} on rabbitfarmers.`,
     `Reply to this email and a person will read it, or write to ${support()}.`,
     url ? `Your farm: ${url}` : '',
   ].filter(Boolean).join('\n');

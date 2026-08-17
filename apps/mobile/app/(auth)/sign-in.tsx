@@ -48,7 +48,7 @@ export default function SignIn() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ padding: space.lg, paddingTop: space.xxl }}>
-        <H1>Rabbitry</H1>
+        <H1>rabbitfarmers</H1>
         <Muted>Breeding, medicine rounds and staff, from the shed.</Muted>
 
         <View style={{ height: space.xl }} />
@@ -62,7 +62,7 @@ export default function SignIn() {
         {canSetServer && (
           <>
             <Field
-              label="Your Rabbitry address"
+              label="Your rabbitfarmers address"
               testID="server"
               value={server}
               onChangeText={setServer}
@@ -112,7 +112,7 @@ export default function SignIn() {
         <View style={{ height: space.xl }} />
         <Link href="/(auth)/sign-up" testID="go-signup">
           <Text style={{ color: colors.accent, fontWeight: '600' }}>
-            New here? Start a 30-day free trial
+            Sign up
           </Text>
         </Link>
       </ScrollView>

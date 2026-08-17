@@ -99,7 +99,7 @@ function page(title, body) {
 export function renderLogin(error) {
   return page('Admin sign in', `
     <div class="login">
-      <h1>Rabbitry admin</h1>
+      <h1>rabbitfarmers admin</h1>
       <p class="muted" style="margin:6px 0 18px">Every action here is logged.</p>
       ${error ? `<div class="err">${esc(error)}</div>` : ''}
       <form method="post" action="/admin/login">
@@ -157,7 +157,7 @@ export function renderFarms({ farms, summary, q, status, admin }) {
       <td class="num">${seen(f.days_since_activity)}</td>
     </tr>`).join('');
 
-  return page('Farms — Rabbitry admin', `
+  return page('Farms — rabbitfarmers admin', `
     <header>
       <h1>Farms</h1>
       <div class="muted">${nav('farms', admin)}${esc(admin?.full_name ?? '')} · ${esc(admin?.role ?? '')}
@@ -397,7 +397,7 @@ export function renderBilling({ summary, revenue, exceptions, renewals, payments
             : ''}</td>
     </tr>`).join('');
 
-  return page('Billing — Rabbitry admin', `
+  return page('Billing — rabbitfarmers admin', `
     <header>
       <h1>Billing</h1>
       <div class="muted">${nav('billing', admin)}${esc(admin?.full_name ?? '')} · ${esc(admin?.role ?? '')}
@@ -665,7 +665,7 @@ export function renderFarm({ farm, audit, subscription, payments = [], admin }) 
       <td>${canBill && p.refundable_paise > 0 ? refundForm(p) : ''}</td>
     </tr>`).join('');
 
-  return page(`${farm.farm_name} — Rabbitry admin`, `
+  return page(`${farm.farm_name} — rabbitfarmers admin`, `
     <header>
       <h1>${esc(farm.farm_name)}</h1>
       <div class="muted"><a href="/admin/farms">← All farms</a></div>

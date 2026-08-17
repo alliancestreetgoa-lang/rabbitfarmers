@@ -468,7 +468,7 @@ async function startImpersonation(c, farmId, reason) {
                               impersonation_id, ip)
     VALUES ($1, $2, $3, $4, $5, $6)`,
     [owner[0].id, hash, imp.expires_at,
-     `Rabbitry support · ${admin.full_name}`, imp.id,
+     `rabbitfarmers support · ${admin.full_name}`, imp.id,
      c.req.header('x-forwarded-for') || null]);
 
   /*
@@ -482,7 +482,7 @@ async function startImpersonation(c, farmId, reason) {
     INSERT INTO notification (farm_id, kind, title, body, urgency, dedupe_key)
     VALUES ($1, 'support_access', $2, $3, 'medium', $4)`,
     [farmId,
-     `${admin.full_name} from Rabbitry support opened your farm`,
+     `${admin.full_name} from rabbitfarmers support opened your farm`,
      `They can see your records for one hour and cannot change anything. `
      + `Reason given: "${reason}". If you did not ask for help, change your `
      + `password from More — that ends every session on this farm, including theirs.`,

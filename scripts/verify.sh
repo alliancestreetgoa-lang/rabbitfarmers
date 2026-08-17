@@ -151,8 +151,12 @@ fi
 curl -fsS localhost:$PORT/health | grep -q '"ok":true' || die "health check failed"
 ok "GET /health"
 
-curl -fsS localhost:$PORT/plans | grep -q '9900' || die "plans endpoint wrong"
-ok "GET /plans returns ₹99 / ₹999 introductory pricing"
+# Free since migration 0031. Asserting the endpoint is GONE rather than deleting
+# the check: the failure this guards against is a half-reverted change that
+# leaves a price list answering ₹99 on a product that never charges.
+curl -fsS "localhost:$PORT/plans" >/dev/null 2>&1 \
+  && die "GET /plans still answers — the product is free, that endpoint should be gone"
+ok "GET /plans is gone — nothing serves a price"
 
 EMAIL="verify$$@example.test"
 # Unique per run, like the email. Since migration 0024 a phone is a login
@@ -165,7 +169,7 @@ SIGNUP=$(curl -fsS -X POST localhost:$PORT/auth/signup -H 'content-type: applica
        \"city\":\"Margao\",\"state\":\"Goa\",\"pincode\":\"403709\"}")
 TOKEN=$(echo "$SIGNUP" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 [ -n "$TOKEN" ] || die "signup failed: $SIGNUP"
-ok "POST /auth/signup — farm created, 30-day trial running"
+ok "POST /auth/signup — farm created, free, nothing to pay"
 
 DOE=$(curl -fsS -X POST localhost:$PORT/animals -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
@@ -213,7 +217,7 @@ curl -fsS localhost:$PORT/scheduler/health | grep -q '"healthy":true' \
   || die "scheduler heartbeat is not healthy"
 ok "GET /scheduler/health — heartbeat healthy"
 
-curl -fsS localhost:$PORT/admin/login | grep -q 'Rabbitry admin' || die "admin console did not render"
+curl -fsS localhost:$PORT/admin/login | grep -q 'rabbitfarmers admin' || die "admin console did not render"
 ok "GET /admin/login — admin console renders"
 
 ADMIN_EMAIL="verify$$@admin.test"

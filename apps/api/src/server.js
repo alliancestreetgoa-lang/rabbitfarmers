@@ -10,7 +10,7 @@ if (!process.env.DATABASE_URL) {
 }
 
 const server = serve({ fetch: createApp().fetch, port }, (info) => {
-  console.log(`rabbitry api on http://localhost:${info.port}`);
+  console.log(`rabbitfarmers api on http://localhost:${info.port}`);
   console.log(`admin console  http://localhost:${info.port}/admin/login`);
 });
 

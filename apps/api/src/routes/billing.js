@@ -397,7 +397,7 @@ billingRoutes.post('/billing/pay', requireCan('billing:read'), async (c) => {
   try {
     link = await createPaymentLink({
       amountPaise: amount,
-      description: `Rabbitry — ${period === 'monthly' ? 'one month' : 'one year'} for ${farm.name}`,
+      description: `rabbitfarmers — ${period === 'monthly' ? 'one month' : 'one year'} for ${farm.name}`,
       referenceId: paymentId,
       customer: { name: owner.full_name, email: owner.email, phone: owner.phone },
       callbackUrl: `${process.env.PUBLIC_URL ?? ''}/billing/return`,
@@ -445,5 +445,5 @@ function page(title, body) {
     text-decoration:none;padding:12px 20px;border-radius:3px}
 </style></head>
 <body><main><h1>${esc(title)}</h1><p>${esc(body)}</p>
-<a href="/">Back to Rabbitry</a></main></body></html>`;
+<a href="/">Back to rabbitfarmers</a></main></body></html>`;
 }

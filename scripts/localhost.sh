@@ -326,7 +326,7 @@ curl -fsS -X POST "http://localhost:${API_PORT}/scheduler/run" \
 # --------------------------------------------------------------- and done --
 cat <<EOF
 
-$bold  Rabbitry is running.$reset
+$bold  rabbitfarmers is running.$reset
 
   the farmer's app     http://localhost:${SITE_PORT}
   the admin console    http://localhost:${SITE_PORT}/admin/login
