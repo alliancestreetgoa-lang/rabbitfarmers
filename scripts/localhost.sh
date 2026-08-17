@@ -180,6 +180,32 @@ export ADMIN_DATABASE_URL DATABASE_URL
 
 adminsql() { psql "$ADMIN_DATABASE_URL" -q -v ON_ERROR_STOP=1 "$@"; }
 
+# ----------------------------------------------------------------- reachable --
+#
+# Both roles, before anything depends on either. The API opens two pools — the
+# farmer-facing one as a role WITHOUT bypassrls, the admin one with it — and
+# only the admin one has been exercised by the time we get here, by the
+# migrations. So an app_login that cannot connect stays invisible until the
+# health check fails, and it fails as "the API did not come up", because
+# /health answers 503 when its pool is dead and `curl -f` treats that as no
+# server at all. A perfectly running API, reported as missing.
+check_role() {
+  local url=$1 who=$2 err
+  err=$(psql "$url" -qtc 'SELECT 1' 2>&1 >/dev/null) && return 0
+  die "the ${who} database role cannot connect.
+
+     ${err}
+
+     Both roles are created by this script and used by the API. If the error is
+     about authentication, your pg_hba.conf wants a different method than the
+     password these were made with; the quickest way out is to point the script
+     at connections you know work:
+
+       DATABASE_URL=... ADMIN_DATABASE_URL=... ./scripts/localhost.sh"
+}
+check_role "$ADMIN_DATABASE_URL" "admin"
+check_role "$DATABASE_URL" "farmer-facing (app_login)"
+
 # ------------------------------------------------------------ dependencies --
 step "Dependencies"
 [ -d "$API_DIR/node_modules" ] || (cd "$API_DIR" && npm install --silent) || die "npm install failed in apps/api"
@@ -243,8 +269,15 @@ for _ in $(seq 1 60); do
   curl -fsS "http://localhost:${API_PORT}/health" >/dev/null 2>&1 && break
   sleep 0.5
 done
-curl -fsS "http://localhost:${API_PORT}/health" >/dev/null 2>&1 \
-  || die_log "the API did not come up." "$ROOT/.localhost-api.log"
+if ! curl -fsS "http://localhost:${API_PORT}/health" >/dev/null 2>&1; then
+  # What it actually said, if it said anything. `curl -f` fails on a 503 the
+  # same way it fails on a closed port, and those are completely different
+  # problems: one is a server that never started, the other is a server that
+  # started and cannot reach its database.
+  BODY=$(curl -sS -m 5 -w ' [HTTP %{http_code}]' "http://localhost:${API_PORT}/health" 2>&1)
+  [ -n "$BODY" ] && info "GET /health said: ${BODY}"
+  die_log "the API did not come up." "$ROOT/.localhost-api.log"
+fi
 ok "API on :${API_PORT}"
 
 # API_ORIGIN too, or the site proxies to :3000 whatever API_PORT says — and the
