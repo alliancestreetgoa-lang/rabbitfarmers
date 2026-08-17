@@ -92,6 +92,20 @@ step that fails for a reason in *this* repository — a bad import, a version
 mismatch, an asset that is not where the config says — and catching it locally
 costs seconds instead of a twenty-minute queue.
 
+**One thing the workflow cannot be tested against from here**: your account has
+no Android keystore until something creates one, and `eas build` runs
+`--non-interactive`. If the first run fails saying it will not generate a
+keystore without a prompt, generate it once from any machine and every run
+after that is unattended:
+
+```bash
+cd apps/mobile && eas credentials      # Android → Keystore → set up a new one
+```
+
+Everything upstream of that call — the secret check, the checkout, `npm ci`,
+the Android bundle, writing the address into `eas.json` — has been run and does
+work.
+
 ---
 
 ## Build it on EAS from your machine (no local Android SDK)
