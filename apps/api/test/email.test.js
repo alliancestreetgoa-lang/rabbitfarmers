@@ -74,7 +74,7 @@ before(async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   process.env.EMAIL_BASE = `http://127.0.0.1:${server.address().port}`;
   process.env.EMAIL_API_KEY = 're_test_key';
-  process.env.EMAIL_FROM = 'Rabbitry <billing@rabbitry.test>';
+  process.env.EMAIL_FROM = 'rabbitfarmers <billing@rabbitry.test>';
   process.env.SUPPORT_EMAIL = 'support@rabbitry.test';
   process.env.EMAIL_WEBHOOK_SECRET = WEBHOOK_SECRET;
 });
@@ -140,14 +140,24 @@ describe('when a farm gets an email', () => {
     assert.equal(mine[0].context.grace_days, 30);
   });
 
-  test('the day it actually stops, which is not the same day', async () => {
-    // Thirty days of grace on the yearly plan (migration 0029), so the money
-    // was due a month before the farm noticed anything.
+  test('nothing stops, so there is no "it has stopped" mail to send', async () => {
+    /*
+     * Asserted a `subscription_lapsed` email until migration 0031.
+     *
+     * That branch of generate_dunning_emails() selects farms whose entitlement
+     * has gone to 'read_only'. Access is now the constant 'full', so the branch
+     * matches nobody and the mail cannot be produced — which is the correct
+     * outcome, not a gap: telling a farmer on a free product that their
+     * subscription has ended would be a lie, and unlike an in-app notice this
+     * one leaves the building.
+     *
+     * Called directly here, as the whole file does. The scheduler no longer calls
+     * this function at all — see the last suite in lapse.test.js.
+     */
     const f = await farmDue(-31);
     await generate();
-    const mine = await mail(f.farm.id);
-    assert.equal(mine.length, 1);
-    assert.equal(mine[0].kind, 'subscription_lapsed');
+    assert.deepEqual(await mail(f.farm.id), [],
+      'a free product must never email a farmer that their subscription ended');
   });
 
   test('and a receipt when they pay', async () => {
@@ -203,7 +213,7 @@ describe('sending it', () => {
 
     const sent = posted.find((p) => p.to[0] === f.email);
     assert.ok(sent, 'the message went to the owner');
-    assert.equal(sent.from, 'Rabbitry <billing@rabbitry.test>');
+    assert.equal(sent.from, 'rabbitfarmers <billing@rabbitry.test>');
     // A farmer replying to a billing email must reach a person, not a void.
     assert.equal(sent.reply_to, 'support@rabbitry.test');
     assert.match(sent.subject, /ends on/);

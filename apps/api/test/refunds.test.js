@@ -328,7 +328,7 @@ describe('the money', () => {
 /* ------------------------------------------------------------------ access -- */
 
 describe('what it does to the farm', () => {
-  test('leaving takes the days back, and the farm goes read-only', async () => {
+  test('leaving takes the days back, and the farm keeps working', async () => {
     mode = 'instant';
     const { farm, payment } = await paidFarm();
     assert.equal((await api('POST', '/animals', {
@@ -342,22 +342,28 @@ describe('what it does to the farm', () => {
     assert.equal(s.status, 'cancelled');
     assert.match(s.cancel_reason, /^refunded: closing the farm down/);
 
-    // Read-only, and every record still there. That is the documented shape of
-    // a lapse and a refund is not a punishment beyond it.
+    // The money and the days are the refund. Since 0031 access is not part of
+    // it: a refunded farm keeps every record AND keeps recording. The refund
+    // remains a full accounting event — days removed, status cancelled, reason
+    // logged — it just no longer costs the farmer their tools.
     assert.equal((await api('POST', '/animals', {
-      token: farm.token, body: { name: 'After', sex: 'doe' } })).status, 402);
+      token: farm.token, body: { name: 'After', sex: 'doe' } })).status, 201);
     const list = await api('GET', '/animals', { token: farm.token });
     assert.equal(list.status, 200);
-    assert.equal(list.body.animals.length, 1);
+    assert.equal(list.body.animals.length, 2);
   });
 
-  test('a refunded farm is not an emergency — being read-only is it working', async () => {
+  test('a refunded farm is not an emergency', async () => {
     /*
-     * Without this exclusion every ordinary refund raises a severity-1 "paid,
-     * still locked out" alarm, and a list that cries wolf on every refund is a
-     * list nobody reads by March. That is worse than not having the list: the
-     * one real "we took their money and they cannot work" would be sitting in
-     * the middle of it.
+     * Written for an exclusion that mattered when refunds cost access: without
+     * it every ordinary refund raised a severity-1 "paid, still locked out"
+     * alarm, and a list that cries wolf on every refund is a list nobody reads
+     * by March.
+     *
+     * Since 0031 the alarm cannot fire for anyone (it filters on read-only
+     * access, which no longer exists), so the exclusion is belt-and-braces. The
+     * assertion kept below is the one that still means something: a part refund
+     * is still recorded as a part refund, and the farm is not on the alarm list.
      */
     mode = 'instant';
     const { farm, payment } = await paidFarm();
@@ -373,8 +379,12 @@ describe('what it does to the farm', () => {
     await refund(payment.id, admin.token,
       { amount_paise: 30000, reason: 'ending it early, refunding the unused part' });
 
+    // The refund took effect where it now shows: the days, not the access.
+    const s = await sub(farm.farm.id);
+    assert.ok(new Date(s.current_period_end) <= new Date(),
+      'the unused days were taken back');
     const me = await api('GET', '/auth/me', { token: farm.token });
-    assert.equal(me.body.subscription.access, 'read_only', 'the refund did take effect');
+    assert.equal(me.body.subscription.access, 'full', 'a refund does not cost access any more');
     const still = await adminQuery('SELECT status FROM payment WHERE id = $1', [payment.id]);
     assert.equal(still.rows[0].status, 'paid', 'part of that payment was never refunded');
 

@@ -15,8 +15,12 @@ const TRIAL_DAYS = Number(process.env.TRIAL_DAYS ?? 30);
  *
  * Email, phone, address, password, farm name. No verification step: the account
  * is usable the moment this returns. Creates farm + settings + owner + a
- * 30-day trial on whichever plan is currently on sale, price snapshotted so an
- * introductory rate survives a future price rise.
+ * subscription row on whichever plan is currently on sale.
+ *
+ * That row's trial date and snapshotted price are now bookkeeping only — nothing
+ * is charged and nothing expires (migration 0031). It is still written because a
+ * farm with no subscription row is a shape the billing code would have to learn
+ * if charging were ever switched back on.
  */
 authRoutes.post('/signup', async (c) => {
   const input = validateSignup(await c.req.json());
@@ -61,7 +65,10 @@ authRoutes.post('/signup', async (c) => {
     token,
     farm: { id: farmId, name: input.farmName },
     user: { id: employeeId, name: input.fullName, email: input.email, role: 'owner' },
-    trial_days: TRIAL_DAYS,
+    // No trial_days. The product is free since migration 0031, and an API that
+    // announces a trial length teaches every client to render a countdown to
+    // something that never happens. The subscription row is still created with a
+    // date on it, because that is the row charging again would be built back on.
   }, 201);
 });
 

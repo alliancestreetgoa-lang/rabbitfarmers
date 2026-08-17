@@ -59,13 +59,15 @@ export function createApp() {
     }
   });
 
-  // Public price list — the pricing page reads this rather than hard-coding ₹99.
-  app.get('/plans', async (c) => {
-    const { rows } = await appQuery(`
-      SELECT code, name, price_monthly_paise, price_yearly_paise, is_introductory
-      FROM v_current_public_plan`);
-    return c.json({ plans: rows, trial_days: Number(process.env.TRIAL_DAYS ?? 30) });
-  });
+  /*
+   * There is no GET /plans any more. The product is free (migration 0031), and a
+   * price list that answers ₹99 while nothing charges it is worse than a 404 —
+   * anything still reading it would render a price that is not real.
+   *
+   * The plan table, v_current_public_plan and the payment routes below all
+   * remain: they carry accounting history and are what charging again would be
+   * built back on. Restoring the endpoint is a paste of five lines.
+   */
 
   app.route('/auth', authRoutes);
   // Admin must be mounted BEFORE the farm routes. Those are mounted at '/' and

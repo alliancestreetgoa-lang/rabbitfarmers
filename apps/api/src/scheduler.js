@@ -58,25 +58,29 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
     const assigned = await client.query('SELECT assign_tasks_by_section() AS n');
     const notes = await client.query('SELECT generate_notifications() AS n');
     /*
-     * Subscriptions that have run out.
+     * Subscription bookkeeping, and nothing a farm can feel.
      *
-     * The advance is reporting only — what a farm may do is derived from its
-     * period end by v_farm_entitlement, so a pass that never runs cannot hand
-     * out free access, and one that runs twice changes nothing. What it does
-     * change is MRR: without it, a farm that stopped paying in March is still
-     * counted as revenue in December.
+     * Since 0031 the product is free: v_farm_entitlement.access is the constant
+     * 'full', so nothing here decides what a farm may do. The advance still runs
+     * because the status it writes is a true record of payment history — a farm
+     * that stopped paying in March still reads as suspended in the console —
+     * and it is idempotent, so running it costs nothing.
      *
-     * The notices come after it so that a farm suspended in this pass is told
-     * in the same pass rather than fifteen minutes later.
+     * WHAT IS DELIBERATELY NOT CALLED, and why it would be a bug:
+     *
+     *   generate_billing_notifications() raises its renewal warning on
+     *   `access = 'full' AND covered_days_left BETWEEN 0 AND 7`. Access is now
+     *   always 'full', so that branch fires for every farm whose old period end
+     *   happens to be near — telling a farmer on a free product that their
+     *   subscription ends in three days and to renew from More · Billing, on a
+     *   screen that no longer exists. The lapsed branch is unreachable for the
+     *   same reason. generate_dunning_emails() sends the same four events by
+     *   email, so it is worse: it leaves the app.
+     *
+     * Both functions are kept in the database, tested, and callable. Charging
+     * again means calling them here and reverting 0031 — an afternoon.
      */
     const advanced = await client.query('SELECT * FROM billing_advance_subscriptions()');
-    const billing = await client.query('SELECT generate_billing_notifications() AS n');
-    /*
-     * The same four events, by email, for the farm that has stopped opening the
-     * app — which is exactly the farm about to lapse without noticing. Queued
-     * here inside the transaction and sent after it, like push.
-     */
-    const mail = await client.query('SELECT generate_dunning_emails() AS n');
     // Sessions nobody can use any more. Expired ones were always rejected at
     // sign-in, so this is housekeeping rather than a fix — but nothing ever
     // deleted them, and user_session grows by a row per device per sign-in for
@@ -120,9 +124,12 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
       ok: true,
       tasksCreated: tasks.rows[0].n,
       tasksAssigned: assigned.rows[0].n,
-      notificationsCreated: notes.rows[0].n + billing.rows[0].n,
-      billingNoticesCreated: billing.rows[0].n,
-      emailsQueued: mail.rows[0].n,
+      notificationsCreated: notes.rows[0].n,
+      // Kept in the shape so anything reading the run result still finds the
+      // keys, and reads zero rather than undefined. The product is free; there
+      // are no billing notices and no dunning mail to queue.
+      billingNoticesCreated: 0,
+      emailsQueued: 0,
       emailsSent: email.sent ?? 0,
       emailsFailed: email.failed ?? 0,
       emailsExpired: email.expired ?? 0,

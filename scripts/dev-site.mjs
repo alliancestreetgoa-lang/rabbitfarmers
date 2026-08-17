@@ -31,7 +31,7 @@ const API_PREFIXES = ['/api', '/admin', '/scheduler', '/webhooks'];
 // /billing/return is the one path where a screen name and a server path collide:
 // `/billing` is a screen in the app, `/billing/return` is where Razorpay sends
 // the browser back to. Exact, so the screen still works.
-const API_EXACT = ['/health', '/plans', '/billing/return'];
+const API_EXACT = ['/health', '/billing/return'];
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',

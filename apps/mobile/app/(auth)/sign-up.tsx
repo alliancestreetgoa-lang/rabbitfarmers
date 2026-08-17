@@ -47,7 +47,7 @@ export default function SignUp() {
     <Screen>
       <ScrollView contentContainerStyle={{ padding: space.lg }}>
         <H1>Start your farm</H1>
-        <Muted>30 days free, everything included. No card.</Muted>
+        <Muted>Free, everything included. No card.</Muted>
         <View style={{ height: space.lg }} />
 
         <Field label="Farm name" testID="farm_name" value={f.farm_name}
@@ -81,7 +81,7 @@ export default function SignUp() {
 
         <Button title="Create my farm" onPress={submit} loading={busy} testID="signup" />
         <View style={{ height: space.md }} />
-        <Muted>₹99 a month or ₹999 a year after the trial. Introductory pricing.</Muted>
+        <Muted>Free to use. No card, no trial to run out.</Muted>
       </ScrollView>
     </Screen>
   );

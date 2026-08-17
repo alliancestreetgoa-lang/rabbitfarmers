@@ -113,12 +113,21 @@ async function farmReadyToPay({ period = 'yearly' } = {}) {
 }
 
 describe('asking to pay', () => {
-  test('a lapsed farm is blocked, pays, and is working again', async () => {
+  test('a lapsed farm was never blocked, pays anyway, and the payment applies', async () => {
     const { farm, linkId, amount } = await farmReadyToPay();
 
-    // Lapsed: reads fine, writes refused. That is migration 0003's promise.
+    /*
+     * This asserted a 402 until migration 0031. Migration 0003's promise was
+     * "reads fine, writes refused"; 0031 replaced it with "everything always
+     * works", so the paywall this test was written to prove is gone and a lapsed
+     * farm writes exactly like any other.
+     *
+     * The rest of the test still earns its place: the gateway path is dormant,
+     * not deleted, and a webhook that stopped applying payments correctly is how
+     * charging again would fail silently on the day it is switched back on.
+     */
     assert.equal((await api('POST', '/animals', {
-      token: farm.token, body: { name: 'Blocked', sex: 'doe' } })).status, 402);
+      token: farm.token, body: { name: 'Never Blocked', sex: 'doe' } })).status, 201);
     assert.equal((await api('GET', '/animals', { token: farm.token })).status, 200);
 
     const res = await webhook(paidEvent(linkId, amount));

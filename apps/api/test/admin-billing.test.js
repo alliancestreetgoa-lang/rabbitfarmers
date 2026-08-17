@@ -246,13 +246,25 @@ describe('the ledger', () => {
 /* -------------------------------------------------------------- exceptions -- */
 
 describe('money that has gone wrong', () => {
-  test('a farm that paid and is still locked out is the first thing on the page', async () => {
+  test('nobody can be paid-but-locked-out, because nobody is locked out', async () => {
+    /*
+     * This asserted the opposite until migration 0031, and the change of answer
+     * is the interesting part rather than a regression.
+     *
+     * v_admin_billing_exception finds farms whose money arrived while their
+     * access did not — `paid_but_locked_out`, severity 1, the worst thing on the
+     * page because it costs a customer. It filters on `access = 'read_only'`, and
+     * access is now the constant 'full', so the fault it detects has become
+     * impossible and the view correctly reports none.
+     *
+     * The view is deliberately left alone (see 0033's header): if charging is
+     * ever switched back on, it starts catching this again by itself, with no
+     * repair needed. A view that reports an impossible condition as absent is
+     * right, not broken.
+     */
     const farm = await namedFarm('Locked Out Farm');
     await pay(await link(farm.farm.id));
 
-    // The failure this exists to catch: the payment applied, and something
-    // afterwards moved the period back. From the farmer's side this is a renew
-    // button they have already pressed and paid.
     await adminQuery(`
       UPDATE subscription SET current_period_end = current_date - 1, status = 'grace',
                               grace_until = current_date - 1
@@ -262,13 +274,12 @@ describe('money that has gone wrong', () => {
     const res = await dash(admin.token);
     const mine = res.body.exceptions.filter((x) => x.farm_id === farm.farm.id);
 
-    assert.equal(mine.length, 1, 'a paid farm that cannot write must be reported');
-    assert.equal(mine[0].kind, 'paid_but_locked_out');
-    assert.equal(mine[0].severity, 1, 'nothing else on this list costs a customer');
-    assert.equal(mine[0].amount_paise, 99900);
+    assert.deepEqual(mine, [],
+      'a farm that cannot be locked out cannot be paid-but-locked-out');
 
-    // And it is the sort key, so it cannot be pushed off the bottom by noise.
-    assert.equal(res.body.exceptions[0].severity, 1);
+    // And the one that matters to the farmer: they can still work.
+    assert.equal((await api('POST', '/animals', {
+      token: farm.token, body: { name: 'Working', sex: 'doe' } })).status, 201);
   });
 
   test('a payment with no invoice is reported, farmer fine, GST not', async () => {
@@ -363,10 +374,12 @@ describe('replaying a delivery that got stuck', () => {
     const l = await link(farm.farm.id);
     const evt = await stuckDelivery(l, farm.farm.id);
 
-    // Lapsed, and the money is sitting in a row nothing will ever apply on its
-    // own: Razorpay gave up retrying hours ago.
+    // The money is sitting in a row nothing will ever apply on its own: Razorpay
+    // gave up retrying hours ago. Since 0031 the farm was never locked out over
+    // it — the stuck delivery is now a bookkeeping problem rather than an outage
+    // for the farmer, and replaying it still has to work.
     assert.equal((await api('POST', '/animals', {
-      token: farm.token, body: { name: 'Blocked', sex: 'doe' } })).status, 402);
+      token: farm.token, body: { name: 'Never Blocked', sex: 'doe' } })).status, 201);
 
     const admin = await makeAdmin('billing');
     const before = await dash(admin.token);
@@ -462,7 +475,8 @@ describe('recording a payment taken outside the gateway', () => {
       `UPDATE subscription SET trial_ends_on = current_date - 1 WHERE farm_id = $1`,
       [farm.farm.id]);
     assert.equal((await api('POST', '/animals', {
-      token: farm.token, body: { name: 'Before', sex: 'doe' } })).status, 402);
+      token: farm.token, body: { name: 'Before', sex: 'doe' } })).status, 201,
+      'nothing was blocked to begin with since 0031; the payment record is the point');
 
     const admin = await makeAdmin('billing');
     const res = await api('POST', `/admin/farms/${farm.farm.id}/record_payment`, {

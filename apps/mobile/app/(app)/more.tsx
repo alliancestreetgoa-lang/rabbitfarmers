@@ -3,9 +3,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
 import { TabBar } from '../../src/ui/nav';
-import { Card, H1, Muted, Pill, Screen } from '../../src/ui/components';
+import { Card, H1, Muted, Screen } from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
-import { coverageLine, subscriptionLabel } from '../../src/ui/subscription';
 
 const ROLE_LABEL: Record<string, string> = {
   owner: 'owner', manager: 'manager', caretaker: 'farm hand',
@@ -15,13 +14,9 @@ const ROLE_LABEL: Record<string, string> = {
 export default function More() {
   const { client, session, signOut, pending, readOnly, serverUrl, canSetServer } = useApp();
   const { data } = useQuery('me', () => client.me());
-  const sub = data?.subscription;
   const failed = pending.filter((p) => p.failed);
   const role = data?.user?.role ?? session?.user?.role ?? '';
   const canSeeTeam = ['owner', 'manager', 'accountant'].includes(role);
-  // Same list the server enforces for billing:read. A farm hand never sees
-  // what the farm pays.
-  const canSeeBilling = ['owner', 'manager', 'accountant'].includes(role);
 
   return (
     <Screen>
@@ -34,36 +29,11 @@ export default function More() {
           <Muted>{data?.user?.name} · {ROLE_LABEL[data?.user?.role ?? ''] ?? data?.user?.role}</Muted>
         </Card>
 
-        <Card>
-          <Text style={s.label}>SUBSCRIPTION</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-            <Text style={s.value} testID="sub-status">{subscriptionLabel(sub?.status)}</Text>
-            {sub?.access === 'read_only' && <Pill text="read only" urgency="critical" />}
-          </View>
-          {/* The same sentence the Billing tab shows, from the same function.
-              Two screens describing one farm differently is how a farmer ends
-              up ringing to ask which of them is right. */}
-          {!!coverageLine(sub) && (
-            <Text style={sub?.access === 'read_only' ? s.warn : s.soon} testID="coverage">
-              {coverageLine(sub)}
-            </Text>
-          )}
-          {sub?.trial_days_left != null && sub.trial_days_left > 0 && (
-            <Muted>{sub.trial_days_left} days left in your free trial</Muted>
-          )}
-          {sub?.effective_price_paise != null && (
-            <Muted>
-              ₹{sub.effective_price_paise / 100} per {sub.billing_period === 'yearly' ? 'year' : 'month'}
-              {sub.is_grandfathered ? ' · introductory price kept' : ''}
-            </Muted>
-          )}
-          {sub?.access === 'read_only' && (
-            <Text style={s.warn}>
-              You can still see and export everything. Renew to add new records.
-              Reminders keep working either way.
-            </Text>
-          )}
-        </Card>
+        {/*
+          The SUBSCRIPTION card was here, and there is deliberately nothing in
+          its place. rabbitfarmers is free: a card saying "Active · free forever" is a
+          reassurance nobody asked for, and it invites the question it answers.
+        */}
 
         {/* On an installed app, where the address came from a person typing it,
             "which server am I even on" is the first question worth answering
@@ -98,15 +68,6 @@ export default function More() {
           <Pressable style={s.action} onPress={() => router.push('/(app)/team')}
                      testID="open-team">
             <Text style={s.actionText}>Team and attendance</Text>
-          </Pressable>
-        )}
-
-        {canSeeBilling && (
-          <Pressable style={s.action} onPress={() => router.push('/(app)/billing')}
-                     testID="open-billing">
-            <Text style={s.actionText}>
-              {sub?.access === 'read_only' ? 'Renew your subscription' : 'Billing and invoices'}
-            </Text>
           </Pressable>
         )}
 

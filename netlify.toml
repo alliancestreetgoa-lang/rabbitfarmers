@@ -76,10 +76,10 @@
   to = "/.netlify/functions/api/health"
   status = 200
 
-[[redirects]]
-  from = "/plans"
-  to = "/.netlify/functions/api/plans"
-  status = 200
+# /plans was here. The product is free since migration 0031 and the endpoint is
+# gone, so the path belongs to the app now like any other unrouted name.
+# apps/api/test/routing.test.js is what keeps this file and scripts/dev-site.mjs
+# from disagreeing about that.
 
 # Everything else is a screen. Expo exports a single index.html and routes on
 # the client, so a deep link like /record/mating must return that shell with a

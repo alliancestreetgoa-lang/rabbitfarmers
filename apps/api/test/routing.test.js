@@ -67,7 +67,6 @@ const PATHS = {
   '/scheduler/run': 'function',
   '/scheduler/health': 'function',
   '/health': 'function',
-  '/plans': 'function',
   '/webhooks/razorpay': 'function',
   '/webhooks/email': 'function',
   '/billing/return': 'function',
@@ -78,6 +77,10 @@ const PATHS = {
   '/herd': 'app',
   '/breeding': 'app',
   '/billing': 'app',
+  // Free since 0031, so there is no price list to serve and /plans is just
+  // another client-side name. Asserted on the app's side rather than deleted, so
+  // that re-adding the endpoint without re-adding the redirect fails here.
+  '/plans': 'app',
   '/animals': 'app',
   '/record/mating': 'app',
   '/(app)/team': 'app',

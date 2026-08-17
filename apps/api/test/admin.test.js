@@ -15,7 +15,9 @@ describe('entitlements', () => {
     assert.equal(res.status, 201);
   });
 
-  test('an expired trial goes read-only but keeps every record visible', async () => {
+  test('an expired trial keeps writing, and keeps every record visible', async () => {
+    // Asserted a 402 until migration 0031. There is no trial to expire now: the
+    // date is still written and still ages, and nothing consults it.
     const f = await signupFarm();
     await api('POST', '/animals', { token: f.token, body: { name: 'Meera', sex: 'doe' } });
 
@@ -23,17 +25,14 @@ describe('entitlements', () => {
       `UPDATE subscription SET trial_ends_on = current_date - 1 WHERE farm_id = $1`,
       [f.farm.id]);
 
-    const blocked = await api('POST', '/animals', {
-      token: f.token, body: { name: 'Too Late', sex: 'doe' },
+    const after = await api('POST', '/animals', {
+      token: f.token, body: { name: 'Not Too Late', sex: 'doe' },
     });
-    assert.equal(blocked.status, 402);
-    assert.equal(blocked.body.detail.read_only, true);
+    assert.equal(after.status, 201, 'an aged-out trial date must not stop a farm recording');
 
-    // The whole point: nothing is hidden, nothing is deleted.
     const list = await api('GET', '/animals', { token: f.token });
     assert.equal(list.status, 200);
-    assert.equal(list.body.animals.length, 1);
-    assert.equal(list.body.animals[0].name, 'Meera');
+    assert.equal(list.body.animals.length, 2);
   });
 
   test('a suspended farm still gets its reminders', async () => {
@@ -51,9 +50,11 @@ describe('entitlements', () => {
        WHERE farm_id = $1`, [f.farm.id]);
 
     const me = await api('GET', '/auth/me', { token: f.token });
-    assert.equal(me.body.subscription.access, 'read_only');
+    // Suspension is a record of payment history since 0031, not a lock.
+    assert.equal(me.body.subscription.access, 'full');
+    assert.equal(me.body.subscription.status, 'suspended');
 
-    // Billing failure must never silence an animal-welfare alert.
+    // Billing state must never silence an animal-welfare alert.
     const daily = await api('GET', '/daily', { token: f.token });
     assert.equal(daily.status, 200);
     assert.ok(daily.body.items.some((i) => i.source === 'condition'),
@@ -103,13 +104,20 @@ describe('admin CRM', () => {
     assert.equal(res.body.farms[0].farm_id, f.farm.id);
   });
 
-  test('extending a trial restores access and is logged with a reason', async () => {
+  test('extending a trial still moves the date and is logged with a reason', async () => {
+    /*
+     * The action used to restore access, which is what made it "the most common
+     * support request". Since 0031 nobody loses access, so there is nothing to
+     * restore — but the action, its required reason and its audit entry are all
+     * still here, because the audit log is the record of what admins did to
+     * farms and that has not stopped mattering.
+     */
     const f = await signupFarm();
     await adminQuery(
       `UPDATE subscription SET trial_ends_on = current_date - 1 WHERE farm_id = $1`,
       [f.farm.id]);
     assert.equal((await api('POST', '/animals', {
-      token: f.token, body: { name: 'Blocked', sex: 'doe' } })).status, 402);
+      token: f.token, body: { name: 'Never Blocked', sex: 'doe' } })).status, 201);
 
     const admin = await makeAdmin('support');
     const res = await api('POST', `/admin/farms/${f.farm.id}/extend_trial`, {
@@ -119,7 +127,7 @@ describe('admin CRM', () => {
     assert.equal(res.status, 200, res.text);
 
     assert.equal((await api('POST', '/animals', {
-      token: f.token, body: { name: 'Unblocked', sex: 'doe' } })).status, 201);
+      token: f.token, body: { name: 'After Extension', sex: 'doe' } })).status, 201);
 
     const { rows } = await adminQuery(
       'SELECT action, reason, before_value FROM admin_audit_log WHERE target_farm_id = $1',

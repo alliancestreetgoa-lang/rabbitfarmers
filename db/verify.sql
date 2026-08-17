@@ -562,14 +562,15 @@ BEGIN
       INTO acc, days, used, at_doe, at_seat
     FROM v_farm_entitlement;
 
-    IF acc <> 'full' OR days <> 12 THEN
-        RAISE EXCEPTION 'TRIAL FAIL: expected full access with 12 days left, got % / %', acc, days;
+    -- Free since 0031: full access, and no countdown because no trial runs.
+    IF acc <> 'full' OR days IS NOT NULL THEN
+        RAISE EXCEPTION 'TRIAL FAIL: expected full access and no countdown, got % / %', acc, days;
     END IF;
     -- Unlimited plan: no cap can ever be hit, whatever the herd size.
     IF at_doe OR at_seat THEN
         RAISE EXCEPTION 'LIMIT FAIL: unlimited plan reported a limit at % does', used;
     END IF;
-    RAISE NOTICE 'ok  trial: full access, % days left, % does, no caps', days, used;
+    RAISE NOTICE 'ok  free: full access, no trial countdown, % does, no caps', used;
 END $$;
 
 DO $$
@@ -645,10 +646,13 @@ BEGIN
 
     SELECT access, reminders_active INTO acc, rem FROM v_farm_entitlement;
 
-    IF acc <> 'read_only' THEN
-        RAISE EXCEPTION 'SUSPEND FAIL: expected read_only, got %', acc;
+    -- Free since 0031: suspension is a record of payment history, not a lock.
+    -- Asserted rather than dropped, because an admin pressing Suspend and
+    -- silently cutting a farm off would be the regression that matters.
+    IF acc <> 'full' THEN
+        RAISE EXCEPTION 'SUSPEND FAIL: suspension must not take access away, got %', acc;
     END IF;
-    -- The point of the whole design: billing failure must never silence a
+    -- The point of the whole design: billing state must never silence a
     -- nest-box or loose-motion alert. Rabbits do not know about invoices.
     IF NOT rem THEN
         RAISE EXCEPTION 'SUSPEND FAIL: reminders must survive suspension';
@@ -676,20 +680,20 @@ DO $$
 DECLARE
     acc text;
 BEGIN
-    -- Trial ran out without anyone paying: read-only, but nothing deleted and
-    -- every animal still visible.
+    -- A trial date that has aged out. Nothing consults it since 0031: the farm
+    -- keeps full access and every animal stays visible.
     UPDATE subscription
        SET status = 'trialing', trial_ends_on = current_date - 1, grace_until = NULL
      WHERE farm_id = '11111111-1111-1111-1111-111111111111';
 
     SELECT access INTO acc FROM v_farm_entitlement;
-    IF acc <> 'read_only' THEN
-        RAISE EXCEPTION 'TRIAL EXPIRY FAIL: expected read_only, got %', acc;
+    IF acc <> 'full' THEN
+        RAISE EXCEPTION 'TRIAL EXPIRY FAIL: an aged-out trial date must not lock a farm, got %', acc;
     END IF;
     IF (SELECT count(*) FROM v_doe_reproductive_state) = 0 THEN
-        RAISE EXCEPTION 'TRIAL EXPIRY FAIL: expired farm must not have animals hidden';
+        RAISE EXCEPTION 'TRIAL EXPIRY FAIL: farm must not have animals hidden';
     END IF;
-    RAISE NOTICE 'ok  trial expired: read_only, all animals still visible and exportable';
+    RAISE NOTICE 'ok  aged-out trial date: still full access, animals still visible';
 END $$;
 
 -- --- Signup, sign in, sign out ----------------------------------------------

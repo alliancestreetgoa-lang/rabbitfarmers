@@ -122,9 +122,9 @@ describe('client', () => {
     assert.ok(s, 'the session should survive a restart');
     assert.equal(s.user.role, 'owner');
     const me = await revived.me();
-    assert.equal(me.subscription.status, 'trialing');
-    assert.equal(me.subscription.trial_days_left, 30);
-    assert.equal(me.subscription.effective_price_paise, 99900);
+    // Free since migration 0031: full access, and no trial to count down.
+    assert.equal(me.subscription.access, 'full');
+    assert.equal(me.subscription.trial_days_left, null);
     assert.ok(email.length > 0);
   });
 

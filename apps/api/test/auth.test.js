@@ -5,19 +5,19 @@ import { api, signupFarm, cleanup, closePools, adminQuery, uniqueEmail } from '.
 after(async () => { await cleanup(); await closePools(); });
 
 describe('signup', () => {
-  test('creates a farm, an owner and a running trial in one call', async () => {
+  test('creates a farm and an owner in one call, with nothing to pay', async () => {
     const out = await signupFarm();
     assert.ok(out.token);
     assert.equal(out.user.role, 'owner');
-    assert.equal(out.trial_days, 30);
+    // Deliberately absent since migration 0031: a response that names a trial
+    // length teaches clients to count down to something that never arrives.
+    assert.equal(out.trial_days, undefined);
 
     const me = await api('GET', '/auth/me', { token: out.token });
     assert.equal(me.status, 200);
-    assert.equal(me.body.subscription.status, 'trialing');
     assert.equal(me.body.subscription.access, 'full');
-    assert.equal(me.body.subscription.trial_days_left, 30);
-    // Introductory price snapshotted at signup, not looked up later.
-    assert.equal(me.body.subscription.effective_price_paise, 99900);
+    assert.equal(me.body.subscription.trial_days_left, null,
+      'no trial is running, so there is no countdown');
   });
 
   test('is usable immediately — no verification step', async () => {
