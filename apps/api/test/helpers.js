@@ -5,9 +5,14 @@ import { hashPassword } from '../src/auth.js';
 const app = createApp();
 
 /** Call the API the way a client does — through fetch, not by importing handlers. */
-export async function api(method, path, { body, token, headers = {} } = {}) {
+export async function api(method, path, { body, rawBody, token, headers = {} } = {}) {
   const init = { method, headers: { ...headers } };
-  if (body !== undefined) {
+  // rawBody sends exactly these bytes. The Razorpay webhook is signed over the
+  // body as it arrives, so a test that re-serialises through `body` would be
+  // signing something other than what it sends.
+  if (rawBody !== undefined) {
+    init.body = rawBody;
+  } else if (body !== undefined) {
     init.headers['content-type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
@@ -107,6 +112,7 @@ export async function makeAdmin(role = 'superadmin') {
 export async function cleanup() {
   const mine = `%${process.pid}x%@example.test`;
   const farms = `SELECT farm_id FROM employee WHERE email::text LIKE '${mine}'`;
+  await adminQuery(`DELETE FROM webhook_event     WHERE farm_id       IN (${farms})`);
   await adminQuery(`DELETE FROM admin_audit_log   WHERE target_farm_id IN (${farms})`);
   await adminQuery(`DELETE FROM admin_impersonation WHERE farm_id      IN (${farms})`);
   await adminQuery(`DELETE FROM farm               WHERE id            IN (${farms})`);

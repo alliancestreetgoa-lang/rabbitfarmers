@@ -46,7 +46,7 @@ GRANT rabbitry_admin TO admin_login;
 npm test
 ```
 
-184 tests against a real database — no mocks, because the parts most worth
+209 tests against a real database — no mocks, because the parts most worth
 testing here (RLS, view security, the derived breeding state) only exist in
 Postgres. They create and clean up their own data, scoped by process id so the
 files can run concurrently.
@@ -80,11 +80,13 @@ src/
     auth.js       signup, signin, signout, me
     farm.js       animals, breeding cycle, conditions, daily list, settings
     staff.js      the team, sheds, logins, attendance
+    billing.js    payment links, the Razorpay webhook, invoices
     admin.js      the super-admin CRM
     scheduler.js  the run trigger and the heartbeat
   admin-ui.js     server-rendered admin pages (no build step)
   scheduler.js    task and notification generation, plus health
   push.js         getting a notification onto a phone
+  razorpay.js     payment links, and proving a webhook is really from Razorpay
   run-scheduler.js  run one pass from a shell
   migrate.js      migration runner
   create-admin.js first platform admin
@@ -119,6 +121,18 @@ phone. Read-only is enforced in `requireAuth` as a blanket rule on the HTTP
 method rather than a guard on the write routes — `/auth/password`,
 `/auth/signout` and `/notifications/read` carry no write guard, and those are
 precisely the ones that must not be reachable. See `test/impersonation.test.js`.
+
+**The webhook is the one route an anonymous caller can reach that moves money's
+worth of state.** Its signature is checked over the *raw request bytes* —
+re-serialising the parsed JSON changes key order and whitespace, so every real
+delivery would be rejected while the endpoint still looked healthy — with a
+constant-time compare, and every event id is recorded so a retry cannot pay
+twice. `test/billing.test.js` spends most of its length trying to forge one.
+
+Nothing there grants access, either. A payment moves
+`subscription.current_period_end`; the entitlement view decides what a farm may
+do, exactly as it did before. A dropped webhook costs a reconciliation, not a
+farmer's records.
 
 **Push is an improvement on opening the app, never a replacement.** Every part
 of registration is allowed to fail — a declined permission, Expo Go, a browser,

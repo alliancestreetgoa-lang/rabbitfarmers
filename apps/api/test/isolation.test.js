@@ -66,7 +66,12 @@ describe('tenant isolation', () => {
         -- corrections there and gave it a policy at the same time.
         AND c.relname NOT IN ('schema_migration','plan','platform_admin',
                               'admin_audit_log','admin_impersonation',
-                              'admin_session','scheduler_run')
+                              'admin_session','scheduler_run',
+        -- invoice_series is one row per financial year, shared by every farm:
+        -- a GST invoice number series has no tenant to scope it to. Revoked
+        -- from the farmer-facing role entirely (migration 0026), which is the
+        -- wall; there is no policy to be the belt.
+                              'invoice_series')
       ORDER BY 1`);
     assert.deepEqual(rows.map((r) => r.relname), [],
       `these tables have no row-level security: ${rows.map((r) => r.relname).join(', ')}`);

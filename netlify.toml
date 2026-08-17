@@ -57,6 +57,20 @@
 
 # Uptime monitors and the pricing page point at these, so they stay where they
 # are rather than moving under /api.
+# Razorpay posts here, server to server, and the browser is redirected to
+# /billing/return after a payment. Neither is a screen — if they fall through to
+# the SPA rule below, Razorpay gets index.html with a 200, treats the webhook as
+# delivered, and a farm that paid is never marked paid. Nothing in any log.
+[[redirects]]
+  from = "/webhooks/*"
+  to = "/.netlify/functions/api/webhooks/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/billing/return"
+  to = "/.netlify/functions/api/billing/return"
+  status = 200
+
 [[redirects]]
   from = "/health"
   to = "/.netlify/functions/api/health"

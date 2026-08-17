@@ -16,8 +16,11 @@ export default function More() {
   const { data } = useQuery('me', () => client.me());
   const sub = data?.subscription;
   const failed = pending.filter((p) => p.failed);
-  const canSeeTeam = ['owner', 'manager', 'accountant'].includes(
-    data?.user?.role ?? session?.user?.role ?? '');
+  const role = data?.user?.role ?? session?.user?.role ?? '';
+  const canSeeTeam = ['owner', 'manager', 'accountant'].includes(role);
+  // Same list the server enforces for billing:read. A farm hand never sees
+  // what the farm pays.
+  const canSeeBilling = ['owner', 'manager', 'accountant'].includes(role);
 
   return (
     <Screen>
@@ -86,6 +89,15 @@ export default function More() {
           <Pressable style={s.action} onPress={() => router.push('/(app)/team')}
                      testID="open-team">
             <Text style={s.actionText}>Team and attendance</Text>
+          </Pressable>
+        )}
+
+        {canSeeBilling && (
+          <Pressable style={s.action} onPress={() => router.push('/(app)/billing')}
+                     testID="open-billing">
+            <Text style={s.actionText}>
+              {sub?.access === 'read_only' ? 'Renew your subscription' : 'Billing and invoices'}
+            </Text>
           </Pressable>
         )}
 

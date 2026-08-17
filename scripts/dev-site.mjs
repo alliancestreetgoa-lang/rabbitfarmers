@@ -27,8 +27,11 @@ const PORT = Number(process.env.PORT ?? 8080);
 
 // The same split netlify.toml makes, in the same order. Everything not matched
 // here is a client-side route and gets the SPA shell.
-const API_PREFIXES = ['/api', '/admin', '/scheduler'];
-const API_EXACT = ['/health', '/plans'];
+const API_PREFIXES = ['/api', '/admin', '/scheduler', '/webhooks'];
+// /billing/return is the one path where a screen name and a server path collide:
+// `/billing` is a screen in the app, `/billing/return` is where Razorpay sends
+// the browser back to. Exact, so the screen still works.
+const API_EXACT = ['/health', '/plans', '/billing/return'];
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',

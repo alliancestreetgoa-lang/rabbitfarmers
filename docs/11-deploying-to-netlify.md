@@ -14,7 +14,7 @@ is a separate decision.
 ```
 
 From nothing, it applies the migrations, runs the 41 breeding-rule assertions,
-runs the 184 API tests, then boots the server and hits real endpoints over HTTP —
+runs the 209 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. It uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.
@@ -129,6 +129,10 @@ GRANT rabbitry_admin TO admin_login;
 | `SCHEDULER_SECRET` | a long random string; guards `POST /scheduler/run` |
 | `SCHEDULER_STALE_SECONDS` | `3600` — how long without a successful run before the heartbeat reports unhealthy |
 | `EXPO_PUBLIC_API_URL` | leave **empty** — `netlify.toml` already sets it so, and a value here would pin the app to one host |
+| `RAZORPAY_KEY_ID` | from the Razorpay dashboard. Leave unset and the app says card payments are not switched on, rather than showing a button that fails |
+| `RAZORPAY_KEY_SECRET` | same place. Never in the repo |
+| `RAZORPAY_WEBHOOK_SECRET` | **set when you create the webhook, not before** — it is what proves a delivery is genuine |
+| `PUBLIC_URL` | your site's URL. Razorpay redirects the farmer back to `PUBLIC_URL/billing/return` |
 
 Getting `DATABASE_URL` wrong is the one mistake that matters: point it at
 `admin_login` and every farm can read every other farm, because that role
@@ -251,6 +255,19 @@ exist yet. See [docs/12](12-android-and-ios-builds.md) for the APK.
 project builds for Android and iOS, but that needs EAS, signing keys and store
 accounts, and a native build must have `EXPO_PUBLIC_API_URL` set to the site's
 real URL because there is no origin to infer.
+
+**The Razorpay webhook.** In the dashboard, point a webhook at
+`https://your-site.netlify.app/webhooks/razorpay` and subscribe it to
+`payment_link.paid`, `payment_link.cancelled`, `payment_link.expired` and
+`payment.failed`. Put the secret it gives you in `RAZORPAY_WEBHOOK_SECRET`.
+Without the webhook a farmer's payment still lands — the redirect back applies
+it — but a farmer who closes the browser on the way back is left paid and not
+marked paid until somebody reconciles by hand.
+
+**Recurring payments.** Farms pay once and the period is extended. UPI Autopay
+and e-NACH mandates are deliberately not built: they need mandate registration,
+an additional-factor step on the first debit, and a pre-debit notification
+twenty-four hours before every charge. ₹999 once a year is one tap.
 
 **Rate limiting on signup.** A 30-day trial with no card and no verification is
 trivially farmed. Netlify has rate limiting available at the edge.

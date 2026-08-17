@@ -4,7 +4,8 @@ import type {
   Animal, Breed, BuckSuggestion, Cage, DailyItem, HistoryEvent, Litter, MatingSchedule,
   MedicationDose, OpenCondition, PregnancySummary, PregnantDoe, RabbitLifetime,
   ReadyDoe,
-  Attendance, AttendanceSummary, Session, Shed, Staff, Subscription, SupportAccess,
+  Attendance, AttendanceSummary, BillingRow, Session, Shed, Staff, Subscription,
+  SupportAccess,
 } from './types.ts';
 
 const TOKEN_KEY = 'rb.token';
@@ -363,6 +364,26 @@ export class ApiClient {
 
   unregisterDevice(token: string) {
     return this.request<{ ok: boolean; removed: boolean }>('DELETE', '/devices', { token });
+  }
+
+  /* --------------------------------------------------------------- billing */
+
+  billing() {
+    return this.request<{
+      subscription: Subscription | null;
+      renew: { monthly_paise: number | null; yearly_paise: number | null;
+               is_grandfathered: boolean };
+      history: BillingRow[];
+      gateway_ready: boolean;
+    }>('GET', '/billing');
+  }
+
+  /** Returns a URL to open. Works the same on the web build and in an APK. */
+  startPayment(billing_period: 'monthly' | 'yearly') {
+    return this.request<{
+      payment: { id: string; amount_paise: number; billing_period: string };
+      pay_url: string;
+    }>('POST', '/billing/pay', { billing_period });
   }
 
   permissions() {

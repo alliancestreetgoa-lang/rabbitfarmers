@@ -1,5 +1,12 @@
 # 09 — Selling This as a SaaS
 
+> **Billing is built.** Payment links, signature-verified webhooks, GST
+> invoices with a consecutive per-financial-year series, and grandfathered
+> pricing honoured at renewal. Farms pay once per period; recurring UPI
+> Autopay / e-NACH mandates are deliberately deferred — see
+> [docs/11](11-deploying-to-netlify.md) for why and for the environment
+> variables it needs.
+
 The plan changes from "an app for one farm" to "a product other farmers pay for
 every month". That changes less of the code than you might expect, and much more
 of everything else.

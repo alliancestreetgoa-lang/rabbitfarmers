@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { authRoutes } from './routes/auth.js';
 import { farmRoutes } from './routes/farm.js';
 import { staffRoutes } from './routes/staff.js';
+import { billingRoutes } from './routes/billing.js';
 import { adminRoutes } from './routes/admin.js';
 import { schedulerRoutes } from './routes/scheduler.js';
 import { errorHandler } from './middleware.js';
@@ -74,6 +75,11 @@ export function createApp() {
   // Also before the farm routes: the scheduler authenticates with a shared
   // secret, not a farm session, so it must not hit the farm auth guard.
   app.route('/scheduler', schedulerRoutes);
+  // Billing before the farm routes, and this one is not tidiness: the Razorpay
+  // webhook and the payment-return page have no session, and the farm routes
+  // carry a use('*') auth guard that would reject Razorpay's servers with a
+  // farmer-facing "sign in" error and then be retried for a day.
+  app.route('/', billingRoutes);
   // Staff before the farm routes only for tidiness — their paths do not
   // overlap. Both are mounted at '/' and both carry their own auth guard.
   app.route('/', staffRoutes);

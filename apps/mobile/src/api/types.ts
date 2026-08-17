@@ -290,3 +290,21 @@ export interface AttendanceSummary {
   overtime_minutes: number;
   days_worked: string;
 }
+
+/** One line of what a farm has paid, and the invoice it produced. */
+export interface BillingRow {
+  id: string;
+  created_at: string;
+  paid_at: string | null;
+  status: 'created' | 'paid' | 'failed' | 'cancelled' | 'refunded';
+  amount_paise: number;
+  billing_period: string;
+  covers_days: number;
+  short_url: string | null;
+  failed_reason: string | null;
+  invoice_number: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  subtotal_paise: number | null;
+  tax_paise: number | null;
+}
