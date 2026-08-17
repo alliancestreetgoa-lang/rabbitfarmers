@@ -233,7 +233,11 @@ for taken in "$API_PORT:API_PORT" "$SITE_PORT:PORT"; do
      Stop it, or run with a different one:  ${var}=$((p + 5)) ./scripts/localhost.sh"
 done
 
-(cd "$API_DIR" && node src/server.js > "$ROOT/.localhost-api.log" 2>&1) &
+# PORT, not API_PORT: that is the name the server reads. Passing it per-command
+# rather than exporting it, because the site below reads the same variable and
+# they are two different ports — export it once and whichever starts second
+# wins.
+(cd "$API_DIR" && PORT="$API_PORT" node src/server.js > "$ROOT/.localhost-api.log" 2>&1) &
 API_PID=$!
 for _ in $(seq 1 60); do
   curl -fsS "http://localhost:${API_PORT}/health" >/dev/null 2>&1 && break
@@ -243,7 +247,11 @@ curl -fsS "http://localhost:${API_PORT}/health" >/dev/null 2>&1 \
   || die_log "the API did not come up." "$ROOT/.localhost-api.log"
 ok "API on :${API_PORT}"
 
-PORT="$SITE_PORT" node "$ROOT/scripts/dev-site.mjs" > "$ROOT/.localhost-site.log" 2>&1 &
+# API_ORIGIN too, or the site proxies to :3000 whatever API_PORT says — and the
+# app loads, looks right, and fails every request against whatever else happens
+# to be on that port. Worse than not starting.
+PORT="$SITE_PORT" API_ORIGIN="http://localhost:${API_PORT}" \
+  node "$ROOT/scripts/dev-site.mjs" > "$ROOT/.localhost-site.log" 2>&1 &
 SITE_PID=$!
 for _ in $(seq 1 40); do
   curl -fsS "http://localhost:${SITE_PORT}/" >/dev/null 2>&1 && break
