@@ -58,6 +58,19 @@ throwaway `postgres:16` container and removes it afterwards.
 ### Run the whole thing locally
 
 ```bash
+./scripts/localhost.sh
+```
+
+Database, migrations, an admin account, a farm with rabbits in it, the app
+built, everything served on one port. Run it again and it keeps what is already
+there. `--fresh` throws the database away, `--rebuild` rebuilds the app,
+`--no-demo` leaves the farm empty.
+
+Needs PostgreSQL 15+ running, or Docker, or a `DATABASE_URL` you set yourself.
+
+<details><summary>Or the same thing by hand</summary>
+
+```bash
 cd apps/api && npm start                       # the API on :3000
 ADMIN_PASSWORD='something long' npm run create-admin -- you@example.com "You"
 
@@ -65,6 +78,8 @@ npm --prefix apps/mobile run build:web         # build the app
 node scripts/dev-site.mjs                      # both on http://localhost:8080
 node scripts/demo-data.mjs                     # a farm with something in it
 ```
+
+</details>
 
 `:8080` serves the app and the API on one origin, exactly as Netlify will — the
 farmer's app at `/`, the admin console at `/admin/login`. That matters: `/daily`
