@@ -72,7 +72,21 @@ built, everything served on one port. Run it again and it keeps what is already
 there. `--fresh` throws the database away, `--rebuild` rebuilds the app,
 `--no-demo` leaves the farm empty.
 
-Needs PostgreSQL 15+ running, or Docker, or a `DATABASE_URL` you set yourself.
+**On a Mac, from nothing:**
+
+```bash
+brew install node libpq && brew link --force libpq   # node, and the psql client
+git clone https://github.com/alliancestreetgoa-lang/Rabbit-farm && cd Rabbit-farm
+./scripts/localhost.sh
+```
+
+Then open **http://localhost:8080**. The script prints the two logins.
+
+Needs Node 22+, the `psql` client, and either PostgreSQL 15+ running, Docker
+(it starts `postgres:16` on a volume that survives), or a `DATABASE_URL` you set
+yourself. `psql` is needed even when the database is in Docker — the script
+talks to it from the host. Everything is checked by name before anything runs,
+so a missing one says which.
 
 <details><summary>Or the same thing by hand</summary>
 

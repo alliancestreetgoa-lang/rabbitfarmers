@@ -60,6 +60,25 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# ------------------------------------------------------------ what is here --
+#
+# Checked up front, by name, because every one of these fails later in a way
+# that does not name itself. The Docker path in particular still needs the
+# `psql` CLIENT on this machine — the server being in a container does not help
+# — and without it the script gets four steps further and then says
+# "psql: command not found" from inside a function.
+for tool in node npm psql; do
+  command -v "$tool" >/dev/null 2>&1 && continue
+  case "$tool" in
+    node|npm) die "$tool is not installed. Node 22 or newer: https://nodejs.org
+     macOS: brew install node" ;;
+    psql) die "the psql client is not installed. It is needed even when the
+     database itself runs in Docker.
+     macOS: brew install libpq && brew link --force libpq
+     Debian/Ubuntu: sudo apt install postgresql-client" ;;
+  esac
+done
+
 # ---------------------------------------------------------------- database --
 step "Database"
 
