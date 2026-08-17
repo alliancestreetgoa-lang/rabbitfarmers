@@ -143,6 +143,39 @@ describe('hiring somebody', () => {
 });
 
 describe('what each role may do', () => {
+  test('leaving the herd for good is the owner’s call alone', async () => {
+    /*
+     * Sold, culled and dead end a breeding line, and on a shared phone
+     * "anyone who can record can remove" is how a herd shrinks by mistap.
+     * Quarantine stays ordinary husbandry: the caretaker who spots snuffles
+     * must be able to isolate the animal on the spot.
+     */
+    const f = await signupFarm();
+    const doe = await api('POST', '/animals', {
+      token: f.token, body: { name: 'Tulsi', sex: 'doe' } });
+    const id = doe.body.animal.id;
+
+    for (const role of ['manager', 'caretaker']) {
+      const worker = await hire(f, { name: `R ${role}`, phone: uniquePhone(), role });
+      const refused = await api('POST', `/animals/${id}/status`, {
+        token: worker.token, body: { status: 'sold', reason: 'not their call' } });
+      assert.equal(refused.status, 403, `a ${role} must not remove an animal`);
+      assert.match(refused.body.error, /owner/,
+        'the refusal names who to ask');
+
+      const quarantined = await api('POST', `/animals/${id}/status`, {
+        token: worker.token, body: { status: 'quarantine' } });
+      assert.equal(quarantined.status, 201,
+        `a ${role} must still be able to quarantine on the spot`);
+      await api('POST', `/animals/${id}/status`, {
+        token: worker.token, body: { status: 'active' } });
+    }
+
+    const sold = await api('POST', `/animals/${id}/status`, {
+      token: f.token, body: { status: 'sold', reason: 'sold at market' } });
+    assert.equal(sold.status, 201, sold.text);
+  });
+
   test('a caretaker records animals but never sees the team', async () => {
     const f = await signupFarm();
     const ravi = await hire(f, { name: 'Ravi', phone: uniquePhone(), role: 'caretaker' });

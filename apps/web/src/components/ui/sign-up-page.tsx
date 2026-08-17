@@ -1,26 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { Eye, EyeOff, ArrowLeft, Loader2, ChevronDown } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { BRAND_IMAGE, BRAND_TAGLINE } from '@/lib/brand';
 
 /**
  * Create a farm. Free, instant, no card, no verification step.
  *
- * FIVE FIELDS, not nine.
- *
- * The phone app asks for farm name, your name, email, phone, password, address,
- * town, state and PIN. Only the first five are required: validateSignup in
- * apps/api/src/auth.js defaults address_line, city, state and pincode to null and
- * never rejects a missing one. Four of the nine fields were being demanded by the
- * form and ignored by the server.
- *
- * That matters more than it sounds. This is the screen between a farmer hearing
- * about the product and using it, the product is free specifically so that as
- * many farms as possible get that far, and every field is somewhere to stop. So
- * the address is here — it is genuinely useful, and a farm with one is easier to
- * support — but it is folded away and plainly optional.
+ * Every field is compulsory, the address included — a product decision made
+ * deliberately: the platform exists to collect farm data, and a farm that
+ * cannot be placed on a map is a farm the data cannot say much about. The
+ * server enforces this in validateSignup, so the phone app obeys the same rule;
+ * this form marking fields required is a courtesy, not the enforcement.
  *
  * Errors are rendered per field. /auth/signup answers 400 with
  * `detail: { field: message }` and 409 with `detail: { field }` for a duplicate,
@@ -31,12 +23,9 @@ import { BRAND_IMAGE, BRAND_TAGLINE } from '@/lib/brand';
 
 type Errors = Record<string, string>;
 
-const REQUIRED = ['farm_name', 'full_name', 'email', 'phone', 'password'] as const;
-
 export function SignUpPage() {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
-  const [showAddress, setShowAddress] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [errors, setErrors] = useState<Errors>({});
@@ -106,9 +95,6 @@ export function SignUpPage() {
     <div>
       <label htmlFor={name} className="mb-2 block text-sm font-medium text-gray-700">
         {label}
-        {!REQUIRED.includes(name as (typeof REQUIRED)[number]) && (
-          <span className="ml-1 font-normal text-gray-400">optional</span>
-        )}
       </label>
       <input
         id={name}
@@ -237,34 +223,20 @@ export function SignUpPage() {
               )}
             </div>
 
-            {/* Folded away because the server does not need any of it. */}
-            <div className="rounded-xl border border-gray-200">
-              <button
-                type="button"
-                onClick={() => setShowAddress(!showAddress)}
-                aria-expanded={showAddress}
-                className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-gray-700"
-              >
-                <span>
-                  Where is the farm?{' '}
-                  <span className="font-normal text-gray-400">optional</span>
-                </span>
-                <ChevronDown
-                  className={`h-4 w-4 text-gray-500 transition-transform ${
-                    showAddress ? 'rotate-180' : ''
-                  }`}
-                />
-              </button>
-              {showAddress && (
-                <div className="space-y-4 border-t border-gray-200 p-4">
-                  {field('address_line', 'Address', { placeholder: 'Survey no., village' })}
-                  <div className="grid grid-cols-2 gap-4">
-                    {field('city', 'Town', { placeholder: 'Margao' })}
-                    {field('state', 'State', { placeholder: 'Goa' })}
-                  </div>
-                  {field('pincode', 'PIN code', { placeholder: '403709', inputMode: 'numeric' })}
+            <div>
+              <p className="mb-3 text-sm font-medium text-gray-700">Where is the farm?</p>
+              <div className="space-y-4">
+                {field('address_line', 'Address', {
+                  placeholder: 'Survey no., village', required: true,
+                })}
+                <div className="grid grid-cols-2 gap-4">
+                  {field('city', 'Town', { placeholder: 'Margao', required: true })}
+                  {field('state', 'State', { placeholder: 'Goa', required: true })}
                 </div>
-              )}
+                {field('pincode', 'PIN code', {
+                  placeholder: '403709', inputMode: 'numeric', required: true,
+                })}
+              </div>
             </div>
 
             {message && (

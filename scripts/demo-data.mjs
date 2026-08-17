@@ -225,7 +225,8 @@ if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
     for (const n of neighbours) {
       const s = await call('POST', '/auth/signup', {
         farm_name: n.farm, full_name: n.owner, email: n.email, phone: '+919822000000',
-        password: PASSWORD, city: n.city, state: n.city === 'Belagavi' ? 'Karnataka' : 'Goa',
+        password: PASSWORD, address_line: `Near the market, ${n.city}`,
+        city: n.city, state: n.city === 'Belagavi' ? 'Karnataka' : 'Goa', pincode: '403001',
       });
       const saved = token;
       token = s.token;

@@ -33,6 +33,22 @@ describe('signup', () => {
     assert.equal(rows[0].email_verified_at, null);
   });
 
+  test('the address is compulsory, and each missing piece is named', async () => {
+    // A product decision: the platform collects farm data, and a farm that
+    // cannot be placed on a map is a farm the data cannot say much about.
+    const res = await api('POST', '/auth/signup', {
+      body: {
+        farm_name: 'No Address Farm', full_name: 'Ravi',
+        email: uniqueEmail(), phone: `+9198${Date.now() % 100000000}`,
+        password: 'correct horse battery',
+      },
+    });
+    assert.equal(res.status, 400);
+    for (const field of ['address_line', 'city', 'state', 'pincode']) {
+      assert.ok(res.body.detail[field], `${field} must be named in the error`);
+    }
+  });
+
   test('captures email, phone and address', async () => {
     const out = await signupFarm();
     const { rows } = await adminQuery(
@@ -61,6 +77,9 @@ describe('signup', () => {
       body: {
         farm_name: 'Test Other', full_name: 'Someone Else',
         email: email.toUpperCase(), phone: '+919000000000', password: 'another password',
+        // A full address, so this reaches the duplicate check rather than
+        // stopping at the (now compulsory) address validation.
+        address_line: 'Survey 9', city: 'Margao', state: 'Goa', pincode: '403709',
       },
     });
     assert.equal(again.status, 409);

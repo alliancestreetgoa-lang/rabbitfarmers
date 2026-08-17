@@ -11,7 +11,10 @@ const GONE = ['sold', 'culled', 'dead'];
 
 export default function AnimalScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { client } = useApp();
+  const { client, session } = useApp();
+  // Server-enforced too (animals:remove, owner only). Hiding the button is
+  // just not offering a tap that answers 403 on a shared phone.
+  const canRemove = session?.user?.role === 'owner';
   // One call now, not two: the history endpoint returns the animal, her
   // lifetime totals, her timeline and her offspring. It also works for an
   // animal who has left the herd, which the herd list deliberately does not
@@ -149,12 +152,14 @@ export default function AnimalScreen() {
                        onPress={() => router.push(`/record/condition?rabbit=${a.id}`)}>
               <Text style={s.actionText}>Report a problem</Text>
             </Pressable>
-            <Pressable style={[s.action, s.leave]} testID="a-leave"
-                       onPress={() => router.push(`/record/status?rabbit=${a.id}`)}>
-              <Text style={[s.actionText, { color: colors.muted }]}>
-                Sold, culled or died
-              </Text>
-            </Pressable>
+            {canRemove && (
+              <Pressable style={[s.action, s.leave]} testID="a-leave"
+                         onPress={() => router.push(`/record/status?rabbit=${a.id}`)}>
+                <Text style={[s.actionText, { color: colors.muted }]}>
+                  Sold, culled or died
+                </Text>
+              </Pressable>
+            )}
           </>
         )}
 

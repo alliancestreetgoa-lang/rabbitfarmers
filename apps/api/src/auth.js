@@ -122,6 +122,22 @@ export function validateSignup(body) {
     errors.timezone = 'Use a timezone name like Asia/Kolkata';
   }
 
+  /*
+   * The address is compulsory — a product decision, not a technical one. The
+   * platform exists to collect farm data, and a farm that cannot be placed on a
+   * map is a farm the data cannot say much about. Content stays unvalidated in
+   * the same spirit as the phone rule above: an address is whatever the farmer
+   * says it is, and rejecting a real one is worse than accepting an odd one.
+   */
+  const addressLine = (body.address_line ?? '').trim();
+  const city = (body.city ?? '').trim();
+  const state = (body.state ?? '').trim();
+  const pincode = (body.pincode ?? '').trim();
+  if (!addressLine) errors.address_line = 'Enter the farm’s address';
+  if (!city) errors.city = 'Enter the town or village';
+  if (!state) errors.state = 'Enter the state';
+  if (!pincode) errors.pincode = 'Enter the PIN code';
+
   if (Object.keys(errors).length) throw new HttpError(400, 'Check the form', errors);
 
   return {
@@ -130,10 +146,10 @@ export function validateSignup(body) {
     email,
     phone,
     password,
-    addressLine: (body.address_line ?? '').trim() || null,
-    city: (body.city ?? '').trim() || null,
-    state: (body.state ?? '').trim() || null,
-    pincode: (body.pincode ?? '').trim() || null,
+    addressLine,
+    city,
+    state,
+    pincode,
     timezone,
   };
 }

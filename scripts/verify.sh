@@ -166,7 +166,7 @@ PHONE="+91$(printf '%010d' $(($$ % 1000000000)))"
 SIGNUP=$(curl -fsS -X POST localhost:$PORT/auth/signup -H 'content-type: application/json' \
   -d "{\"farm_name\":\"Verify Farm\",\"full_name\":\"Verifier\",\"email\":\"$EMAIL\",
        \"phone\":\"$PHONE\",\"password\":\"correct horse battery\",
-       \"city\":\"Margao\",\"state\":\"Goa\",\"pincode\":\"403709\"}")
+       \"address_line\":\"Verify Lane\",\"city\":\"Margao\",\"state\":\"Goa\",\"pincode\":\"403709\"}")
 TOKEN=$(echo "$SIGNUP" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 [ -n "$TOKEN" ] || die "signup failed: $SIGNUP"
 ok "POST /auth/signup — farm created, free, nothing to pay"

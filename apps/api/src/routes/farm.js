@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { requireAuth, requireWriteAccess } from '../middleware.js';
-import { requireCan, canEditRecord } from '../permissions.js';
+import { requireCan, requireInline, canEditRecord } from '../permissions.js';
 import { HttpError, isKnownTimezone } from '../auth.js';
 
 export const farmRoutes = new Hono();
@@ -326,6 +326,14 @@ farmRoutes.patch('/animals/:id', write, canWriteAnimals, async (c) => {
  * in April and sold in November keeps all three facts.
  */
 const STATUSES = ['active', 'quarantine', 'sold', 'culled', 'dead'];
+/*
+ * The permanent three are the owner's call alone. Quarantine and a return to
+ * active are ordinary husbandry — a caretaker who spots snuffles must be able
+ * to isolate the animal on the spot. But sold, culled and dead end a breeding
+ * line, and on a shared phone in a shed, "anyone who can record can remove"
+ * is how a herd shrinks by mistap. animals:remove is granted to owner only.
+ */
+const PERMANENT = ['sold', 'culled', 'dead'];
 
 farmRoutes.post('/animals/:id/status', write, canWriteAnimals, async (c) => {
   const id = c.req.param('id');
@@ -336,6 +344,7 @@ farmRoutes.post('/animals/:id/status', write, canWriteAnimals, async (c) => {
     throw new HttpError(400, `Status must be one of ${STATUSES.join(', ')}`,
       { field: 'status' });
   }
+  if (PERMANENT.includes(to)) requireInline(c.get('session'), 'animals:remove');
   // A reason is required for the three that are permanent. "Culled" with no
   // reason six months later tells nobody whether she was barren or sick.
   const reason = String(b.reason ?? '').trim();

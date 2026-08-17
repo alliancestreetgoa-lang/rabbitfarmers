@@ -16,6 +16,7 @@ import { HttpError } from './auth.js';
 export const ACTIONS = [
   'animals:read',      // the herd, a rabbit's history, the daily list
   'animals:write',     // add a rabbit, record a mating, a kindling, a weaning
+  'animals:remove',    // sold, culled, died — the permanent exits from the herd
   'health:write',      // report a condition, record a dose, resolve a case
   'tasks:complete',    // tick off assigned work
   'staff:read',        // see the team and who is in today
@@ -80,6 +81,20 @@ export function requireCan(action) {
     }
     await next();
   };
+}
+
+/**
+ * The same refusal, for a check that lives inside a route rather than in front
+ * of it — used where one endpoint's inputs need different permissions, like a
+ * status change that is ordinary husbandry for quarantine and a permanent exit
+ * for sold/culled/died.
+ */
+export function requireInline(session, action) {
+  if (!can(session, action)) {
+    throw new HttpError(403, refusal(action, session?.role), {
+      action, role: session?.role ?? null,
+    });
+  }
 }
 
 function refusal(action, role) {

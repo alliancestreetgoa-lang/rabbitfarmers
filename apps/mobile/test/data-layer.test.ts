@@ -105,7 +105,7 @@ async function freshFarm() {
     email,
     phone: uniquePhone(),
     password: 'correct horse battery',
-    city: 'Margao', state: 'Goa', pincode: '403709',
+    address_line: 'Survey 7, Curtorim', city: 'Margao', state: 'Goa', pincode: '403709',
   });
   const outbox = new Outbox(client, storage);
   return { client, outbox, storage, email };

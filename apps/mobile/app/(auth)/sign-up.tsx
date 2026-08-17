@@ -64,14 +64,19 @@ export default function SignUp() {
                onChangeText={set('password')} secureTextEntry
                placeholder="At least 8 characters" error={errors.password} />
 
+        {/* Compulsory like everything above — the server rejects a blank, so
+            each field carries its own error rather than leaving a farmer to
+            guess which of nine boxes the banner meant. */}
         <Field label="Address" testID="address_line" value={f.address_line}
-               onChangeText={set('address_line')} placeholder="Survey no., village" />
+               onChangeText={set('address_line')} placeholder="Survey no., village"
+               error={errors.address_line} />
         <Field label="Town" testID="city" value={f.city} onChangeText={set('city')}
-               placeholder="Margao" />
+               placeholder="Margao" error={errors.city} />
         <Field label="State" testID="state" value={f.state} onChangeText={set('state')}
-               placeholder="Goa" />
+               placeholder="Goa" error={errors.state} />
         <Field label="PIN code" testID="pincode" value={f.pincode}
-               onChangeText={set('pincode')} keyboardType="number-pad" placeholder="403709" />
+               onChangeText={set('pincode')} keyboardType="number-pad" placeholder="403709"
+               error={errors.pincode} />
 
         {!!error && (
           <Text style={{ color: colors.crit, marginBottom: space.md }} testID="signup-error">
