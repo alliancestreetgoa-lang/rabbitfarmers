@@ -1,20 +1,4 @@
 {
-  "//": [
-    "Build profiles for EAS, Expo's hosted Android and iOS builders.",
-    "",
-    "The point of building on EAS rather than locally is that the Android SDK,",
-    "the NDK and a signing keystore all live on their machines instead of",
-    "yours. `preview` is the one to use: it produces an installable .apk.",
-    "The default for a store submission is an .aab, which a phone cannot open,",
-    "and finding that out after a twenty-minute build is a rite of passage",
-    "worth skipping.",
-    "",
-    "  npm i -g eas-cli && eas login && eas init",
-    "  eas build --platform android --profile preview",
-    "",
-    "Set EXPO_PUBLIC_API_URL to your deployed site first — see the env blocks",
-    "below and docs/12-android-and-ios-builds.md."
-  ],
   "cli": {
     "version": ">= 12.0.0",
     "appVersionSource": "local"
@@ -32,18 +16,12 @@
       "channel": "preview",
       "android": {
         "buildType": "apk"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_URL": ""
       }
     },
     "production": {
       "channel": "production",
       "android": {
         "buildType": "app-bundle"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_URL": ""
       }
     }
   },
