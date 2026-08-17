@@ -20,3 +20,6 @@ apps/mobile/ios/
 # A keystore is the app's identity on Play. Never in git.
 *.keystore
 *.jks
+
+# Local Netlify folder
+.netlify

@@ -499,6 +499,64 @@ farmRoutes.post('/animals', write, canWriteAnimals, async (c) => {
 /* ------------------------------------------------------------- the numbers -- */
 
 /** GET /pregnant — "how many are pregnant?", confirmed and presumed kept apart. */
+/**
+ * GET /summary — the farm at a glance, in one round trip.
+ *
+ * Built for the web dashboard, which opens on this. Everything here is
+ * answerable from existing views except kits, which nothing could answer
+ * before: kits are counted from litter.born_alive rather than rabbit rows,
+ * because kits only become individual rabbit rows when somebody records them
+ * one by one, which most farms do late or never — counting rabbit rows would
+ * report zero for every young litter.
+ *
+ * Computed in SQL inside the farm's RLS context, so this and every other
+ * screen give identical answers to "who is pregnant". One request, because a
+ * dashboard that fires seven is a dashboard that renders in pieces.
+ */
+farmRoutes.get('/summary', canRead, async (c) => {
+  const db = c.get('db');
+  const data = await db(async (client) => {
+    const [herd, preg, ready, kits, health, today, team] = await Promise.all([
+      client.query(`
+        SELECT count(*)::int                                   AS total,
+               count(*) FILTER (WHERE sex = 'buck')::int       AS bucks,
+               count(*) FILTER (WHERE sex = 'doe')::int        AS does,
+               count(*) FILTER (WHERE role = 'grower')::int    AS growers
+        FROM rabbit WHERE status IN ('active', 'quarantine')`),
+      client.query('SELECT * FROM v_pregnancy_summary'),
+      client.query(`
+        SELECT count(*)::int AS ready,
+               count(*) FILTER (WHERE days_overdue > 0)::int AS overdue
+        FROM v_ready_to_mate`),
+      client.query(`
+        SELECT COALESCE(sum(born_alive) FILTER (WHERE weaned_on IS NULL), 0)::int AS unweaned,
+               count(*) FILTER (WHERE weaned_on IS NULL)::int                     AS litters_open,
+               COALESCE(sum(weaned_count), 0)::int                                AS weaned_total
+        FROM litter`),
+      client.query(`
+        SELECT (SELECT count(*)::int FROM v_open_conditions)  AS open_conditions,
+               (SELECT count(*)::int FROM v_medication_due)   AS doses_due`),
+      client.query(`
+        SELECT count(*)::int                                          AS open,
+               count(*) FILTER (WHERE urgency = 'critical')::int      AS urgent
+        FROM v_daily_list`),
+      client.query(`SELECT count(*)::int AS staff FROM employee WHERE is_active`),
+    ]);
+    return {
+      herd: herd.rows[0],
+      pregnant: preg.rows[0] ?? {
+        total_pregnant: 0, confirmed_pregnant: 0, presumed_pregnant: 0, due_within_7_days: 0,
+      },
+      ready: ready.rows[0],
+      kits: kits.rows[0],
+      health: health.rows[0],
+      today: today.rows[0],
+      team: team.rows[0],
+    };
+  });
+  return c.json(data);
+});
+
 farmRoutes.get('/pregnant', canRead, async (c) => {
   const db = c.get('db');
   const data = await db(async (client) => {
