@@ -7,11 +7,27 @@ import { colors, space } from '../../src/ui/theme';
 import { ApiError, OfflineError } from '../../src/api/client';
 
 export default function SignIn() {
-  const { signIn } = useApp();
+  const { signIn, serverUrl, canSetServer, setServerUrl } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [server, setServer] = useState(serverUrl);
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverNote, setServerNote] = useState<string | null>(null);
+
+  const saveServer = async () => {
+    setServerBusy(true);
+    setServerNote(null);
+    try {
+      await setServerUrl(server);
+      setServerNote('Connected.');
+    } catch (err) {
+      setServerNote((err as Error).message);
+    } finally {
+      setServerBusy(false);
+    }
+  };
 
   const submit = async () => {
     setBusy(true);
@@ -36,6 +52,34 @@ export default function SignIn() {
         <Muted>Breeding, medicine rounds and staff, from the shed.</Muted>
 
         <View style={{ height: space.xl }} />
+
+        {/*
+          Only on an installed app that was built without an address. The web
+          build knows it from the origin that served it, and an APK built with
+          EXPO_PUBLIC_API_URL set never shows this either. It is here so a build
+          without one is usable instead of silently unable to reach anything.
+        */}
+        {canSetServer && (
+          <>
+            <Field
+              label="Your Rabbitry address"
+              testID="server"
+              value={server}
+              onChangeText={setServer}
+              autoCapitalize="none"
+              keyboardType="url"
+              placeholder="https://yourfarm.netlify.app"
+            />
+            <Button title="Connect" onPress={saveServer} loading={serverBusy}
+                    variant="ghost" testID="connect" />
+            {!!serverNote && (
+              <Text style={{ color: colors.muted, marginTop: space.sm }} testID="server-note">
+                {serverNote}
+              </Text>
+            )}
+            <View style={{ height: space.xl }} />
+          </>
+        )}
 
         <Field
           label="Email"

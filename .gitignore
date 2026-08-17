@@ -6,3 +6,14 @@ node_modules/
 # Expo web export — built by Netlify, never committed.
 apps/mobile/dist/
 .expo/
+
+# Native projects are generated from app.config.js by `expo prebuild`, not
+# authored. Committing them means the next prebuild silently discards whatever
+# was edited by hand, and two people's builds drift apart with nothing in the
+# diff to explain it. Native changes go in a config plugin.
+apps/mobile/android/
+apps/mobile/ios/
+
+# A keystore is the app's identity on Play. Never in git.
+*.keystore
+*.jks

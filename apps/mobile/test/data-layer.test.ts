@@ -493,3 +493,46 @@ describe('support access', () => {
     assert.equal((await revived.animals()).animals.length, 0);
   });
 });
+
+/**
+ * An installed app has no origin to infer its server from.
+ *
+ * The web build is served by the same site as the API, so it works this out
+ * from window.location. An APK is a file on a phone: unless the address was
+ * compiled in with EXPO_PUBLIC_API_URL, the farmer types it on the sign-in
+ * screen. That means the client's base URL has to be settable after the client
+ * exists — everything below is what makes that safe to do.
+ */
+describe('pointing an installed app at a server', () => {
+  test('the base URL can be set after the client is built', async () => {
+    const client = new ApiClient({
+      baseUrl: 'http://127.0.0.1:9', storage: new MemoryStorage(), timeoutMs: 1500,
+    });
+
+    // Nothing there — which is exactly what a wrong address looks like.
+    await assert.rejects(
+      () => client.request('GET', '/health', undefined, { auth: false }),
+      (e: unknown) => e instanceof OfflineError);
+
+    // A trailing slash is what a person typing a URL produces, and two slashes
+    // in a path is a 404 the farmer cannot diagnose.
+    client.setBaseUrl(`${API_URL}/`);
+    assert.equal(client.baseUrl, API_URL);
+
+    const health = await client.request<{ ok: boolean }>(
+      'GET', '/health', undefined, { auth: false });
+    assert.equal(health.ok, true);
+  });
+
+  test('a session survives being carried across a base URL change', async () => {
+    const { client, storage } = await freshFarm();
+    await client.addAnimal({ name: 'Gauri', sex: 'doe' });
+
+    // The app relaunching: same storage, base URL applied from what was typed
+    // last time, before the session is loaded.
+    const revived = new ApiClient({ baseUrl: 'http://127.0.0.1:9', storage });
+    revived.setBaseUrl(API_URL);
+    assert.ok(await revived.loadSession());
+    assert.equal((await revived.animals()).animals[0]!.name, 'Gauri');
+  });
+});

@@ -56,7 +56,15 @@ export interface ClientOptions {
 }
 
 export class ApiClient {
-  readonly baseUrl: string;
+  /**
+   * Not readonly, because an installed app is told this after it starts.
+   *
+   * A web build knows the address from the origin that served it. An APK has no
+   * origin: unless it was compiled in, the farmer types it on the sign-in
+   * screen and it is read back from storage on every launch after that. See
+   * setServerUrl in state.tsx.
+   */
+  baseUrl: string;
   private storage: Storage;
   private fetchImpl: typeof fetch;
   private onSignedOut?: () => void;
@@ -98,6 +106,10 @@ export class ApiClient {
   }
 
   get isSignedIn() { return this.token !== null; }
+
+  setBaseUrl(url: string) {
+    this.baseUrl = url.replace(/\/+$/, '');
+  }
 
   async request<T>(
     method: string,

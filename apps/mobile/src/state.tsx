@@ -13,24 +13,56 @@ const asyncStorage: Storage = {
   remove: (k) => AsyncStorage.removeItem(k),
 };
 
+/** A server address the farmer typed in, on a build that had none. */
+const SERVER_KEY = 'rb.server';
+
+const trimUrl = (u: string) => u.trim().replace(/\/+$/, '');
+
 /**
- * Where the API lives.
- *
- * Three cases, in order:
- *
- *  1. EXPO_PUBLIC_API_URL was set at build time — an absolute URL wins outright.
- *     This is how a native build finds the server, and how a developer points
- *     the web build at localhost.
- *  2. Running in a browser with nothing configured — the app was served by
- *     Netlify alongside the function, so the API is /api on this same origin.
- *     Same build works on a deploy preview and on production.
- *  3. Neither — a bare Node process in tests. Fall back to the dev server.
+ * Baked in at build time. An absolute URL wins outright: it is how a native
+ * build finds the server, and how a developer points a web build at localhost.
  */
-function resolveApiUrl(): string {
+function bakedApiUrl(): string | null {
   const configured = (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl;
-  if (configured?.startsWith('http')) return configured.replace(/\/$/, '');
+  return configured?.startsWith('http') ? trimUrl(configured) : null;
+}
+
+/**
+ * The origin that served the page. Netlify puts the app and the function on one
+ * site, so `/api` here is the same deploy — which is why one web build works on
+ * a preview, a branch deploy and production without being told which it is.
+ */
+function sameOriginApiUrl(): string | null {
   if (typeof window !== 'undefined' && window.location) return `${window.location.origin}/api`;
-  return 'http://localhost:3000';
+  return null;
+}
+
+/**
+ * Where the API lives, in order: baked in, then typed in, then the origin that
+ * served the page, then the dev server for a bare Node process in tests.
+ */
+function resolveApiUrl(stored?: string | null): string {
+  return bakedApiUrl()
+    ?? (stored ? trimUrl(stored) : null)
+    ?? sameOriginApiUrl()
+    ?? 'http://localhost:3000';
+}
+
+/**
+ * An installed app has no origin to fall back on.
+ *
+ * A web build is served by the same site as the API, so it can work that out
+ * for itself. An APK cannot: it is a file on a phone, and unless the address
+ * was compiled into it there is nothing to ask. Left unhandled that is an app
+ * which installs, opens, and silently fails every request — the worst possible
+ * first five minutes.
+ *
+ * So a build with no address asks for one, once, on the sign-in screen. Setting
+ * EXPO_PUBLIC_API_URL at build time is still the right answer for an app handed
+ * to farmers; this is what makes a build without it usable rather than inert.
+ */
+function needsServerAddress(): boolean {
+  return bakedApiUrl() === null && sameOriginApiUrl() === null;
 }
 
 /**
@@ -66,6 +98,12 @@ interface AppState {
   signOut(): Promise<void>;
   setOffline(v: boolean): void;
   refreshOutbox(): Promise<void>;
+  /** The API this build is talking to. Shown so a wrong one is diagnosable. */
+  serverUrl: string;
+  /** True on an installed app with no address compiled in — it has to ask. */
+  canSetServer: boolean;
+  /** Checks the address answers before keeping it. Throws if it does not. */
+  setServerUrl(url: string): Promise<void>;
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -75,6 +113,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [pending, setPending] = useState<OutboxEntry[]>([]);
   const [offline, setOffline] = useState(false);
+  const [serverUrl, setServerUrlState] = useState(() => resolveApiUrl());
 
   const client = useMemo(() => new ApiClient({
     baseUrl: resolveApiUrl(),
@@ -89,6 +128,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     (async () => {
+      // Before anything is fetched: an installed app may have been told where
+      // its server is on a previous run, and the session below is about to be
+      // checked against it.
+      const stored = await asyncStorage.get(SERVER_KEY);
+      const url = resolveApiUrl(stored);
+      client.setBaseUrl(url);
+      setServerUrlState(url);
+
       const handed = takeSupportToken();
       if (handed) {
         // A dead or already-ended link must leave the device as it found it —
@@ -140,9 +187,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPending(await outbox.load());
   }, [outbox]);
 
+  /**
+   * Point the app at a server, having checked that something is there.
+   *
+   * The check is the point. A typo saved silently turns every screen into "no
+   * connection" with no hint that the address is the problem, and the person
+   * typing it is a farmer reading a URL off a piece of paper.
+   */
+  const setServerUrl = useCallback(async (input: string) => {
+    const url = trimUrl(input);
+    if (!/^https?:\/\/.+/i.test(url)) {
+      throw new Error('That should start with https:// and be the address of your Rabbitry site');
+    }
+
+    // /health is unauthenticated and cheap, and answering it is exactly the
+    // thing being checked.
+    let ok = false;
+    try {
+      const res = await fetch(`${url}/health`, { headers: { accept: 'application/json' } });
+      ok = res.ok;
+    } catch { ok = false; }
+    if (!ok) throw new Error(`Nothing answered at ${url}. Check the address and your signal.`);
+
+    await asyncStorage.set(SERVER_KEY, url);
+    client.setBaseUrl(url);
+    setServerUrlState(url);
+  }, [client]);
+
   const value: AppState = {
     ready, session, readOnly: !!session?.support, client, outbox, pending, offline,
     signIn, signUp, signOut, setOffline, refreshOutbox,
+    serverUrl, canSetServer: needsServerAddress(), setServerUrl,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

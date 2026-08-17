@@ -7,7 +7,7 @@ import { Card, H1, Muted, Pill, Screen } from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 
 export default function More() {
-  const { client, session, signOut, pending, readOnly } = useApp();
+  const { client, session, signOut, pending, readOnly, serverUrl, canSetServer } = useApp();
   const { data } = useQuery('me', () => client.me());
   const sub = data?.subscription;
   const failed = pending.filter((p) => p.failed);
@@ -45,6 +45,17 @@ export default function More() {
             </Text>
           )}
         </Card>
+
+        {/* On an installed app, where the address came from a person typing it,
+            "which server am I even on" is the first question worth answering
+            when something looks wrong. Signing out returns to the field. */}
+        {canSetServer && (
+          <Card>
+            <Text style={s.label}>SERVER</Text>
+            <Text style={s.value} testID="server-url">{serverUrl}</Text>
+            <Muted>Sign out to point this phone somewhere else.</Muted>
+          </Card>
+        )}
 
         {failed.length > 0 && (
           <Card>

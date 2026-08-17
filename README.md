@@ -38,7 +38,8 @@ with grandfathering enforced in the schema.
 | Super-admin CRM with audit trail | Built, 25 tests |
 | Support impersonation — read-only, an hour, visible to the farm | Built, 13 tests |
 | Scheduler (task generation, 2-hourly reminders, heartbeat) | Built, 25 tests |
-| Expo app — Today, Breeding, Herd, recording, offline outbox | Built, 20 tests against the real API |
+| Expo app — Today, Breeding, Herd, recording, offline outbox | Built, 22 tests against the real API |
+| Android / iOS binaries | Icons, native config and EAS profiles ready. **No APK built** — needs the Android SDK and a signing key |
 | Netlify deployment | Configured and deployment-ready, **not deployed** |
 | Razorpay billing | Not started — deliberately deferred |
 
@@ -82,9 +83,12 @@ a login or be assigned a shed.
 but nothing pushes them to a phone yet. Until then a farmer sees them by opening
 the app — which is why the app opens on Today rather than a dashboard.
 
-**Store builds.** The web export is what gets deployed. The same Expo project
-builds for Android and iOS through EAS, which needs signing keys and store
-accounts.
+**Store builds.** The web export is what gets deployed, and it installs to a
+home screen from the browser. There is no APK in the repo: the icons, the native
+config and the EAS build profiles are here, but producing a binary needs the
+Android SDK and a signing key, and neither belongs in git. One command on a
+machine that has them — see
+[docs/12-android-and-ios-builds.md](docs/12-android-and-ios-builds.md).
 
 ## Documents
 
@@ -101,6 +105,7 @@ accounts.
 | [docs/09-saas-model.md](docs/09-saas-model.md) | Pricing, plans, billing, tenant isolation, onboarding, go-to-market. |
 | [docs/10-admin-console.md](docs/10-admin-console.md) | Signup and sign-in, and the super-admin CRM for running every farm and subscription. |
 | [docs/11-deploying-to-netlify.md](docs/11-deploying-to-netlify.md) | Netlify + Neon setup, environment variables, and what to check after a deploy. |
+| [docs/12-android-and-ios-builds.md](docs/12-android-and-ios-builds.md) | Getting an installable APK, signing, and why a native build has to be told where its server is. |
 | [apps/api](apps/api) | The backend and admin CRM, with its own README. |
 | [apps/mobile](apps/mobile) | The Expo app — Today, Breeding, Herd, recording, and the offline outbox. |
 | [db/migrations](db/migrations) | Ordered, immutable migrations — the source of truth for the schema. |
