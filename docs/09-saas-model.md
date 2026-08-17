@@ -296,6 +296,43 @@ arrive in. Never `critical`, so push holds them until quiet hours are over. The
 lapse notice says the two things a farmer actually wants to know: the records are
 all still there, and the alerts have not stopped.
 
+### Dunning email (migration 0030)
+
+The in-app notices only reach a farm that opens the app, and the farm about to
+lapse is usually the one that has stopped. So the same three events go out by
+email as well, plus a receipt — **four messages, and no more**, each tied to
+something that has actually happened and each sent exactly once:
+
+| Message | When |
+|---|---|
+| `renewal_due` | a week before the money is due |
+| `renewal_last_call` | the day it is due |
+| `subscription_lapsed` | the day the farm actually goes read-only |
+| `payment_received` | the receipt, carrying the GST invoice number |
+
+The fourth is not chasing anything and belongs anyway: a sequence that nags twice
+and never says "thank you, you are paid up" reads as a debt collector.
+
+- **Nothing is sent twice.** The dedupe key is the event and the date it concerns,
+  not the moment — so a scheduler running every fifteen minutes sends one email,
+  not ninety-six.
+- **Nothing is sent late.** Anything still queued after three days is dropped
+  visibly. A renewal warning that arrives a week after the renewal tells a farmer
+  who has already paid that they are about to be cut off.
+- **A hard bounce or a spam complaint suppresses the address for good**, and the
+  send path re-checks that list, so there is no way around it. Mail to dead
+  addresses is what gets a sending domain filtered — and when that goes, it takes
+  the receipts and the lapse notices with it.
+- **Every message is transactional.** No unsubscribe link, because offering to
+  switch off a lapse warning is offering to make somebody's records disappear
+  without notice. Every one says why it arrived and how to reach a person.
+
+Bounces arrive on `POST /webhooks/email`, signed and timestamp-checked — a forged
+bounce for a competitor's address would silently stop that farm's mail.
+Configuration is `EMAIL_API_KEY`, `EMAIL_FROM`, `SUPPORT_EMAIL` and
+`EMAIL_WEBHOOK_SECRET`; with none of them set, mail queues and nothing is sent,
+which is what a local run should do.
+
 **Reminders survive suspension.** They cost you almost nothing to keep running
 and they are the difference between a lapsed customer who comes back and a former
 customer who tells people you killed his litter. Withhold the *product* — new

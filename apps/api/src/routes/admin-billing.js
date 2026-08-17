@@ -53,7 +53,8 @@ adminBillingRoutes.get('/', canBill, async (c) => {
     to: DATE.test(c.req.query('to') ?? '') ? c.req.query('to') : null,
   };
 
-  const [summary, revenue, exceptions, renewals, rows, fy, months, refunds] = await Promise.all([
+  const [summary, revenue, exceptions, renewals, rows, fy, months, refunds,
+         emailHealth, emails] = await Promise.all([
     adminQuery('SELECT * FROM v_admin_billing_summary').then((r) => r.rows[0]),
     adminQuery('SELECT * FROM v_admin_revenue_summary').then((r) => r.rows[0]),
     adminQuery(`SELECT * FROM v_admin_billing_exception
@@ -66,14 +67,18 @@ adminBillingRoutes.get('/', canBill, async (c) => {
     adminQuery('SELECT * FROM v_admin_revenue_month ORDER BY month').then((r) => r.rows),
     adminQuery('SELECT * FROM v_admin_refund ORDER BY created_at DESC LIMIT 50')
       .then((r) => r.rows),
+    adminQuery('SELECT * FROM v_admin_email_health').then((r) => r.rows[0]),
+    adminQuery('SELECT * FROM v_admin_email ORDER BY created_at DESC LIMIT 30')
+      .then((r) => r.rows),
   ]);
 
   if (c.req.query('format') === 'json') {
-    return c.json({ summary, revenue, exceptions, renewals, payments: rows, fy, months, refunds });
+    return c.json({ summary, revenue, exceptions, renewals, payments: rows, fy, months,
+                    refunds, email: emailHealth, emails });
   }
   return c.html(renderBilling({
     summary, revenue, exceptions, renewals, payments: rows, fy, months, refunds,
-    filters, admin: c.get('admin'),
+    emailHealth, emails, filters, admin: c.get('admin'),
   }));
 });
 

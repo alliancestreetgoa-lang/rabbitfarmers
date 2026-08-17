@@ -1,5 +1,6 @@
 import { adminPool } from './db.js';
 import { deliverPending, checkReceipts } from './push.js';
+import { deliverEmails } from './email.js';
 
 /**
  * Run one scheduling pass across every farm.
@@ -70,6 +71,12 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
      */
     const advanced = await client.query('SELECT * FROM billing_advance_subscriptions()');
     const billing = await client.query('SELECT generate_billing_notifications() AS n');
+    /*
+     * The same four events, by email, for the farm that has stopped opening the
+     * app — which is exactly the farm about to lapse without noticing. Queued
+     * here inside the transaction and sent after it, like push.
+     */
+    const mail = await client.query('SELECT generate_dunning_emails() AS n');
     // Sessions nobody can use any more. Expired ones were always rejected at
     // sign-in, so this is housekeeping rather than a fix — but nothing ever
     // deleted them, and user_session grows by a row per device per sign-in for
@@ -100,12 +107,26 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
       push = { sent: 0, failed: 0, error: String(err.message ?? err).slice(0, 200) };
     }
 
+    // Separately caught from push: two providers, and one being down must not
+    // stop the other's queue draining for a quarter of an hour.
+    let email = { sent: 0, failed: 0 };
+    try {
+      email = await deliverEmails();
+    } catch (err) {
+      email = { sent: 0, failed: 0, error: String(err.message ?? err).slice(0, 200) };
+    }
+
     const result = {
       ok: true,
       tasksCreated: tasks.rows[0].n,
       tasksAssigned: assigned.rows[0].n,
       notificationsCreated: notes.rows[0].n + billing.rows[0].n,
       billingNoticesCreated: billing.rows[0].n,
+      emailsQueued: mail.rows[0].n,
+      emailsSent: email.sent ?? 0,
+      emailsFailed: email.failed ?? 0,
+      emailsExpired: email.expired ?? 0,
+      emailError: email.error ?? email.skipped ?? null,
       subscriptionsPastDue: advanced.rows[0].past_due,
       subscriptionsSuspended: advanced.rows[0].suspended,
       sessionsPurged: purged.rows[0].n,

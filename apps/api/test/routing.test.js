@@ -69,6 +69,7 @@ const PATHS = {
   '/health': 'function',
   '/plans': 'function',
   '/webhooks/razorpay': 'function',
+  '/webhooks/email': 'function',
   '/billing/return': 'function',
 
   // The app's. Every one of these is a screen whose name looks like an API.

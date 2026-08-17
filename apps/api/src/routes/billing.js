@@ -6,6 +6,7 @@ import { HttpError } from '../auth.js';
 import {
   createPaymentLink, verifyWebhook, verifyPaymentLink, razorpayConfigured,
 } from '../razorpay.js';
+import { verifyEmailWebhook, applyEmailEvent } from '../email.js';
 import { createHash } from 'node:crypto';
 
 export const billingRoutes = new Hono();
@@ -190,6 +191,61 @@ billingRoutes.post('/webhooks/razorpay', async (c) => {
      WHERE id = $1`, [eventId, result, farmId]);
 
   return c.json({ ok: true, result });
+});
+
+/**
+ * POST /webhooks/email — the provider telling us an address is dead.
+ *
+ * Mounted beside the Razorpay webhook because it is the same kind of thing: an
+ * endpoint anybody on the internet can reach that changes what we do. The
+ * damage here is quieter and worth guarding just as carefully — a forged bounce
+ * for a competitor's address would stop that farm receiving its receipts and
+ * its lapse warnings, with nothing on any screen to say why.
+ *
+ * So: signature over the raw bytes, a timestamp window so a captured signature
+ * cannot be replayed for ever, and the event id recorded in the same
+ * webhook_event table the payment events use, so a retry is a no-op.
+ */
+billingRoutes.post('/webhooks/email', async (c) => {
+  const raw = await c.req.text();
+  const headers = Object.fromEntries(
+    [...c.req.raw.headers].map(([k, v]) => [k.toLowerCase(), v]));
+
+  if (!verifyEmailWebhook(raw, headers)) {
+    // 400 rather than 401, for the reason the Razorpay one is: a delivery that
+    // failed the signature check fails it again on every retry.
+    throw new HttpError(400, 'Bad signature');
+  }
+
+  let body;
+  try { body = JSON.parse(raw); } catch { throw new HttpError(400, 'Not JSON'); }
+
+  const eventId = headers['svix-id'] ?? headers['webhook-id']
+    ?? createHash('sha256').update(raw).digest('hex');
+  const event = String(body?.type ?? 'unknown');
+
+  const { rowCount } = await adminQuery(`
+    INSERT INTO webhook_event (id, gateway, event, payload)
+    VALUES ($1, 'email', $2, $3::jsonb)
+    ON CONFLICT (id) DO NOTHING`, [`email:${eventId}`, event, raw]);
+  if (rowCount === 0) return c.json({ ok: true, duplicate: true });
+
+  let outcome;
+  try {
+    outcome = await applyEmailEvent(body);
+  } catch (err) {
+    const result = `error: ${String(err.message ?? err).slice(0, 200)}`;
+    await adminQuery(
+      'UPDATE webhook_event SET processed_at = now(), result = $2 WHERE id = $1',
+      [`email:${eventId}`, result]);
+    throw err;
+  }
+
+  await adminQuery(
+    'UPDATE webhook_event SET processed_at = now(), result = $2 WHERE id = $1',
+    [`email:${eventId}`, outcome.result]);
+
+  return c.json({ ok: true, ...outcome });
 });
 
 /**

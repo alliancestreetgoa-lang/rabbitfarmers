@@ -14,7 +14,7 @@ is a separate decision.
 ```
 
 From nothing, it applies the migrations, runs the 41 breeding-rule assertions,
-runs the 300 API tests, then boots the server and hits real endpoints over HTTP —
+runs the 330 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. It uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.
@@ -132,7 +132,11 @@ GRANT rabbitry_admin TO admin_login;
 | `RAZORPAY_KEY_ID` | from the Razorpay dashboard. Leave unset and the app says card payments are not switched on, rather than showing a button that fails |
 | `RAZORPAY_KEY_SECRET` | same place. Never in the repo |
 | `RAZORPAY_WEBHOOK_SECRET` | **set when you create the webhook, not before** — it is what proves a delivery is genuine |
-| `PUBLIC_URL` | your site's URL. Razorpay redirects the farmer back to `PUBLIC_URL/billing/return` |
+| `PUBLIC_URL` | your site's URL. Razorpay redirects the farmer back to `PUBLIC_URL/billing/return`, and it is the link in every email |
+| `EMAIL_API_KEY` | from the mail provider. Leave unset and mail queues and is never sent — no errors, nothing lost |
+| `EMAIL_FROM` | `Rabbitry <billing@yourdomain>`. Must be an address on a domain you have verified with the provider, or everything bounces |
+| `SUPPORT_EMAIL` | where replies go. A billing email a farmer cannot reply to is a billing email they assume is a scam |
+| `EMAIL_WEBHOOK_SECRET` | **set when you create the bounce webhook**, pointing at `PUBLIC_URL/webhooks/email`. Without it, bounces are rejected and dead addresses are retried for ever |
 
 Getting `DATABASE_URL` wrong is the one mistake that matters: point it at
 `admin_login` and every farm can read every other farm, because that role

@@ -72,7 +72,11 @@ describe('tenant isolation', () => {
         -- from the farmer-facing role entirely (migration 0026), which is the
         -- wall; there is no policy to be the belt. credit_note_series is the
         -- same document series for money going the other way (0028).
-                              'invoice_series', 'credit_note_series')
+        -- email_suppression is the third of these: an address that bounces is
+        -- dead for every farm at once, not for one of them, and the send path
+        -- must have no way around the list. Revoked entirely (0030).
+                              'invoice_series', 'credit_note_series',
+                              'email_suppression')
       ORDER BY 1`);
     assert.deepEqual(rows.map((r) => r.relname), [],
       `these tables have no row-level security: ${rows.map((r) => r.relname).join(', ')}`);

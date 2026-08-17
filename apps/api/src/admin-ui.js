@@ -258,8 +258,15 @@ function refundForm(p) {
  * week, then the ledger, then the totals. Revenue is the last thing on the page
  * because it is the one number that never needs anybody to act.
  */
+const mailPill = (status) => {
+  const cls = { sent: 'ok', queued: 'warn', failed: 'crit',
+    suppressed: 'crit', expired: 'crit' }[status] ?? '';
+  return `<span class="pill ${cls}">${esc(status)}</span>`;
+};
+
 export function renderBilling({ summary, revenue, exceptions, renewals, payments,
-                                fy, months, refunds = [], filters, admin }) {
+                                fy, months, refunds = [], emailHealth, emails = [],
+                                filters, admin }) {
   const s = summary ?? {};
   const r = revenue ?? {};
   const f = filters ?? {};
@@ -464,6 +471,47 @@ export function renderBilling({ summary, revenue, exceptions, renewals, payments
       farm's access changes until then. “Settled” is for the one Razorpay's own
       dashboard shows as done when no webhook ever arrived.</p>`
     : '<div class="quiet">No refunds. Long may it last.</div>'}
+
+    ${/*
+      Email, on the money screen rather than a screen of its own, because every
+      message this system sends is about money and the person who cares that a
+      receipt bounced is already here.
+    */ ''}
+    <h2>Email</h2>
+    ${(() => {
+      const e = emailHealth ?? {};
+      const rows = emails.map((m) => `
+        <tr>
+          <td class="num">${when(m.created_at)}
+              ${m.sent_at ? `<div class="muted">sent ${when(m.sent_at)}</div>` : ''}</td>
+          <td><a href="/admin/farms/${esc(m.farm_id)}">${esc(m.farm_name)}</a>
+              <div class="muted">${esc(m.to_email)}${
+                m.address_suppressed ? ' · <strong>suppressed</strong>' : ''}</div></td>
+          <td><code>${esc(m.kind)}</code></td>
+          <td>${mailPill(m.status)}
+              ${m.attempts > 1 ? `<div class="muted">${m.attempts} attempts</div>` : ''}</td>
+          <td class="muted">${esc(m.subject ?? m.last_error ?? '')}</td>
+        </tr>`).join('');
+
+      return `<div class="cards">
+        <div class="card"><div class="n">${e.sent_7d ?? 0}</div><div class="k">Sent, 7 days</div></div>
+        <div class="card"><div class="n">${e.queued ?? 0}</div><div class="k">Queued${
+          e.stuck ? ` · ${e.stuck} stuck` : ''}</div></div>
+        <div class="card"><div class="n">${e.failed_7d ?? 0}</div><div class="k">Failed, 7 days</div></div>
+        <div class="card"><div class="n">${e.suppressed ?? 0}</div>
+          <div class="k">Addresses suppressed</div></div>
+      </div>
+      ${rows ? `<div class="tw"><table>
+        <thead><tr><th>Queued</th><th>Farm</th><th>Kind</th><th>Status</th>
+          <th>Subject</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>` : '<div class="quiet">No email has been queued yet.</div>'}
+      <p class="muted" style="margin-top:10px">
+        Four messages and no more: a week before a renewal, on the day, when it
+        has lapsed, and a receipt. An address that hard-bounces or reports spam
+        is suppressed and never written to again — that list is what protects
+        the receipts, so nothing in the send path can go around it.</p>`;
+    })()}
 
     <h2>Collected by month</h2>
     <div class="tw"><table style="min-width:0">
