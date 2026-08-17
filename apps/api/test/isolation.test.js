@@ -70,8 +70,9 @@ describe('tenant isolation', () => {
         -- invoice_series is one row per financial year, shared by every farm:
         -- a GST invoice number series has no tenant to scope it to. Revoked
         -- from the farmer-facing role entirely (migration 0026), which is the
-        -- wall; there is no policy to be the belt.
-                              'invoice_series')
+        -- wall; there is no policy to be the belt. credit_note_series is the
+        -- same document series for money going the other way (0028).
+                              'invoice_series', 'credit_note_series')
       ORDER BY 1`);
     assert.deepEqual(rows.map((r) => r.relname), [],
       `these tables have no row-level security: ${rows.map((r) => r.relname).join(', ')}`);

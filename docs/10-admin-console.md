@@ -110,7 +110,7 @@ thing you will do all week.
 | Change the plan or price | Assigns a different plan row; never edits a price in place |
 | Record an offline payment | For the customer who paid you by UPI or bank transfer. Real payment row, real invoice number |
 | Replay a webhook | For the delivery that arrived while the database was down. Idempotent |
-| Refund | Through Razorpay, recorded here |
+| Refund | On the payment it reverses. Credit note, days back or not, `billing` only |
 | Resend an invoice | GST invoices get lost; this is a weekly request |
 | Export a farm's data | For a customer asking, or a cancellation |
 | Impersonate ("view as") | Support only. Time-boxed, reason required, logged, visible to the farm |
@@ -210,7 +210,35 @@ It is ordered by what somebody has to *do*, not by what is nice to look at:
    first and last invoice number so the consecutive series GST requires can be
    checked against the count at a glance.
 
-Two actions live here, both audited with a required reason:
+### Refunds
+
+The button is on the payment it reverses, on the farm's page, for `billing` and
+`superadmin` — never `support`. Four things are decided for you, and each one is
+a decision somebody would otherwise have to remember:
+
+- **The invoice is never touched.** A refund issues a **credit note** with its
+  own consecutive series (`CN/2026-27/00001`), and both documents go on the
+  return. An invoice deleted because it was later refunded leaves a gap in a
+  series an auditor reads as evasion.
+- **Why decides what it costs them.** A *cancellation* takes back the share of
+  the days that payment bought, in proportion to the money going back, rounded
+  down in the farmer's favour; if that spends the period, the subscription is
+  cancelled — read-only, every record kept, every reminder still firing. A
+  *goodwill* refund takes back nothing. Clawing back access for an apology would
+  undo the apology.
+- **Nothing moves until the money has.** Razorpay's normal speed is five to
+  seven working days. Until `refund.processed` arrives the farm is still a
+  paying customer, because locking somebody out on a promise that might yet fail
+  is a farmer in a shed unable to record a kindling. A refund that fails is
+  raised at severity 1; one still unsettled after ten days is raised too, with a
+  **Settled** button for when Razorpay's own dashboard shows it went and no
+  webhook ever arrived.
+- **Never more than was taken.** Part refunds are allowed and stack; refunds
+  already in flight count towards the limit, so a double-clicked button cannot
+  pay a customer twice. Money taken by hand goes back by hand and settles when
+  the person recording it says it has.
+
+Two more actions live here, both audited with a required reason:
 
 - **Replay a stored webhook.** Razorpay retries for a while and then stops.
   After that a delivery that arrived while the database was down is a payment

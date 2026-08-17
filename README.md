@@ -45,6 +45,7 @@ with grandfathering enforced in the schema.
 | Netlify deployment | Configured and deployment-ready, **not deployed** |
 | Razorpay billing — payment links, signed webhooks, GST invoices | Built, 25 tests against a stub gateway, plus a 27-check browser pass. Recurring mandates deferred |
 | Admin billing — reconciliation, renewals, GST totals, offline payments | Built, 32 tests |
+| Refunds — credit notes, part refunds, goodwill, period claw-back | Built, 28 tests plus an 18-check browser pass |
 
 ### Verify it yourself
 
@@ -53,7 +54,7 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 246 API tests, then boots the server and hits real endpoints over HTTP —
+the 274 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.

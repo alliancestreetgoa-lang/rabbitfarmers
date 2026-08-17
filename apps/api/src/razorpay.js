@@ -135,6 +135,55 @@ export async function createPaymentLink({
   return json;
 }
 
+/**
+ * Send money back.
+ *
+ * Razorpay refunds against the PAYMENT, not the link, which is why the payment
+ * id is stored on our row at all. Two things about the call matter:
+ *
+ * `notes.refund_id` carries our own refund row's id into the gateway and back
+ * out again on every webhook about it. The refund id Razorpay returns is stored
+ * too, but a webhook that arrives before this call's response has been written
+ * — which is a real ordering on a slow connection — can still be matched.
+ *
+ * Normal speed, not instant. Instant refunds cost extra and land in minutes;
+ * normal takes five to seven working days and is what the published policy
+ * promises. A farmer who is leaving is not waiting on the difference.
+ */
+export async function createRefund({
+  paymentId, amountPaise, refundId, notes, fetchImpl = globalThis.fetch,
+}) {
+  const res = await fetchImpl(`${BASE()}/v1/payments/${paymentId}/refund`, {
+    method: 'POST',
+    headers: {
+      authorization: authHeader(),
+      'content-type': 'application/json',
+      accept: 'application/json',
+      // Razorpay's own idempotency header. A retry after a timeout returns the
+      // first refund rather than making a second one, which is the difference
+      // between a customer being paid once and twice.
+      ...(refundId ? { 'x-razorpay-idempotency-key': refundId } : {}),
+    },
+    body: JSON.stringify({
+      amount: amountPaise,
+      speed: 'normal',
+      notes: { ...(notes ?? {}), ...(refundId ? { refund_id: refundId } : {}) },
+    }),
+  });
+
+  const text = await res.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+
+  if (!res.ok) {
+    const err = new Error(json?.error?.description ?? `Razorpay returned ${res.status}`);
+    err.status = res.status;
+    err.gateway = json?.error ?? null;
+    throw err;
+  }
+  return json;
+}
+
 /** Read a link back, for reconciling a payment nobody told us about. */
 export async function fetchPaymentLink(linkId, { fetchImpl = globalThis.fetch } = {}) {
   const res = await fetchImpl(`${BASE()}/v1/payment_links/${linkId}`, {

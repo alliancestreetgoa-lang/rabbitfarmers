@@ -235,7 +235,7 @@ collecting and not collecting from a smallholder.
 | Invoices | GST-compliant, sequential numbering, your GSTIN, downloadable |
 | Switching cycle | Monthly ↔ yearly at the next renewal, at the farm's locked-in prices |
 | Mandate max | Register a few thousand rupees of headroom. It can never be raised without the customer re-authorising |
-| Refunds | Published policy; at ₹99 a no-questions refund window costs you almost nothing and buys real trust |
+| Refunds | Published policy; at ₹99 a no-questions refund window costs you almost nothing and buys real trust. Built: credit notes, part refunds, and a goodwill refund that does not take their access back — see [docs/10](10-admin-console.md#refunds) |
 | Minimums | Check Razorpay's per-transaction floor against a ₹99 ticket — another reason to steer people to the ₹999 annual |
 
 Keep the gateway at arm's length: store `gateway`, `gateway_subscription_id` and

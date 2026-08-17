@@ -61,7 +61,10 @@ export default function Billing() {
           {sub?.trial_days_left != null && (
             <Muted>{sub.trial_days_left} days left in your free trial</Muted>
           )}
-          {!!sub?.current_period_end && (
+          {/* Only while it means something. After a refund the period end is
+              today or earlier, and "paid up to" next to "cancelled" reads like
+              the app has lost track of what happened. */}
+          {!!sub?.current_period_end && sub?.access !== 'read_only' && (
             <Muted>Paid up to {when(sub.current_period_end)}</Muted>
           )}
           {renew?.is_grandfathered && (
@@ -120,7 +123,10 @@ export default function Billing() {
                 {rupees(h.amount_paise)} · {h.billing_period === 'yearly' ? 'one year' : 'one month'}
               </Text>
               <Text style={s.rowMeta}>
-                {h.status === 'paid'
+                {/* A refunded payment was still a payment: it has a date and an
+                    invoice number, and hiding them would make the credit note
+                    below refer to nothing. */}
+                {h.status === 'paid' || h.status === 'refunded'
                   ? `${when(h.paid_at)}${h.invoice_number ? ` · ${h.invoice_number}` : ''}`
                   : h.status === 'failed'
                     ? h.failed_reason ?? 'Did not go through'
@@ -129,11 +135,21 @@ export default function Billing() {
               {h.status === 'paid' && !!h.period_end && (
                 <Text style={s.rowMeta}>Covers to {when(h.period_end)}</Text>
               )}
+              {/* Money that came back. A refund the app does not show is a
+                  support call: it has left our account and their screen still
+                  says they paid. */}
+              {!!h.refunded_paise && (
+                <Text style={s.refund} testID={`refunded-${h.id}`}>
+                  {rupees(h.refunded_paise)} refunded {when(h.refunded_at)}
+                  {h.credit_note_number ? ` · ${h.credit_note_number}` : ''}
+                </Text>
+              )}
             </View>
             <Text style={[
               s.state,
               h.status === 'paid' && { color: colors.accent },
               h.status === 'failed' && { color: colors.crit },
+              h.status === 'refunded' && { color: colors.warn },
             ]}>
               {h.status}
             </Text>
@@ -170,5 +186,6 @@ const s = StyleSheet.create({
   },
   rowTitle: { ...t.title, color: colors.ink },
   rowMeta: { ...t.small, color: colors.muted, marginTop: 2 },
+  refund: { ...t.small, color: colors.warn, marginTop: 2, fontWeight: '600' },
   state: { ...t.small, fontWeight: '600', color: colors.muted, textTransform: 'capitalize' },
 });

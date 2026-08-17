@@ -83,6 +83,10 @@ const STYLE = `
   form.rowform button{padding:5px 10px;font-size:13px}
   pre{background:var(--surface);border:1px solid var(--rule);padding:14px;overflow-x:auto;
     font:12.5px/1.5 ui-monospace,monospace}
+  details summary{cursor:pointer;color:var(--accent);font-size:13.5px}
+  details form{display:flex;flex-direction:column;gap:6px;margin-top:8px;min-width:230px}
+  details form input,details form select{font-size:13px;padding:6px 8px}
+  details form button{font-size:13px;padding:6px 10px}
 `;
 
 function page(title, body) {
@@ -204,8 +208,47 @@ const EXCEPTION_LABEL = {
   webhook_failed: 'Webhook failed',
   unattributed_payment: 'Unattributed payment',
   amount_mismatch: 'Wrong amount',
+  refund_failed: 'Refund failed',
+  refund_stuck: 'Refund not settled',
   abandoned_link: 'Link never paid',
 };
+
+const refundPill = (status) => {
+  const cls = { processed: 'ok', created: 'warn', failed: 'crit', cancelled: 'crit' }[status] ?? '';
+  return `<span class="pill ${cls}">${esc(status)}</span>`;
+};
+
+/**
+ * The refund form, on the payment it reverses.
+ *
+ * Folded away behind a disclosure rather than laid out in the row: it is four
+ * fields, it is rarely the reason somebody opened this page, and an always-open
+ * refund form next to every payment is an invitation to a mis-click that costs
+ * a farmer their subscription.
+ *
+ * The kind is the first field and it is spelled out in words, because it is the
+ * decision — money back because they are leaving takes the days with it, money
+ * back as an apology does not, and the difference is invisible in the number.
+ */
+function refundForm(p) {
+  const left = p.refundable_paise ?? 0;
+  return `
+    <details>
+      <summary>Refund${left < p.amount_paise ? ` (${rupees(left)} left)` : ''}</summary>
+      <form method="post" action="/admin/billing/payments/${esc(p.id)}/refund">
+        <select name="kind">
+          <option value="cancellation">They are leaving — take the days back</option>
+          <option value="goodwill">Goodwill — they keep their subscription</option>
+        </select>
+        <input name="amount_paise" type="number" min="1" max="${left}"
+               placeholder="Paise (blank = all ${rupees(left)})">
+        ${p.gateway !== 'razorpay'
+          ? '<input name="reference" placeholder="UTR of the money you sent back">' : ''}
+        <input name="reason" placeholder="Reason (required)" required>
+        <button type="submit">Refund ${rupees(left)}</button>
+      </form>
+    </details>`;
+}
 
 /**
  * The money screen.
@@ -216,7 +259,7 @@ const EXCEPTION_LABEL = {
  * because it is the one number that never needs anybody to act.
  */
 export function renderBilling({ summary, revenue, exceptions, renewals, payments,
-                                fy, months, filters, admin }) {
+                                fy, months, refunds = [], filters, admin }) {
   const s = summary ?? {};
   const r = revenue ?? {};
   const f = filters ?? {};
@@ -257,6 +300,28 @@ export function renderBilling({ summary, revenue, exceptions, renewals, payments
           <div class="muted">${seen(x.days_since_activity)}</div></td>
     </tr>`).join('');
 
+  const refundRows = refunds.map((r) => `
+    <tr>
+      <td class="num">${when(r.created_at)}
+          ${r.processed_at ? `<div class="muted">back ${when(r.processed_at)}</div>` : ''}</td>
+      <td><a href="/admin/farms/${esc(r.farm_id)}">${esc(r.farm_name)}</a>
+          <div class="muted">${esc(r.requested_by_name ?? '')}</div></td>
+      <td class="num">${rupees(r.amount_paise)}
+          <div class="muted">of ${rupees(r.payment_paise)}</div></td>
+      <td><span class="pill ${r.kind === 'goodwill' ? 'ok' : 'warn'}">${esc(r.kind)}</span>
+          <div class="muted">${r.days_removed == null ? ''
+            : r.days_removed ? `${r.days_removed} days back` : 'kept their days'}</div></td>
+      <td>${refundPill(r.status)}
+          ${r.failed_reason ? `<div class="muted">${esc(r.failed_reason)}</div>` : ''}</td>
+      <td>${r.credit_note_number ? `<code>${esc(r.credit_note_number)}</code>` : '—'}
+          <div class="muted">${esc(r.reason)}</div></td>
+      <td>${r.status === 'created' ? `
+        <form class="rowform" method="post" action="/admin/billing/refunds/${esc(r.id)}/settle">
+          <input name="reason" placeholder="Reason" required>
+          <button type="submit">Settled</button>
+        </form>` : ''}</td>
+    </tr>`).join('');
+
   const paymentRows = payments.map((p) => `
     <tr>
       <td class="num">${when(p.created_at)}
@@ -264,7 +329,8 @@ export function renderBilling({ summary, revenue, exceptions, renewals, payments
       <td><a href="/admin/farms/${esc(p.farm_id)}">${esc(p.farm_name)}</a>
           ${p.gateway !== 'razorpay' ? `<div class="muted">${esc(p.gateway)}</div>` : ''}</td>
       <td class="num">${rupees(p.amount_paise)}
-          <div class="muted">${esc(p.billing_period)} · ${p.covers_days}d</div></td>
+          <div class="muted">${esc(p.billing_period)} · ${p.covers_days}d</div>
+          ${p.refunded_paise ? `<div class="muted">−${rupees(p.refunded_paise)} refunded</div>` : ''}</td>
       <td>${payPill(p.status)}
           ${p.failed_reason ? `<div class="muted">${esc(p.failed_reason)}</div>` : ''}</td>
       <td>${p.invoice_number
@@ -284,21 +350,29 @@ export function renderBilling({ summary, revenue, exceptions, renewals, payments
   const monthRows = months.map((m) => `
     <tr>
       <td class="num">${esc(String(m.month).slice(0, 7))}</td>
-      <td style="width:60%"><div class="bar" style="width:${
-        Math.round((Number(m.total_paise) / peak) * 100)}%;
+      <td style="width:55%"><div class="bar" style="width:${
+        Math.round((Math.max(0, Number(m.total_paise)) / peak) * 100)}%;
         background:${m.total_paise ? 'var(--accent)' : 'var(--rule)'}"></div></td>
       <td class="num">${rupees(m.total_paise)}</td>
+      <td class="num muted">${m.refunded_paise ? `−${rupees(m.refunded_paise)}` : ''}</td>
       <td class="num muted">${m.invoices}</td>
     </tr>`).join('');
 
   const fyRows = fy.map((y) => `
     <tr>
       <td class="num">${esc(y.financial_year)}</td>
-      <td class="num">${y.invoices}</td>
-      <td class="num">${rupees(y.taxable_paise)}</td>
-      <td class="num">${rupees(y.tax_paise)}</td>
-      <td class="num">${rupees(y.total_paise)}</td>
-      <td class="muted"><code>${esc(y.first_number)}</code> → <code>${esc(y.last_number)}</code></td>
+      <td class="num">${y.invoices}
+          ${y.credit_notes ? `<div class="muted">${y.credit_notes} credit notes</div>` : ''}</td>
+      <td class="num">${rupees(y.taxable_paise)}
+          ${y.credit_notes ? `<div class="muted">−${rupees(y.credited_taxable_paise)}</div>` : ''}</td>
+      <td class="num">${rupees(y.tax_paise)}
+          ${y.credit_notes ? `<div class="muted">−${rupees(y.credited_tax_paise)}</div>` : ''}</td>
+      <td class="num">${rupees(y.net_total_paise)}
+          ${y.credit_notes ? `<div class="muted">${rupees(y.total_paise)} billed</div>` : ''}</td>
+      <td class="muted"><code>${esc(y.first_number)}</code> → <code>${esc(y.last_number)}</code>
+          ${y.credit_notes
+            ? `<div><code>${esc(y.first_credit_note)}</code> → <code>${esc(y.last_credit_note)}</code></div>`
+            : ''}</td>
     </tr>`).join('');
 
   return page('Billing — Rabbitry admin', `
@@ -319,6 +393,9 @@ export function renderBilling({ summary, revenue, exceptions, renewals, payments
       <div class="card"><div class="n">${rupees(s.tax_fy_paise)}</div>
         <div class="k">GST collected, FY</div></div>
       <div class="card"><div class="n">${s.due_14d ?? 0}</div><div class="k">Due in 14 days</div></div>
+      <div class="card"><div class="n">${rupees(s.refunded_fy_paise)}</div>
+        <div class="k">Refunded, FY${s.refunds_in_flight
+          ? ` · ${s.refunds_in_flight} pending` : ''}</div></div>
       <div class="card"><div class="n">${s.locked_out ?? 0}</div><div class="k">Locked out</div></div>
     </div>
 
@@ -359,6 +436,19 @@ export function renderBilling({ summary, revenue, exceptions, renewals, payments
       <tbody>${paymentRows || '<tr><td colspan="6" class="muted">No payments match.</td></tr>'}</tbody>
     </table></div>
     <p class="muted" style="margin-top:10px">Most recent hundred. Times are UTC.</p>
+
+    <h2>Refunds</h2>
+    ${refunds.length ? `<div class="tw"><table>
+      <thead><tr><th>Asked</th><th>Farm</th><th>Amount</th><th>Kind</th><th>Status</th>
+        <th>Credit note and reason</th><th></th></tr></thead>
+      <tbody>${refundRows}</tbody>
+    </table></div>
+    <p class="muted" style="margin-top:10px">
+      A refund is asked for here and settles when the money has actually gone —
+      Razorpay's normal speed is five to seven working days, and nothing about a
+      farm's access changes until then. “Settled” is for the one Razorpay's own
+      dashboard shows as done when no webhook ever arrived.</p>`
+    : '<div class="quiet">No refunds. Long may it last.</div>'}
 
     <h2>Collected by month</h2>
     <div class="tw"><table style="min-width:0">
@@ -491,14 +581,25 @@ export function renderFarm({ farm, audit, subscription, payments = [], admin }) 
       <td class="num">${when(p.created_at)}</td>
       <td class="num">${rupees(p.amount_paise)}
           <div class="muted">${esc(p.billing_period)}${
-            p.gateway !== 'razorpay' ? ` · ${esc(p.gateway)}` : ''}</div></td>
+            p.gateway !== 'razorpay' ? ` · ${esc(p.gateway)}` : ''}</div>
+          ${p.refunded_paise
+            ? `<div class="muted">−${rupees(p.refunded_paise)} back</div>` : ''}</td>
       <td>${payPill(p.status)}
           ${p.failed_reason ? `<div class="muted">${esc(p.failed_reason)}</div>` : ''}</td>
       <td>${p.invoice_number
             ? `<code>${esc(p.invoice_number)}</code>
                <div class="muted">${esc(p.period_start ?? '')} → ${esc(p.period_end ?? '')}</div>`
-            : '<span class="muted">—</span>'}</td>
+            : '<span class="muted">—</span>'}
+          ${p.credit_note_number
+            ? `<div class="muted">credit note <code>${esc(p.credit_note_number)}</code></div>`
+            : ''}</td>
       <td class="muted">${esc(p.gateway_payment_id ?? p.gateway_link_id ?? '')}</td>
+      ${/*
+        The refund lives on the payment it reverses, because that is how a
+        person thinks about it: "give them back the ₹999 they paid in April",
+        not "make a refund and then say which payment it was against".
+      */ ''}
+      <td>${canBill && p.refundable_paise > 0 ? refundForm(p) : ''}</td>
     </tr>`).join('');
 
   return page(`${farm.farm_name} — Rabbitry admin`, `
@@ -564,9 +665,9 @@ export function renderFarm({ farm, audit, subscription, payments = [], admin }) 
     <h2>Payments</h2>
     <div class="tw"><table style="min-width:620px">
       <thead><tr><th>Made</th><th>Amount</th><th>Status</th><th>Invoice</th>
-        <th>Gateway ref</th></tr></thead>
+        <th>Gateway ref</th><th></th></tr></thead>
       <tbody>${paymentRows
-        || '<tr><td colspan="5" class="muted">Nothing paid yet.</td></tr>'}</tbody>
+        || '<tr><td colspan="6" class="muted">Nothing paid yet.</td></tr>'}</tbody>
     </table></div>
 
     ${/*

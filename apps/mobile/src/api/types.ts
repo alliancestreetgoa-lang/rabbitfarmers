@@ -307,4 +307,9 @@ export interface BillingRow {
   period_end: string | null;
   subtotal_paise: number | null;
   tax_paise: number | null;
+  /* Money that came back, and the credit note that says so. Null on every
+     payment that was never refunded, which is almost all of them. */
+  refunded_paise: number | null;
+  credit_note_number: string | null;
+  refunded_at: string | null;
 }

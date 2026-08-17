@@ -60,6 +60,45 @@ export async function applyWebhookEvent(body) {
     };
   }
 
+  /*
+   * Refunds. The money has actually left our account by the time `processed`
+   * arrives, and that — not the moment somebody pressed the button — is when a
+   * farm's days go back. See billing_settle_refund.
+   *
+   * Matched on our own refund id, carried out to the gateway in `notes` and
+   * back again, falling back to the gateway's id. Neither is trusted as a farm
+   * id: the farm comes from our refund row.
+   */
+  const refund = body?.payload?.refund?.entity;
+  if (event?.startsWith('refund.') && refund) {
+    const ours = refund.notes?.refund_id ?? null;
+    const { rows } = await adminQuery(`
+      SELECT id, farm_id, status FROM refund
+       WHERE ($1::uuid IS NOT NULL AND id = $1::uuid)
+          OR ($2::text IS NOT NULL AND gateway_refund_id = $2)
+       LIMIT 1`,
+      [/^[0-9a-f-]{36}$/i.test(String(ours)) ? ours : null, refund.id ?? null]);
+    const row = rows[0];
+    if (!row) return { farmId: null, result: 'no matching refund' };
+
+    if (event === 'refund.processed') {
+      const settled = await adminQuery('SELECT * FROM billing_settle_refund($1,$2)',
+        [row.id, refund.id ?? null]);
+      return {
+        farmId: row.farm_id,
+        result: settled.rows[0]?.settled ? 'refund settled' : 'refund already settled',
+      };
+    }
+    if (event === 'refund.failed') {
+      await adminQuery('SELECT billing_fail_refund($1,$2)',
+        [row.id, refund.error_description ?? refund.status ?? 'refund failed']);
+      return { farmId: row.farm_id, result: 'refund failed' };
+    }
+    // refund.created and anything else: acknowledged, nothing to move. The
+    // refund row already exists — we made it before calling the gateway.
+    return { farmId: row.farm_id, result: 'noted' };
+  }
+
   if (event === 'payment.failed' && payment?.id) {
     /*
      * Noted, not acted on. A failed attempt is not a lapse — the farmer's card
