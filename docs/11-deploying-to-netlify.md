@@ -116,7 +116,18 @@ ADMIN_DATABASE_URL='postgres://…-pooler…neon.tech/rabbitry?sslmode=require' 
 ```sql
 GRANT rabbitry_app   TO app_login;
 GRANT rabbitry_admin TO admin_login;
+ALTER ROLE admin_login BYPASSRLS;
 ```
+
+That last line is not optional, and it is easy to believe it is. `rabbitry_admin`
+has BYPASSRLS from migration 0006, and `admin_login` is a member of it — but
+**BYPASSRLS is a role attribute, not a privilege, and attributes are never
+inherited through membership**. Without the ALTER, `admin_login` connects fine,
+every query succeeds, and every one of them comes back empty: the admin console
+renders a platform with no farms on it, on a database full of them. Local dev
+never showed this because `scripts/localhost.sh` creates `admin_login` with the
+attribute directly, which it can do as superuser. Neon lets the database owner
+run the ALTER, so nothing here needs a superuser — it just needs to be typed.
 
 ### 2. Netlify environment variables
 
