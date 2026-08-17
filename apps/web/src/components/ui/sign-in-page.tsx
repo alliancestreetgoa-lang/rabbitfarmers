@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Eye, EyeOff, ArrowLeft, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { BRAND_IMAGE, BRAND_TAGLINE } from '@/lib/brand';
 
 /**
  * Sign in.
@@ -28,9 +29,6 @@ import { useNavigate } from 'react-router-dom';
  *   sessionStorage, which is the difference between surviving a browser restart
  *   and not. The server issues a 30-day session either way.
  */
-
-const BRAND_IMAGE =
-  'https://images.unsplash.com/photo-1585110396000-c9ffd4e4b308?auto=format&fit=crop&w=1400&q=70';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -115,7 +113,7 @@ export function LoginPage() {
             accounted for.
           </p>
           <p className="mt-4 text-sm tracking-[0.18em] text-white/70 uppercase">
-            Healthy rabbits · Better farms · Brighter future
+            {BRAND_TAGLINE}
           </p>
         </div>
       </div>
@@ -220,14 +218,24 @@ export function LoginPage() {
             </button>
 
             {/*
-              Where "Forgot password?" was. There is no reset link to send, so
-              this says what really happens rather than opening a dead end.
+              Where "Forgot password?" was. There is no reset link to send — no
+              email is verified, so there is no address to trust one to — and
+              `POST /admin/farms/:id/reset_password` is the only way back in. So
+              this gives the number to ring instead of opening a dead end.
+
+              A tel: link, because most farmers reading this are on a phone and
+              the useful thing is to be able to press it.
             */}
             <p className="border-t border-gray-200 pt-5 text-center text-sm text-gray-500">
-              Forgotten your password? A farm owner can reset it for a farm hand
-              from <span className="font-medium text-gray-700">Team</span>. Owners
-              need to ask support — there is no reset email, because no email is
-              verified.
+              Forgotten your password? Call{' '}
+              <a
+                href="tel:+917375096163"
+                className="font-semibold text-farm-accent hover:underline"
+              >
+                7375096163
+              </a>
+              . Only a super admin can reset it — there is no reset email,
+              because no email address is verified.
             </p>
           </form>
         </div>

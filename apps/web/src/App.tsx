@@ -1,10 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { LoginPage } from '@/components/ui/sign-in-page';
+import { SignUpPage } from '@/components/ui/sign-up-page';
 
 /**
- * Only sign-in is real so far. /dashboard and /signup are placeholders so the
- * links on the login page go somewhere honest instead of a blank screen — the
- * dashboard itself is the next piece of work.
+ * Sign in and sign up are both real. /dashboard is still a placeholder so the
+ * two of them land somewhere honest instead of a blank screen — the dashboard is
+ * the next piece of work.
  */
 function Placeholder({ title }: { title: string }) {
   return (
@@ -28,7 +29,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<LoginPage />} />
         <Route path="/dashboard" element={<Placeholder title="Dashboard" />} />
-        <Route path="/signup" element={<Placeholder title="Create your farm" />} />
+        <Route path="/signup" element={<SignUpPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
