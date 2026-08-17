@@ -302,7 +302,12 @@ if [ "$DEMO" = 1 ] && [ "${FARMS:-0}" = "0" ]; then
   DEMO_OUT=$(API_URL="http://localhost:${API_PORT}" node "$ROOT/scripts/demo-data.mjs" 2>&1)
   if [ $? -eq 0 ]; then
     echo "$DEMO_OUT" | grep -E '^(farm|animals|breeding|health|today|pregnant|ready)' | sed 's/^/    /'
-    DEMO_LINE=$(echo "$DEMO_OUT" | grep -o '[a-z.]*@example\.farm' | head -1)
+    # The stamp in the seeded address is base-36, so it usually holds a digit.
+    # A class without digits still matched, just not the whole address: the
+    # empty string when the digit came last, a truncated one when it did not.
+    # Either way the banner printed it as the login. Only an all-letter stamp,
+    # about one run in five, came out right.
+    DEMO_LINE=$(echo "$DEMO_OUT" | grep -oE '[a-z0-9._%+-]+@example\.farm' | head -1)
   else
     printf '%s  ! the demo seed failed; the app still works, just empty%s\n' "$red" "$reset"
     echo "$DEMO_OUT" | tail -3 | sed 's/^/    /'
