@@ -355,6 +355,16 @@ export class ApiClient {
       'GET', `/attendance${month ? `?month=${month}` : ''}`);
   }
 
+  /* ------------------------------------------------------------------ push */
+
+  registerDevice(input: { token: string; platform: string; device_name?: string }) {
+    return this.request<{ device: { id: string } }>('POST', '/devices', input);
+  }
+
+  unregisterDevice(token: string) {
+    return this.request<{ ok: boolean; removed: boolean }>('DELETE', '/devices', { token });
+  }
+
   permissions() {
     return this.request<{ role: string; can: Record<string, boolean> }>(
       'GET', '/me/permissions');

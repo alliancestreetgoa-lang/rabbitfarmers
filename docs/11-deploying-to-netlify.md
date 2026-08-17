@@ -14,7 +14,7 @@ is a separate decision.
 ```
 
 From nothing, it applies the migrations, runs the 41 breeding-rule assertions,
-runs the 139 API tests, then boots the server and hits real endpoints over HTTP —
+runs the 184 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. It uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.
@@ -237,10 +237,15 @@ ADMIN_DATABASE_URL='postgres://…neon.tech/rabbitry' npm --prefix apps/api run 
 
 Worth being explicit, because the deploy will look finished and will not be:
 
-**Push notifications.** The scheduler creates notification rows and the API
-serves them, but nothing delivers them to a phone. `notification.sent_at` stays
-NULL until a dispatcher exists. Until then a farmer sees them by opening the app
-— which is why the app opens on Today rather than a dashboard.
+**Push notifications are on** and need no configuration: the scheduler delivers
+through Expo's push service on every pass. Two environment variables exist for
+it, both optional — `PUSH_ENABLED=0` turns delivery off entirely, and
+`PUSH_ENDPOINT` points the sender somewhere other than Expo, which is how the
+test suite drives it against a stub.
+
+Delivery only reaches phones running a **native build**. The web export shows
+reminders on Today; web push needs a service worker and VAPID keys that do not
+exist yet. See [docs/12](12-android-and-ios-builds.md) for the APK.
 
 **App store builds.** The web export is what Netlify serves. The same Expo
 project builds for Android and iOS, but that needs EAS, signing keys and store

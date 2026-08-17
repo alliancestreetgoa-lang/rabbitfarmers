@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 import { useFocusEffect } from 'expo-router';
 import { ApiClient, OfflineError } from './api/client';
 import { Outbox, type OutboxEntry } from './api/outbox';
+import { registerForPush, unregisterPush } from './api/push';
 import type { Storage } from './api/storage';
 import type { Session } from './api/types';
 import {
@@ -150,11 +151,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSession(await client.signIn(email, password));
   }, [client]);
 
+  /*
+   * Ask for notifications after there is a session, not before.
+   *
+   * A permission prompt on a screen that has not yet shown anybody anything is
+   * a prompt people decline — and on iOS declining once is close to permanent.
+   * Asking after sign-in means the farm's own reminders are the thing being
+   * asked about.
+   *
+   * Every failure path inside returns null. Push is an improvement on opening
+   * the app, never a replacement, so nothing here surfaces an error.
+   */
+  useEffect(() => {
+    if (!session) return;
+    registerForPush(client).catch(() => {});
+  }, [session?.token, client]);
+
   const signUp = useCallback(async (input: Parameters<ApiClient['signUp']>[0]) => {
     setSession(await client.signUp(input));
   }, [client]);
 
   const signOut = useCallback(async () => {
+    // Before the session dies, while the call is still authorised. A farm hand
+    // handing the phone back must stop getting that farm's reminders on it.
+    await unregisterPush(client);
     await client.signOut();
     setSession(null);
   }, [client]);

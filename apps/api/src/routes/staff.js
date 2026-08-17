@@ -437,3 +437,86 @@ staffRoutes.get('/me/permissions', async (c) => {
   }
   return c.json({ role: session.role, can: allowed });
 });
+
+/* ------------------------------------------------------------------ push -- */
+
+const PLATFORMS = ['android', 'ios', 'web'];
+
+/**
+ * POST /devices — this phone would like to be told things.
+ *
+ * Called after sign-in and whenever the token changes, which the OS does on its
+ * own schedule. Upserting on the token rather than inserting is what makes that
+ * safe: the same phone re-registering is one row, and a phone that changed
+ * hands moves to the new person instead of quietly pushing one farm hand's
+ * reminders to another's.
+ *
+ * Needs no permission beyond being signed in. Every role gets notifications —
+ * a vet is told about the sick rabbit, an accountant is not told anything
+ * because nothing generates finance notifications yet.
+ */
+staffRoutes.post('/devices', async (c) => {
+  const b = await c.req.json();
+  const session = c.get('session');
+
+  const token = String(b.token ?? '').trim();
+  if (!token) throw new HttpError(400, 'A push token is required', { field: 'token' });
+  const platform = b.platform ?? 'android';
+  if (!PLATFORMS.includes(platform)) {
+    throw new HttpError(400, `Platform must be one of ${PLATFORMS.join(', ')}`,
+      { field: 'platform' });
+  }
+
+  const db = c.get('db');
+  const row = await db(async (client) => {
+    const { rows } = await client.query(`
+      INSERT INTO push_device (farm_id, employee_id, token, platform, device_name)
+      VALUES (current_farm_id(), $1, $2, $3::push_platform_t, $4)
+      ON CONFLICT (token) DO UPDATE
+        SET employee_id = EXCLUDED.employee_id,
+            farm_id     = EXCLUDED.farm_id,
+            device_name = COALESCE(EXCLUDED.device_name, push_device.device_name),
+            last_seen_at = now(),
+            -- Re-registering is the phone telling us it is alive. Whatever
+            -- went wrong before is over, or it would not be here.
+            failures = 0, disabled_at = NULL, disabled_reason = NULL
+      RETURNING id, platform, created_at`,
+      [session.employeeId, token, platform, b.device_name ?? null]);
+    return rows[0];
+  });
+
+  return c.json({ device: row }, 201);
+});
+
+/**
+ * DELETE /devices — stop telling this phone things.
+ *
+ * Called on sign-out. A farm hand who hands the phone back must stop receiving
+ * the farm's reminders on it, and that has to happen even though the session is
+ * about to end, which is why it takes the token in the body rather than
+ * inferring the device from the session.
+ */
+staffRoutes.delete('/devices', async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const token = String(b.token ?? '').trim();
+  if (!token) throw new HttpError(400, 'Which token?', { field: 'token' });
+
+  const db = c.get('db');
+  const gone = await db(async (client) => {
+    const { rowCount } = await client.query(
+      'DELETE FROM push_device WHERE token = $1', [token]);
+    return rowCount > 0;
+  });
+  return c.json({ ok: true, removed: gone });
+});
+
+/** GET /devices — which phones this farm is pushing to, and which have died. */
+staffRoutes.get('/devices', requireCan('staff:read'), async (c) => {
+  const db = c.get('db');
+  const rows = await db(async (client) => {
+    const { rows } = await client.query(
+      'SELECT * FROM v_push_device ORDER BY active DESC, last_seen_at DESC');
+    return rows;
+  });
+  return c.json({ devices: rows });
+});

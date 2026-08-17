@@ -1,4 +1,5 @@
 import { adminPool } from './db.js';
+import { deliverPending, checkReceipts } from './push.js';
 
 /**
  * Run one scheduling pass across every farm.
@@ -62,12 +63,40 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
     const purged = await client.query('SELECT purge_expired_sessions() AS n');
     await client.query('COMMIT');
 
+    /*
+     * Delivery runs AFTER the commit, and outside the transaction, deliberately.
+     *
+     * It makes a network call to somebody else's server. Holding a transaction
+     * open across that would pin a connection and the FOR KEY SHARE lock above
+     * for however long Expo takes to answer — turning a sub-second pass into a
+     * multi-second one that blocks a farm deletion, for a call that is allowed
+     * to fail.
+     *
+     * And it is allowed to fail. A failed send leaves the rows un-delivered and
+     * the next pass picks them up; a failed *generation* would lose the work
+     * itself. They do not deserve the same blast radius, so a throw here is
+     * caught and reported rather than failing the run.
+     */
+    let push = { sent: 0, failed: 0 };
+    let receipts = { checked: 0, dead: 0 };
+    try {
+      push = await deliverPending();
+      receipts = await checkReceipts();
+    } catch (err) {
+      push = { sent: 0, failed: 0, error: String(err.message ?? err).slice(0, 200) };
+    }
+
     const result = {
       ok: true,
       tasksCreated: tasks.rows[0].n,
       tasksAssigned: assigned.rows[0].n,
       notificationsCreated: notes.rows[0].n,
       sessionsPurged: purged.rows[0].n,
+      pushSent: push.sent ?? 0,
+      pushFailed: push.failed ?? 0,
+      pushError: push.error ?? null,
+      receiptsChecked: receipts.checked ?? 0,
+      devicesRetired: receipts.dead ?? 0,
       durationMs: Date.now() - started,
     };
 

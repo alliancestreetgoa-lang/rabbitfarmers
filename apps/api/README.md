@@ -46,7 +46,7 @@ GRANT rabbitry_admin TO admin_login;
 npm test
 ```
 
-165 tests against a real database — no mocks, because the parts most worth
+184 tests against a real database — no mocks, because the parts most worth
 testing here (RLS, view security, the derived breeding state) only exist in
 Postgres. They create and clean up their own data, scoped by process id so the
 files can run concurrently.
@@ -84,6 +84,7 @@ src/
     scheduler.js  the run trigger and the heartbeat
   admin-ui.js     server-rendered admin pages (no build step)
   scheduler.js    task and notification generation, plus health
+  push.js         getting a notification onto a phone
   run-scheduler.js  run one pass from a shell
   migrate.js      migration runner
   create-admin.js first platform admin
@@ -118,6 +119,21 @@ phone. Read-only is enforced in `requireAuth` as a blanket rule on the HTTP
 method rather than a guard on the write routes — `/auth/password`,
 `/auth/signout` and `/notifications/read` carry no write guard, and those are
 precisely the ones that must not be reachable. See `test/impersonation.test.js`.
+
+**Push is an improvement on opening the app, never a replacement.** Every part
+of registration is allowed to fail — a declined permission, Expo Go, a browser,
+a simulator — and all of them end with the app working exactly as before, with
+the same reminders on Today. The moment push becomes load-bearing, every farmer
+whose phone silently revoked the permission stops being told about a kindling.
+
+Three properties decide whether a farmer keeps notifications turned on, and all
+three live in `v_push_queue` rather than in the sender: never the same thing
+twice (a row per notification *per device*, so two phones both hear and neither
+hears twice), nothing outside quiet hours unless it is critical, and never a
+backlog — a phone that has been off for a week does not get a week of alerts,
+and a phone registered this morning gets none of yesterday's. Receipts are
+checked on a later pass, which is where `DeviceNotRegistered` usually arrives;
+skipping that is why push systems quietly accumulate dead tokens.
 
 **The scheduler runs from outside the database.** `src/scheduler.js` generates
 tasks and notifications; Netlify's scheduled function calls it every 15 minutes.
