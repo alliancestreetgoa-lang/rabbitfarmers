@@ -46,7 +46,7 @@ GRANT rabbitry_admin TO admin_login;
 npm test
 ```
 
-139 tests against a real database — no mocks, because the parts most worth
+165 tests against a real database — no mocks, because the parts most worth
 testing here (RLS, view security, the derived breeding state) only exist in
 Postgres. They create and clean up their own data, scoped by process id so the
 files can run concurrently.
@@ -74,10 +74,12 @@ src/
   db.js           two pools; withFarm() sets the tenant context per transaction
   auth.js         scrypt hashing, session tokens, signup validation
   middleware.js   session resolution, entitlement gate, error mapping
+  permissions.js  who may do what — one table, enforced server-side
   app.js          route wiring
   routes/
     auth.js       signup, signin, signout, me
     farm.js       animals, breeding cycle, conditions, daily list, settings
+    staff.js      the team, sheds, logins, attendance
     admin.js      the super-admin CRM
     scheduler.js  the run trigger and the heartbeat
   admin-ui.js     server-rendered admin pages (no build step)
@@ -97,6 +99,17 @@ litter. There is a test asserting this.
 **Calendar dates stay strings.** `DATE` columns are parsed as `YYYY-MM-DD`
 rather than `Date` objects. A kindling date is a day on the farm, not an
 instant, and converting it attaches the server's timezone to it.
+
+**A farm hand signs in with their phone.** The owner has an email; staff are
+given a login by their manager and know a phone number, not an email. A phone is
+unique only among accounts that have a password (a partial unique index in
+migration 0024), so the lookup at sign-in cannot be ambiguous — two farms may
+hold the same contact number, only one may make it a login.
+
+**Roles are one table, not scattered checks.** `permissions.js` holds the matrix
+from docs/04 and every route names the action it needs. A permission that only
+hides a button is not a permission: a farm hand's phone is a shared device, and
+`test/staff.test.js` checks each role against an endpoint it must not reach.
 
 **Support impersonation is an ordinary farm session.** `POST
 /admin/farms/:id/impersonate` mints a session on the owner's employee row bound

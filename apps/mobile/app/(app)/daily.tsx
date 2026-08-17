@@ -102,6 +102,8 @@ export default function Daily() {
           </View>
         )}
 
+        <ClockCard />
+
         <View style={{ height: space.lg }} />
 
         {loading && !data && <Loading />}
@@ -228,6 +230,71 @@ function DoseRow({ item, busy, readOnly, onGiven }: {
 }
 
 /**
+ * Check in and out, from the top of the screen a farm hand already opens.
+ *
+ * docs/04 wants this to be one tap, and it is: no separate screen, no menu. The
+ * card also states the time it recorded, because attendance somebody cannot see
+ * is attendance they will not trust — and a farm hand who does not trust it
+ * goes back to signing the paper register, which is the failure mode this whole
+ * module exists to avoid.
+ *
+ * No geofence and no QR yet. docs/04 lists them as options a farm picks; neither
+ * is worth building before anybody is using the plain version.
+ */
+function ClockCard() {
+  const { client, readOnly } = useApp();
+  const me = useQuery('my-attendance', () => client.myAttendance(), []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (readOnly) return null;
+
+  const at = (iso?: string | null) =>
+    iso ? new Date(iso).toTimeString().slice(0, 5) : null;
+  const inAt = at(me.data?.attendance?.checked_in_at);
+  const outAt = at(me.data?.attendance?.checked_out_at);
+
+  const tap = async (which: 'in' | 'out') => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (which === 'in') await client.checkIn();
+      else await client.checkOut();
+      await me.reload();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View style={s.clock} testID="clock-card">
+      <View style={{ flex: 1 }}>
+        <Text style={s.clockText} testID="clock-state">
+          {outAt ? `Worked ${inAt ?? '—'} to ${outAt}`
+            : inAt ? `Checked in ${inAt}`
+            : 'Not checked in'}
+        </Text>
+        {!!error && <Text style={s.clockError}>{error}</Text>}
+      </View>
+      {!outAt && (
+        <Pressable
+          testID={inAt ? 'check-out' : 'check-in'}
+          style={[s.smallBtn, { backgroundColor: colors.accent, borderColor: colors.accent }]}
+          onPress={() => tap(inAt ? 'out' : 'in')}
+          disabled={busy}
+        >
+          <Text style={[s.smallBtnText, { color: colors.white }]}>
+            {busy ? 'Saving…' : inAt ? 'Check out' : 'Check in'}
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+/**
  * A condition row answers its own question inline. The reminder asks "still
  * going, or stopped?" so the answer has to be one tap away, not three screens
  * deep.
@@ -284,6 +351,14 @@ function ConditionRow({ item, busy, answeredAt, readOnly, onStillGoing, onStoppe
 }
 
 const s = StyleSheet.create({
+  clock: {
+    flexDirection: 'row', alignItems: 'center', gap: space.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.rule, borderRadius: radius.md,
+    padding: space.md, marginTop: space.md,
+  },
+  clockText: { ...t.body, color: colors.ink, fontWeight: '600' },
+  clockError: { ...t.small, color: colors.crit, marginTop: 2 },
   sectionHead: {
     flexDirection: 'row', justifyContent: 'space-between',
     marginTop: space.lg, marginBottom: space.sm,

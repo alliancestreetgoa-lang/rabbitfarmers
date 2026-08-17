@@ -39,7 +39,7 @@ describe('signup', () => {
       `SELECT e.email::text, e.phone, f.address_line, f.city, f.pincode
        FROM employee e JOIN farm f ON f.id = e.farm_id WHERE e.farm_id = $1`, [out.farm.id]);
     assert.equal(rows[0].email, out.email.toLowerCase());
-    assert.equal(rows[0].phone, '+919876543210');
+    assert.equal(rows[0].phone, out.phone);
     assert.equal(rows[0].city, 'Margao');
     assert.equal(rows[0].pincode, '403709');
   });

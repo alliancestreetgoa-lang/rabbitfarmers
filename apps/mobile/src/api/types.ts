@@ -230,3 +230,63 @@ export interface MatingSchedule {
   expected_kindling_on: string;
   watch_until: string;
 }
+
+/* --------------------------------------------------------------------- team */
+
+/** The five roles from docs/04. Enforced by the API, mirrored here for the UI. */
+export type StaffRole = 'owner' | 'manager' | 'caretaker' | 'vet' | 'accountant';
+
+export interface Staff {
+  id: string;
+  full_name: string;
+  phone: string;
+  email: string | null;
+  role: StaffRole;
+  employment_type: string;
+  joined_on: string | null;
+  left_on: string | null;
+  language: string;
+  can_palpate: boolean;
+  is_active: boolean;
+  /** They have a password. Plenty of staff never need one. */
+  can_sign_in: boolean;
+  /** Sheds they look after — what auto-assigns their work. */
+  sheds: string[];
+  shed_ids: string[];
+  today_status: string | null;
+  today_checked_in_at: string | null;
+  today_checked_out_at: string | null;
+  open_tasks: number;
+}
+
+export interface Shed {
+  id: string;
+  name: string;
+  cages?: number;
+  animals?: number;
+  caretakers?: string[];
+}
+
+export interface Attendance {
+  id: string;
+  employee_id: string;
+  work_date: string;
+  status: string;
+  checked_in_at: string | null;
+  checked_out_at: string | null;
+  overtime_minutes: number;
+  note: string | null;
+}
+
+export interface AttendanceSummary {
+  employee_id: string;
+  full_name: string;
+  month: string;
+  present: number;
+  half_days: number;
+  absent: number;
+  leave: number;
+  holiday: number;
+  overtime_minutes: number;
+  days_worked: string;
+}

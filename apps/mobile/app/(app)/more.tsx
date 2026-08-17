@@ -6,11 +6,18 @@ import { TabBar } from '../../src/ui/nav';
 import { Card, H1, Muted, Pill, Screen } from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 
+const ROLE_LABEL: Record<string, string> = {
+  owner: 'owner', manager: 'manager', caretaker: 'farm hand',
+  vet: 'vet', accountant: 'accountant',
+};
+
 export default function More() {
   const { client, session, signOut, pending, readOnly, serverUrl, canSetServer } = useApp();
   const { data } = useQuery('me', () => client.me());
   const sub = data?.subscription;
   const failed = pending.filter((p) => p.failed);
+  const canSeeTeam = ['owner', 'manager', 'accountant'].includes(
+    data?.user?.role ?? session?.user?.role ?? '');
 
   return (
     <Screen>
@@ -20,7 +27,7 @@ export default function More() {
         <Card>
           <Text style={s.label}>FARM</Text>
           <Text style={s.value} testID="farm-name">{data?.farm?.name ?? session?.farm?.name ?? '—'}</Text>
-          <Muted>{data?.user?.name} · {data?.user?.role}</Muted>
+          <Muted>{data?.user?.name} · {ROLE_LABEL[data?.user?.role ?? ''] ?? data?.user?.role}</Muted>
         </Card>
 
         <Card>
@@ -70,6 +77,15 @@ export default function More() {
           <Pressable style={s.action} onPress={() => router.push('/record/condition')}
                      testID="report-problem">
             <Text style={s.actionText}>Report a sick rabbit</Text>
+          </Pressable>
+        )}
+
+        {/* Only for the roles the server would actually let through. Offering a
+            button that answers 403 teaches people to distrust the app. */}
+        {canSeeTeam && (
+          <Pressable style={s.action} onPress={() => router.push('/(app)/team')}
+                     testID="open-team">
+            <Text style={s.actionText}>Team and attendance</Text>
           </Pressable>
         )}
 

@@ -23,6 +23,7 @@ export default function RootLayout() {
         <Stack.Screen name="(app)/herd" options={{ title: 'Herd' }} />
         <Stack.Screen name="(app)/breeding" options={{ title: 'Breeding' }} />
         <Stack.Screen name="(app)/more" options={{ title: 'More' }} />
+        <Stack.Screen name="(app)/team" options={{ title: 'Team' }} />
         <Stack.Screen name="(app)/animal" options={{ title: 'Rabbit' }} />
         <Stack.Screen name="record/mating" options={{ title: 'Record a mating' }} />
         <Stack.Screen name="record/kindling" options={{ title: 'Record a kindling' }} />
@@ -32,6 +33,7 @@ export default function RootLayout() {
         <Stack.Screen name="record/kits" options={{ title: 'Add the kits' }} />
         <Stack.Screen name="record/edit-animal" options={{ title: 'Edit' }} />
         <Stack.Screen name="record/weaning" options={{ title: 'Separate the kits' }} />
+        <Stack.Screen name="record/staff" options={{ title: 'Somebody on the farm' }} />
       </Stack>
     </AppProvider>
   );

@@ -33,6 +33,16 @@ before(async () => {
 const PREFIX = `m${process.pid}`;
 const uniq = () => `${PREFIX}${Date.now()}${Math.floor(Math.random() * 1e4)}`;
 
+/*
+ * A phone is a login identity since migration 0024 — unique among accounts that
+ * can sign in, so a farm hand's number resolves to one farm. That makes it as
+ * unique as the email here: a shared fixture number means the second farm in
+ * any run cannot sign up at all.
+ */
+let phoneSeq = 0;
+const uniquePhone = () =>
+  `+91${String(process.pid % 100000).padStart(5, '0')}${String(++phoneSeq).padStart(5, '0')}`;
+
 /**
  * These tests sign up real farms against a real API, so they have to clean up
  * after themselves — otherwise the admin console fills with hundreds of "Mobile
@@ -93,7 +103,7 @@ async function freshFarm() {
     farm_name: 'Mobile Test Farm',
     full_name: 'Mobile Tester',
     email,
-    phone: '+919876543210',
+    phone: uniquePhone(),
     password: 'correct horse battery',
     city: 'Margao', state: 'Goa', pincode: '403709',
   });

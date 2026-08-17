@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { authRoutes } from './routes/auth.js';
 import { farmRoutes } from './routes/farm.js';
+import { staffRoutes } from './routes/staff.js';
 import { adminRoutes } from './routes/admin.js';
 import { schedulerRoutes } from './routes/scheduler.js';
 import { errorHandler } from './middleware.js';
@@ -73,6 +74,9 @@ export function createApp() {
   // Also before the farm routes: the scheduler authenticates with a shared
   // secret, not a farm session, so it must not hit the farm auth guard.
   app.route('/scheduler', schedulerRoutes);
+  // Staff before the farm routes only for tidiness — their paths do not
+  // overlap. Both are mounted at '/' and both carry their own auth guard.
+  app.route('/', staffRoutes);
   app.route('/', farmRoutes);
 
   return app;

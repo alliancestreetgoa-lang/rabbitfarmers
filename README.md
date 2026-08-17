@@ -37,8 +37,9 @@ with grandfathering enforced in the schema.
 | Subscriptions, trial, grace, entitlements | Built, 4 tests |
 | Super-admin CRM with audit trail | Built, 25 tests |
 | Support impersonation — read-only, an hour, visible to the farm | Built, 13 tests |
+| Staff: logins by phone, five roles enforced server-side, sections, attendance | Built, 26 tests |
 | Scheduler (task generation, 2-hourly reminders, heartbeat) | Built, 25 tests |
-| Expo app — Today, Breeding, Herd, recording, offline outbox | Built, 33 tests — 22 against the real API |
+| Expo app — Today, Breeding, Herd, Team, recording, offline outbox | Built, 33 tests — 22 against the real API |
 | Android / iOS binaries | Icons, native config and EAS profiles ready. **No APK built** — needs the Android SDK and a signing key |
 | Netlify deployment | Configured and deployment-ready, **not deployed** |
 | Razorpay billing | Not started — deliberately deferred |
@@ -50,7 +51,7 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 139 API tests, then boots the server and hits real endpoints over HTTP —
+the 165 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.
@@ -89,10 +90,6 @@ a deploy would answer with.
 Deploying is [docs/11-deploying-to-netlify.md](docs/11-deploying-to-netlify.md).
 
 ### The next thing to build
-
-**Employees.** The tables are there — staff, sections, attendance — and nothing
-is exposed. Every farm is a single owner account, so a farm hand cannot be given
-a login or be assigned a shed.
 
 **Push delivery.** The scheduler raises notifications and the API serves them,
 but nothing pushes them to a phone yet. Until then a farmer sees them by opening

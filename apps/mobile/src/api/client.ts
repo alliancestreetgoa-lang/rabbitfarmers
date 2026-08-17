@@ -4,7 +4,7 @@ import type {
   Animal, Breed, BuckSuggestion, Cage, DailyItem, HistoryEvent, Litter, MatingSchedule,
   MedicationDose, OpenCondition, PregnancySummary, PregnantDoe, RabbitLifetime,
   ReadyDoe,
-  Session, Subscription, SupportAccess,
+  Attendance, AttendanceSummary, Session, Shed, Staff, Subscription, SupportAccess,
 } from './types.ts';
 
 const TOKEN_KEY = 'rb.token';
@@ -166,9 +166,19 @@ export class ApiClient {
     return s;
   }
 
-  async signIn(email: string, password: string): Promise<Session> {
-    const s = await this.request<Session>(
-      'POST', '/auth/signin', { email, password }, { auth: false });
+  /**
+   * Email or phone, whichever they typed.
+   *
+   * The owner signed up with an email. A farm hand was given a login by their
+   * manager and knows their phone number — docs/04 is right that farm workers
+   * reliably have one and often have no email at all.
+   */
+  async signIn(identifier: string, password: string): Promise<Session> {
+    const looksLikeEmail = identifier.includes('@');
+    const s = await this.request<Session>('POST', '/auth/signin', {
+      ...(looksLikeEmail ? { email: identifier } : { phone: identifier }),
+      password,
+    }, { auth: false });
     await this.setSession(s);
     return s;
   }
@@ -286,6 +296,68 @@ export class ApiClient {
 
   cages() {
     return this.request<{ cages: Cage[] }>('GET', '/cages');
+  }
+
+  /* ------------------------------------------------------------------ team */
+
+  staff(include: 'active' | 'past' | 'all' = 'active') {
+    return this.request<{ staff: Staff[] }>('GET', `/staff?include=${include}`);
+  }
+
+  sheds() {
+    return this.request<{ sheds: Shed[] }>('GET', '/sheds');
+  }
+
+  addShed(name: string) {
+    return this.request<{ shed: Shed }>('POST', '/sheds', { name });
+  }
+
+  addStaff(input: Partial<Staff> & { full_name: string; phone: string }) {
+    return this.request<{ staff: Staff }>('POST', '/staff', input);
+  }
+
+  editStaff(id: string, input: Partial<Staff> & { shed_ids?: string[] }) {
+    return this.request<{ staff: Staff }>('PATCH', `/staff/${id}`, input);
+  }
+
+  /** Shown once, never stored in readable form. */
+  giveLogin(id: string) {
+    return this.request<{
+      staff: { id: string; full_name: string; phone: string };
+      temporary_password: string;
+      message: string;
+    }>('POST', `/staff/${id}/login`, {});
+  }
+
+  /** My own day. A farm hand cannot read the team but must see themselves. */
+  myAttendance() {
+    return this.request<{ attendance: Attendance | null }>('GET', '/me/attendance');
+  }
+
+  checkIn(coords?: { lat: number; lng: number }) {
+    return this.request<{ attendance: Attendance }>(
+      'POST', '/attendance/check-in', coords ?? {});
+  }
+
+  checkOut() {
+    return this.request<{ attendance: Attendance }>('POST', '/attendance/check-out', {});
+  }
+
+  markAttendance(input: {
+    employee_id: string; status: string; work_date?: string;
+    overtime_minutes?: number; note?: string;
+  }) {
+    return this.request<{ attendance: Attendance }>('POST', '/attendance', input);
+  }
+
+  attendance(month?: string) {
+    return this.request<{ month: string; summary: AttendanceSummary[]; days: unknown[] }>(
+      'GET', `/attendance${month ? `?month=${month}` : ''}`);
+  }
+
+  permissions() {
+    return this.request<{ role: string; can: Record<string, boolean> }>(
+      'GET', '/me/permissions');
   }
 
   notifications(unreadOnly = false) {

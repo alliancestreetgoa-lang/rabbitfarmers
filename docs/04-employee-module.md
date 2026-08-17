@@ -1,5 +1,16 @@
 # 04 — Employee Module
 
+> **Status: built**, apart from the parts marked deferred below. Staff sign in
+> with a phone number, the permission matrix is enforced in the API (not the
+> UI), sheds route work automatically, and attendance exports to CSV.
+> `apps/api/src/permissions.js` is the matrix; `test/staff.test.js` checks every
+> role against an endpoint it must not reach.
+>
+> **Deferred, on purpose:** payroll and wage computation, shift rosters,
+> GPS/QR attendance verification, per-employee UI language, and the
+> accountability metrics at the bottom of this page. Each is called out where it
+> appears.
+
 The employee side is not a separate HR app bolted on. Its value comes from being
 **wired into the breeding calendar**: the breeding engine generates the work, the
 employee module assigns it, and completion writes back into the animal records.
@@ -22,11 +33,20 @@ Breeding engine ──generates──► Tasks ──assigned to──► Employ
 | **Veterinarian** | Read all animal records, write health events, prescriptions, withdrawal periods | Breeding decisions, finances, staff |
 | **Accountant** | Read/write sales, expenses, payroll; read herd summary | Individual animal records, health data |
 
-Implementation note: enforce this **server-side** (PostgreSQL row-level security
-if using Supabase), never only in the UI. A farm hand's phone is a shared device
-in practice.
+Implementation note: enforce this **server-side**, never only in the UI. A farm
+hand's phone is a shared device in practice.
+
+*Built.* One table in `apps/api/src/permissions.js` rather than role checks
+scattered through the routes — a matrix you can read in one screen is a matrix
+somebody will notice is wrong. Every route names the action it needs, and the
+refusal names who to ask rather than which check failed. Tenant isolation stays
+where it was, in row-level security; roles sit above it, because every employee
+of a farm is inside the same tenant.
 
 ### The edit-window rule
+
+*Built* — `canEditRecord` in `permissions.js`, applied to editing a rabbit and
+editing a kindling.
 
 Farm hands can edit their own entries for **24 hours**, then the record locks and
 needs a manager to change it. Without this, mistakes are never corrected (too
@@ -40,7 +60,7 @@ easy and audit integrity holds.
 | Field | Notes |
 |---|---|
 | Name, photo | Photo matters — shared devices, low literacy contexts |
-| Phone | Also the login identity (OTP). Farm workers reliably have a phone number, not an email |
+| Phone | Also the login identity. Farm workers reliably have a phone number, not an email. **Password, not OTP** — there is no SMS provider, so a manager sets a temporary password and reads it out once. A phone is unique among accounts that can sign in, so somebody works at one farm |
 | Role, assigned sheds/rows | Scopes their task list to their section |
 | Employment type | Permanent / daily wage / piece rate / contract |
 | Join date, wage rate, pay cycle | Feeds payroll |
@@ -53,7 +73,10 @@ easy and audit integrity holds.
 ## Attendance
 
 - **Check in / check out** from the phone, one tap.
-- **Verification options**, pick per farm:
+- *Built:* one-tap check in and check out from the top of Today, a manager
+  marking anybody, a monthly summary and a CSV export.
+- **Verification options** — *deferred*, none built. Worth choosing only once a
+  farm is actually using the plain version:
   - GPS geofence around the farm (simplest, works offline with queued sync)
   - QR code posted in each shed (cheap, no GPS drain, harder to fake from home)
   - Manager marks attendance (fallback for staff without smartphones)
@@ -72,11 +95,16 @@ whole app.
 ### Assignment strategies
 
 1. **By section** (default) — each caretaker owns specific sheds/rows and
-   automatically receives every task for animals housed there.
-2. **By skill** — palpation and health treatments route only to staff flagged as
-   trained. Palpation accuracy varies enormously between people; an untrained
+   automatically receives every task for animals housed there. *Built:*
+   `assign_tasks_by_section()`, run by the scheduler after each generation pass.
+   A shed with **two** caretakers leaves its work unassigned on purpose — the
+   farm has not decided who owns it, and picking one produces work that looks
+   assigned and is nobody's.
+2. **By skill** — *deferred.* The `can_palpate` flag is recorded and editable;
+   nothing routes on it yet. Palpation and health treatments should route only
+   to staff flagged as trained. Palpation accuracy varies enormously between people; an untrained
    palpation is worse than none, because it produces a confident wrong answer.
-3. **Manual** — manager drags a task to a person.
+3. **Manual** — *deferred.* A manager cannot yet hand one task to one person.
 
 ### The daily work screen (a farm hand's entire app)
 
@@ -108,7 +136,10 @@ Design constraints for this screen, learned from how these apps fail:
 - **Works fully offline**, syncing when the phone reaches wifi.
 - **Local language**, selectable per employee.
 
-### Accountability metrics (per employee)
+### Accountability metrics (per employee) — deferred
+
+The data to compute all of these is already recorded; nothing reports on it yet.
+
 
 Use these to coach, not to punish — and say so openly to staff, or they will
 start falsifying entries and the data becomes worthless.
@@ -124,7 +155,7 @@ start falsifying entries and the data becomes worthless.
 
 ---
 
-## Payroll (Phase 3, not MVP)
+## Payroll (Phase 3, not MVP) — deferred, as planned
 
 Deliberately deferred. Payroll is a large, regulation-heavy build, and every
 country's rules differ. Building it early would delay the breeding features that
@@ -138,7 +169,7 @@ weaned, per cage cleaned), advances and deductions, payslip generation.
 
 ---
 
-## Shift and roster planning
+## Shift and roster planning — deferred
 
 For farms large enough to need it:
 

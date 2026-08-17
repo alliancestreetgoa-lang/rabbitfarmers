@@ -30,7 +30,22 @@ authRoutes.post('/signup', async (c) => {
        input.addressLine, input.city, input.state, input.pincode,
        input.timezone, TRIAL_DAYS]);
   } catch (err) {
+    /*
+     * Which unique constraint, not just "something was a duplicate".
+     *
+     * Since migration 0024 a phone is a login identity, so the owner's number
+     * has to be unique among accounts that can sign in — and a farmer whose
+     * number is already in use was being told their *email* was taken. They
+     * would change the email, try again, and be told the same thing, with
+     * nothing on the screen pointing at the field that was actually wrong.
+     */
     if (err.code === '23505') {
+      const on = `${err.constraint ?? ''} ${err.detail ?? ''}`;
+      if (/phone/.test(on)) {
+        throw new HttpError(409,
+          'That phone number is already the sign-in for another account',
+          { field: 'phone' });
+      }
       throw new HttpError(409, 'That email is already registered', { field: 'email' });
     }
     throw err;
@@ -50,13 +65,26 @@ authRoutes.post('/signup', async (c) => {
   }, 201);
 });
 
-/** POST /auth/signin — email + password. */
+/**
+ * POST /auth/signin — email + password, or phone + password.
+ *
+ * The owner signs up with an email. A farm hand is given a login by their
+ * manager and signs in with the phone number they already know, because
+ * docs/04 is right that farm workers reliably have a phone and often no email.
+ *
+ * A phone is only a login where a password exists — enforced by a partial
+ * unique index in migration 0024, so this lookup cannot be ambiguous. Two farms
+ * may hold the same contact number; only one can turn it into a sign-in.
+ */
 authRoutes.post('/signin', async (c) => {
   const body = await c.req.json();
   const email = (body.email ?? '').trim().toLowerCase();
+  const phone = (body.phone ?? '').trim();
   const password = body.password ?? '';
 
-  const { rows } = await appQuery('SELECT * FROM auth_lookup_by_email($1)', [email]);
+  const { rows } = phone && !email
+    ? await appQuery('SELECT * FROM auth_lookup_by_phone($1)', [phone])
+    : await appQuery('SELECT * FROM auth_lookup_by_email($1)', [email]);
   const user = rows[0];
 
   // Same message and roughly the same work whether the email exists or not, so
@@ -65,7 +93,11 @@ authRoutes.post('/signin', async (c) => {
     ? await verifyPassword(password, user.password_hash)
     : await verifyPassword(password, 'scrypt$32768$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAA');
 
-  if (!ok || !user?.is_active) throw new HttpError(401, 'Email or password is incorrect');
+  if (!ok || !user?.is_active) {
+    throw new HttpError(401,
+      phone && !email ? 'Phone number or password is incorrect'
+                      : 'Email or password is incorrect');
+  }
 
   const { token, hash } = newSessionToken();
   await appQuery('SELECT auth_create_session($1,$2,$3,$4)',
@@ -75,7 +107,10 @@ authRoutes.post('/signin', async (c) => {
   return c.json({
     token,
     farm: { id: user.farm_id },
-    user: { id: user.employee_id, name: user.full_name, email, role: user.role },
+    user: {
+      id: user.employee_id, name: user.full_name, role: user.role,
+      ...(email ? { email } : { phone }),
+    },
   });
 });
 

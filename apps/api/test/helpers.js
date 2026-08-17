@@ -36,15 +36,23 @@ let counter = 0;
 export const uniqueEmail = () =>
   `owner${process.pid}x${++counter}@example.test`;
 
+/** Also unique: a phone is a login identity since migration 0024. */
+export const uniquePhone = () =>
+  `+91${String(process.pid).padStart(7, '0').slice(-7)}${String(++counter).padStart(3, '0')}`;
+
 /** Sign up a farm and return its token plus ids. */
 export async function signupFarm(overrides = {}) {
   const email = overrides.email ?? uniqueEmail();
+  // Unique per farm, like the email. Since migration 0024 a phone is a login
+  // identity — unique among accounts that can sign in — so a shared fixture
+  // number means the second farm in any test cannot sign up at all.
+  const phone = overrides.phone ?? uniquePhone();
   const res = await api('POST', '/auth/signup', {
     body: {
       farm_name: 'Test Rabbitry',
       full_name: 'Farm Owner',
       email,
-      phone: '+919876543210',
+      phone,
       password: 'correct horse battery',
       address_line: 'Survey 42',
       city: 'Margao',
@@ -73,7 +81,7 @@ export async function signupFarm(overrides = {}) {
     await adminQuery(`UPDATE farm SET timezone = 'UTC' WHERE id = $1`, [res.body.farm.id]);
   }
 
-  return { ...res.body, email };
+  return { ...res.body, email, phone };
 }
 
 export async function makeAdmin(role = 'superadmin') {

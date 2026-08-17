@@ -88,7 +88,7 @@ describe('admin CRM', () => {
     const row = res.body.farms.find((x) => x.farm_id === f.farm.id);
     assert.ok(row, 'the new farm should be listed');
     assert.equal(row.owner_email, f.email.toLowerCase());
-    assert.equal(row.owner_phone, '+919876543210');
+    assert.equal(row.owner_phone, f.phone);
     assert.equal(row.city, 'Margao');
     assert.equal(row.status, 'trialing');
     assert.equal(row.days_since_activity, 0);

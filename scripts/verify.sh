@@ -155,9 +155,13 @@ curl -fsS localhost:$PORT/plans | grep -q '9900' || die "plans endpoint wrong"
 ok "GET /plans returns ₹99 / ₹999 introductory pricing"
 
 EMAIL="verify$$@example.test"
+# Unique per run, like the email. Since migration 0024 a phone is a login
+# identity — unique among accounts that can sign in — so a fixed number here
+# works exactly once and then every later run fails at signup with a 409.
+PHONE="+91$(printf '%010d' $(($$ % 1000000000)))"
 SIGNUP=$(curl -fsS -X POST localhost:$PORT/auth/signup -H 'content-type: application/json' \
   -d "{\"farm_name\":\"Verify Farm\",\"full_name\":\"Verifier\",\"email\":\"$EMAIL\",
-       \"phone\":\"+919876543210\",\"password\":\"correct horse battery\",
+       \"phone\":\"$PHONE\",\"password\":\"correct horse battery\",
        \"city\":\"Margao\",\"state\":\"Goa\",\"pincode\":\"403709\"}")
 TOKEN=$(echo "$SIGNUP" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
 [ -n "$TOKEN" ] || die "signup failed: $SIGNUP"

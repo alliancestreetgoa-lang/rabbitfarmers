@@ -1,11 +1,54 @@
 import { Hono } from 'hono';
 import { requireAuth, requireWriteAccess } from '../middleware.js';
+import { requireCan, canEditRecord } from '../permissions.js';
 import { HttpError, isKnownTimezone } from '../auth.js';
 
 export const farmRoutes = new Hono();
 farmRoutes.use('*', requireAuth);
 
+/*
+ * Two different questions, and every route answers both.
+ *
+ *   `write`  — is the farm's subscription live? (402 if not)
+ *   `canX`   — is this person allowed to? (403 if not)
+ *
+ * They are separate because they fail differently: a lapsed subscription is the
+ * owner's problem and reads keep working, while a permission is about who is
+ * holding the phone. Collapsing them produced a "renew your subscription"
+ * message for a vet who simply is not allowed to record a mating.
+ */
 const write = requireWriteAccess;
+const canRead = requireCan('animals:read');
+const canWriteAnimals = requireCan('animals:write');
+const canWriteHealth = requireCan('health:write');
+const canWriteSettings = requireCan('settings:write');
+
+/**
+ * The edit window, from docs/04.
+ *
+ * A farm hand may correct their own entry for a day; after that a manager has
+ * to. The reasoning is worth keeping here rather than only in the doc: with no
+ * window, mistakes are never corrected, because asking is embarrassing and the
+ * wrong weight simply stays. With an unlimited one, history gets quietly
+ * rewritten, which is worse. A day is long enough to notice at evening feed.
+ *
+ * Owners and managers pass straight through — correcting old records is most of
+ * what a manager is for.
+ */
+async function enforceEditWindow(client, session, table, id) {
+  if (session.role === 'owner' || session.role === 'manager') return;
+
+  const column = table === 'rabbit' ? 'created_by' : 'recorded_by';
+  const { rows } = await client.query(
+    `SELECT ${column} AS recorded_by, created_at FROM ${table} WHERE id = $1`, [id]);
+  if (!rows.length) return;
+
+  const verdict = canEditRecord(session, {
+    recordedBy: rows[0].recorded_by,
+    createdAt: rows[0].created_at,
+  });
+  if (!verdict.ok) throw new HttpError(403, verdict.reason, { edit_window: true });
+}
 
 /* ---------------------------------------------------------------- animals -- */
 
@@ -17,7 +60,7 @@ const write = requireWriteAccess;
  * `?include=all` returns both — nothing is ever dropped from the database, so
  * anything hidden here is still one query away.
  */
-farmRoutes.get('/animals', async (c) => {
+farmRoutes.get('/animals', canRead, async (c) => {
   const db = c.get('db');
   const sex = c.req.query('sex');
   const role = c.req.query('role');
@@ -65,7 +108,7 @@ farmRoutes.get('/animals', async (c) => {
  * Works for an animal that has been sold, culled or died — especially then,
  * because that is when someone wants to know what her line produced.
  */
-farmRoutes.get('/animals/:id/history', async (c) => {
+farmRoutes.get('/animals/:id/history', canRead, async (c) => {
   const id = c.req.param('id');
 
   const result = await c.get('db')(async (client) => {
@@ -142,7 +185,7 @@ farmRoutes.get('/animals/:id/history', async (c) => {
  */
 const ANIMAL_EDITABLE = ['name', 'tag', 'sex', 'role', 'date_of_birth', 'notes'];
 
-farmRoutes.patch('/animals/:id', write, async (c) => {
+farmRoutes.patch('/animals/:id', write, canWriteAnimals, async (c) => {
   const id = c.req.param('id');
   const b = await c.req.json();
   const session = c.get('session');
@@ -167,6 +210,8 @@ farmRoutes.patch('/animals/:id', write, async (c) => {
       WHERE r.id = $1`, [id]);
     if (!before.length) throw new HttpError(404, 'No such rabbit');
     const was = before[0];
+
+    await enforceEditWindow(client, session, 'rabbit', id);
 
     const sets = [];
     const values = [];
@@ -282,7 +327,7 @@ farmRoutes.patch('/animals/:id', write, async (c) => {
  */
 const STATUSES = ['active', 'quarantine', 'sold', 'culled', 'dead'];
 
-farmRoutes.post('/animals/:id/status', write, async (c) => {
+farmRoutes.post('/animals/:id/status', write, canWriteAnimals, async (c) => {
   const id = c.req.param('id');
   const b = await c.req.json();
   const to = b.status;
@@ -338,7 +383,7 @@ farmRoutes.post('/animals/:id/status', write, async (c) => {
  * without breeds soon enough, and a joined payload would have to be pulled
  * apart again.
  */
-farmRoutes.get('/breeds', async (c) => {
+farmRoutes.get('/breeds', canRead, async (c) => {
   const rows = await c.get('db')(async (client) => (await client.query(`
     SELECT b.id, b.name, b.size_class, b.doe_first_mating_days,
            b.buck_first_mating_days,
@@ -348,7 +393,7 @@ farmRoutes.get('/breeds', async (c) => {
   return c.json({ breeds: rows });
 });
 
-farmRoutes.get('/cages', async (c) => {
+farmRoutes.get('/cages', canRead, async (c) => {
   const rows = await c.get('db')(async (client) => (await client.query(`
     SELECT cg.id, cg.code, cg.row_label, cg.capacity, s.name AS shed,
            count(r.id) FILTER (WHERE r.status <> 'dead') AS occupants
@@ -408,7 +453,7 @@ async function resolveCage(client, { id, code }) {
 }
 
 /** POST /animals — you add and name every rabbit yourself. */
-farmRoutes.post('/animals', write, async (c) => {
+farmRoutes.post('/animals', write, canWriteAnimals, async (c) => {
   const b = await c.req.json();
   const name = (b.name ?? '').trim();
   const sex = b.sex;
@@ -454,7 +499,7 @@ farmRoutes.post('/animals', write, async (c) => {
 /* ------------------------------------------------------------- the numbers -- */
 
 /** GET /pregnant — "how many are pregnant?", confirmed and presumed kept apart. */
-farmRoutes.get('/pregnant', async (c) => {
+farmRoutes.get('/pregnant', canRead, async (c) => {
   const db = c.get('db');
   const data = await db(async (client) => {
     const summary = await client.query('SELECT * FROM v_pregnancy_summary');
@@ -475,7 +520,7 @@ farmRoutes.get('/pregnant', async (c) => {
 });
 
 /** GET /ready-to-mate — the queue, each row carrying the reason it is there. */
-farmRoutes.get('/ready-to-mate', async (c) => {
+farmRoutes.get('/ready-to-mate', canRead, async (c) => {
   const db = c.get('db');
   const rows = await db(async (client) => {
     const { rows } = await client.query(`
@@ -493,7 +538,7 @@ farmRoutes.get('/ready-to-mate', async (c) => {
 });
 
 /** GET /bucks/suggest?doe_id= — under quota, not closely related, best first. */
-farmRoutes.get('/bucks/suggest', async (c) => {
+farmRoutes.get('/bucks/suggest', canRead, async (c) => {
   const doeId = c.req.query('doe_id');
   if (!doeId) throw new HttpError(400, 'doe_id is required');
   const db = c.get('db');
@@ -541,7 +586,7 @@ farmRoutes.get('/bucks/suggest', async (c) => {
 });
 
 /** GET /daily — the tab that opens on login. */
-farmRoutes.get('/daily', async (c) => {
+farmRoutes.get('/daily', canRead, async (c) => {
   const db = c.get('db');
   const rows = await db(async (client) => {
     const { rows } = await client.query(`
@@ -561,7 +606,7 @@ farmRoutes.get('/daily', async (c) => {
 /* --------------------------------------------------------------- breeding -- */
 
 /** POST /matings — take the doe to the buck, then record it here. */
-farmRoutes.post('/matings', write, async (c) => {
+farmRoutes.post('/matings', write, canWriteAnimals, async (c) => {
   const b = await c.req.json();
   if (!b.doe_id) throw new HttpError(400, 'Which doe?', { field: 'doe_id' });
   const db = c.get('db');
@@ -594,7 +639,7 @@ farmRoutes.post('/matings', write, async (c) => {
 });
 
 /** POST /pregnancy-checks — palpation result. The latest check wins. */
-farmRoutes.post('/pregnancy-checks', write, async (c) => {
+farmRoutes.post('/pregnancy-checks', write, canWriteAnimals, async (c) => {
   const b = await c.req.json();
   if (!b.mating_id) throw new HttpError(400, 'Which mating?', { field: 'mating_id' });
   if (!['positive', 'negative', 'uncertain'].includes(b.result)) {
@@ -628,7 +673,7 @@ farmRoutes.post('/pregnancy-checks', write, async (c) => {
 });
 
 /** POST /litters — she kindled. */
-farmRoutes.post('/litters', write, async (c) => {
+farmRoutes.post('/litters', write, canWriteAnimals, async (c) => {
   const b = await c.req.json();
   if (!b.doe_id) throw new HttpError(400, 'Which doe?', { field: 'doe_id' });
   const db = c.get('db');
@@ -662,7 +707,7 @@ farmRoutes.post('/litters', write, async (c) => {
 });
 
 /** GET /litters/:id — one kindling record, for reading it back or editing it. */
-farmRoutes.get('/litters/:id', async (c) => {
+farmRoutes.get('/litters/:id', canRead, async (c) => {
   const id = c.req.param('id');
   const row = await c.get('db')(async (client) => {
     const { rows } = await client.query(`
@@ -713,7 +758,7 @@ farmRoutes.get('/litters/:id', async (c) => {
 const LITTER_EDITABLE = ['kindled_on', 'born_alive', 'born_dead', 'notes',
                          'nest_box_placed_on', 'fostered_in', 'fostered_out'];
 
-farmRoutes.patch('/litters/:id', write, async (c) => {
+farmRoutes.patch('/litters/:id', write, canWriteAnimals, async (c) => {
   const id = c.req.param('id');
   const b = await c.req.json();
   const session = c.get('session');
@@ -733,6 +778,8 @@ farmRoutes.patch('/litters/:id', write, async (c) => {
     const { rows: before } = await client.query(
       `SELECT ${LITTER_EDITABLE.join(', ')}, doe_id FROM litter WHERE id = $1`, [id]);
     if (!before.length) throw new HttpError(404, 'No such kindling record');
+
+    await enforceEditWindow(client, session, 'litter', id);
 
     const sets = fields.map((k, i) => `${k} = $${i + 2}`).join(', ');
     const values = fields.map((k) => (b[k] === '' ? null : b[k]));
@@ -791,7 +838,7 @@ farmRoutes.patch('/litters/:id', write, async (c) => {
  * to kindle. Better a blank the farmer fills in at eight weeks than a guess
  * recorded as a fact.
  */
-farmRoutes.post('/litters/:id/kits', write, async (c) => {
+farmRoutes.post('/litters/:id/kits', write, canWriteAnimals, async (c) => {
   const id = c.req.param('id');
   const b = await c.req.json();
   const session = c.get('session');
@@ -885,7 +932,7 @@ farmRoutes.post('/litters/:id/kits', write, async (c) => {
 });
 
 /** GET /litters/:id/kits — the individuals recorded from one litter. */
-farmRoutes.get('/litters/:id/kits', async (c) => {
+farmRoutes.get('/litters/:id/kits', canRead, async (c) => {
   const id = c.req.param('id');
   const result = await c.get('db')(async (client) => {
     const { rows: summary } = await client.query(
@@ -906,7 +953,7 @@ farmRoutes.get('/litters/:id/kits', async (c) => {
 });
 
 /** POST /litters/:id/wean — separating the kits. The KPI moment. */
-farmRoutes.post('/litters/:id/wean', write, async (c) => {
+farmRoutes.post('/litters/:id/wean', write, canWriteAnimals, async (c) => {
   const b = await c.req.json();
   const db = c.get('db');
 
@@ -933,7 +980,7 @@ farmRoutes.post('/litters/:id/wean', write, async (c) => {
 /* ------------------------------------------------------------- conditions -- */
 
 /** GET /conditions — what is currently marked, and what needs looking at now. */
-farmRoutes.get('/conditions', async (c) => {
+farmRoutes.get('/conditions', canRead, async (c) => {
   const db = c.get('db');
   const data = await db(async (client) => {
     const open = await client.query(`
@@ -947,7 +994,7 @@ farmRoutes.get('/conditions', async (c) => {
 });
 
 /** POST /conditions — anyone can report loose motion, no permission needed. */
-farmRoutes.post('/conditions', write, async (c) => {
+farmRoutes.post('/conditions', write, canWriteHealth, async (c) => {
   const b = await c.req.json();
   const db = c.get('db');
   const session = c.get('session');
@@ -993,7 +1040,7 @@ farmRoutes.post('/conditions', write, async (c) => {
  * "Still loose" restarts the 2-hour clock from this observation rather than
  * from onset, so checking the animal is what buys the quiet.
  */
-farmRoutes.post('/conditions/:id/check', write, async (c) => {
+farmRoutes.post('/conditions/:id/check', write, canWriteHealth, async (c) => {
   const b = await c.req.json();
   const status = b.status ?? 'ongoing';
   if (!['ongoing', 'improving', 'worse', 'stopped'].includes(status)) {
@@ -1038,7 +1085,7 @@ farmRoutes.post('/conditions/:id/check', write, async (c) => {
  * around kindling is not catastrophic on its own, but a farm that has stopped
  * giving them has usually stopped doing several things.
  */
-farmRoutes.get('/medication', async (c) => {
+farmRoutes.get('/medication', canRead, async (c) => {
   // Lapsed doses are excluded by default, the same way they are on Today.
   // A dose past its grace period cannot be recorded any more, so listing it as
   // outstanding invites a tap that will not work. `?include=lapsed` is there
@@ -1078,7 +1125,7 @@ farmRoutes.get('/medication', async (c) => {
  * because a farm hand doing the round at six in the morning is not going to
  * care which side of midnight it fell.
  */
-farmRoutes.post('/medication', write, async (c) => {
+farmRoutes.post('/medication', write, canWriteHealth, async (c) => {
   const b = await c.req.json();
   const session = c.get('session');
 
@@ -1130,7 +1177,7 @@ farmRoutes.post('/medication', write, async (c) => {
  * paying still gets told its doe is due to kindle; billing failure must not
  * cost a litter.
  */
-farmRoutes.get('/notifications', async (c) => {
+farmRoutes.get('/notifications', canRead, async (c) => {
   const db = c.get('db');
   const session = c.get('session');
   const unreadOnly = c.req.query('unread') === '1';
@@ -1154,7 +1201,7 @@ farmRoutes.get('/notifications', async (c) => {
 });
 
 /** POST /notifications/read — dismiss, either one or everything. */
-farmRoutes.post('/notifications/read', async (c) => {
+farmRoutes.post('/notifications/read', canRead, async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const db = c.get('db');
   const session = c.get('session');
@@ -1173,7 +1220,7 @@ farmRoutes.post('/notifications/read', async (c) => {
 
 /* --------------------------------------------------------------- settings -- */
 
-farmRoutes.get('/settings', async (c) => {
+farmRoutes.get('/settings', canRead, async (c) => {
   const db = c.get('db');
   const row = await db(async (client) => {
     const { rows } = await client.query('SELECT * FROM farm_settings');
@@ -1183,7 +1230,7 @@ farmRoutes.get('/settings', async (c) => {
 });
 
 /** PATCH /settings — every breeding constant is the farmer's to change. */
-farmRoutes.patch('/settings', write, async (c) => {
+farmRoutes.patch('/settings', write, canWriteSettings, async (c) => {
   const b = await c.req.json();
   const allowed = new Set([
     'gestation_expected_days', 'gestation_window_start_day', 'gestation_window_end_day',

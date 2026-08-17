@@ -48,6 +48,12 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
     await client.query('SELECT id FROM farm ORDER BY id FOR KEY SHARE');
 
     const tasks = await client.query('SELECT generate_due_tasks() AS n');
+    // The engine knows which doe needs a nest box; it does not know who walks
+    // that row. This hands each new task to whoever looks after the shed the
+    // animal is in — and leaves it unassigned where a shed has nobody, or more
+    // than one person, because work that looks assigned and is nobody's is
+    // worse than work on everybody's list.
+    const assigned = await client.query('SELECT assign_tasks_by_section() AS n');
     const notes = await client.query('SELECT generate_notifications() AS n');
     // Sessions nobody can use any more. Expired ones were always rejected at
     // sign-in, so this is housekeeping rather than a fix — but nothing ever
@@ -59,6 +65,7 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
     const result = {
       ok: true,
       tasksCreated: tasks.rows[0].n,
+      tasksAssigned: assigned.rows[0].n,
       notificationsCreated: notes.rows[0].n,
       sessionsPurged: purged.rows[0].n,
       durationMs: Date.now() - started,
