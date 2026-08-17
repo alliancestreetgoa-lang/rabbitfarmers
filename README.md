@@ -38,7 +38,7 @@ with grandfathering enforced in the schema.
 | Super-admin CRM with audit trail | Built, 25 tests |
 | Support impersonation — read-only, an hour, visible to the farm | Built, 13 tests |
 | Scheduler (task generation, 2-hourly reminders, heartbeat) | Built, 25 tests |
-| Expo app — Today, Breeding, Herd, recording, offline outbox | Built, 22 tests against the real API |
+| Expo app — Today, Breeding, Herd, recording, offline outbox | Built, 33 tests — 22 against the real API |
 | Android / iOS binaries | Icons, native config and EAS profiles ready. **No APK built** — needs the Android SDK and a signing key |
 | Netlify deployment | Configured and deployment-ready, **not deployed** |
 | Razorpay billing | Not started — deliberately deferred |

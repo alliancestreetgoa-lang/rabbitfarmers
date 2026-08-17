@@ -6,6 +6,9 @@ import { ApiClient, OfflineError } from './api/client';
 import { Outbox, type OutboxEntry } from './api/outbox';
 import type { Storage } from './api/storage';
 import type { Session } from './api/types';
+import {
+  needsServerAddress, resolveApiUrl, validateServerUrl, type ServerUrlSources,
+} from './api/server-url';
 
 const asyncStorage: Storage = {
   get: (k) => AsyncStorage.getItem(k),
@@ -16,70 +19,26 @@ const asyncStorage: Storage = {
 /** A server address the farmer typed in, on a build that had none. */
 const SERVER_KEY = 'rb.server';
 
-const trimUrl = (u: string) => u.trim().replace(/\/+$/, '');
-
 /**
- * Baked in at build time. An absolute URL wins outright: it is how a native
- * build finds the server, and how a developer points a web build at localhost.
+ * Every global the address resolution depends on, read in one place.
  *
- * Two sources, and the order matters.
+ * `process.env.EXPO_PUBLIC_API_URL` is spelled out in full deliberately: Metro
+ * substitutes the value by matching that exact expression while it builds the
+ * bundle, so any indirection — a variable, a lookup, destructuring — reads back
+ * undefined and the address silently vanishes from an APK.
  *
- * `process.env.EXPO_PUBLIC_API_URL` is substituted into the JavaScript by Metro
- * when the bundle is built, so it travels *in the bundle*. It has to be written
- * out in full like this — Metro matches the literal expression, and any
- * indirection reads back undefined.
- *
- * `Constants.expoConfig.extra` does not travel in the bundle on native. It
- * comes from an app.config embedded during the native build, which for an EAS
- * build happens on Expo's machines — so it only carries a value if eas.json's
- * `env` had one. Both paths are needed: the second is what a `expo start`
- * session and the web build use, the first is what makes an APK independent of
- * how the native half was configured.
+ * The decisions themselves are in api/server-url.ts, which takes these as
+ * arguments and is therefore testable without a React Native runtime.
  */
-function bakedApiUrl(): string | null {
-  const fromBundle = process.env.EXPO_PUBLIC_API_URL;
-  if (fromBundle?.startsWith('http')) return trimUrl(fromBundle);
-
-  const fromConfig = (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl;
-  return fromConfig?.startsWith('http') ? trimUrl(fromConfig) : null;
-}
-
-/**
- * The origin that served the page. Netlify puts the app and the function on one
- * site, so `/api` here is the same deploy — which is why one web build works on
- * a preview, a branch deploy and production without being told which it is.
- */
-function sameOriginApiUrl(): string | null {
-  if (typeof window !== 'undefined' && window.location) return `${window.location.origin}/api`;
-  return null;
-}
-
-/**
- * Where the API lives, in order: baked in, then typed in, then the origin that
- * served the page, then the dev server for a bare Node process in tests.
- */
-function resolveApiUrl(stored?: string | null): string {
-  return bakedApiUrl()
-    ?? (stored ? trimUrl(stored) : null)
-    ?? sameOriginApiUrl()
-    ?? 'http://localhost:3000';
-}
-
-/**
- * An installed app has no origin to fall back on.
- *
- * A web build is served by the same site as the API, so it can work that out
- * for itself. An APK cannot: it is a file on a phone, and unless the address
- * was compiled into it there is nothing to ask. Left unhandled that is an app
- * which installs, opens, and silently fails every request — the worst possible
- * first five minutes.
- *
- * So a build with no address asks for one, once, on the sign-in screen. Setting
- * EXPO_PUBLIC_API_URL at build time is still the right answer for an app handed
- * to farmers; this is what makes a build without it usable rather than inert.
- */
-function needsServerAddress(): boolean {
-  return bakedApiUrl() === null && sameOriginApiUrl() === null;
+function sources(stored?: string | null): ServerUrlSources {
+  return {
+    fromBundle: process.env.EXPO_PUBLIC_API_URL ?? null,
+    fromConfig: (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ?? null,
+    stored: stored ?? null,
+    origin: typeof window !== 'undefined' && window.location
+      ? window.location.origin
+      : null,
+  };
 }
 
 /**
@@ -130,10 +89,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [pending, setPending] = useState<OutboxEntry[]>([]);
   const [offline, setOffline] = useState(false);
-  const [serverUrl, setServerUrlState] = useState(() => resolveApiUrl());
+  const [serverUrl, setServerUrlState] = useState(() => resolveApiUrl(sources()));
 
   const client = useMemo(() => new ApiClient({
-    baseUrl: resolveApiUrl(),
+    baseUrl: resolveApiUrl(sources()),
     storage: asyncStorage,
     onSignedOut: () => setSession(null),
   }), []);
@@ -149,7 +108,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // its server is on a previous run, and the session below is about to be
       // checked against it.
       const stored = await asyncStorage.get(SERVER_KEY);
-      const url = resolveApiUrl(stored);
+      const url = resolveApiUrl(sources(stored));
       client.setBaseUrl(url);
       setServerUrlState(url);
 
@@ -212,10 +171,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * typing it is a farmer reading a URL off a piece of paper.
    */
   const setServerUrl = useCallback(async (input: string) => {
-    const url = trimUrl(input);
-    if (!/^https?:\/\/.+/i.test(url)) {
-      throw new Error('That should start with https:// and be the address of your Rabbitry site');
-    }
+    const url = validateServerUrl(input);
 
     // /health is unauthenticated and cheap, and answering it is exactly the
     // thing being checked.
@@ -234,7 +190,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const value: AppState = {
     ready, session, readOnly: !!session?.support, client, outbox, pending, offline,
     signIn, signUp, signOut, setOffline, refreshOutbox,
-    serverUrl, canSetServer: needsServerAddress(), setServerUrl,
+    serverUrl, canSetServer: needsServerAddress(sources()), setServerUrl,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
