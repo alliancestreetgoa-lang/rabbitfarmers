@@ -38,7 +38,35 @@ is testable rather than inert.
 
 ---
 
-## Build it on EAS (no local Android SDK)
+## Build it from GitHub (nothing installed at all)
+
+`.github/workflows/android-apk.yml` runs the EAS build for you. Manual trigger
+only — never on a push, because an APK is something you ask for.
+
+Once, in the browser:
+
+1. An Expo account at [expo.dev](https://expo.dev).
+2. A project on it. Either `eas init` from `apps/mobile` on any machine, or
+   expo.dev → Projects → Create. Copy the project id.
+3. Two repository secrets under **Settings → Secrets and variables → Actions**:
+
+   | Secret | Where it comes from |
+   |---|---|
+   | `EXPO_TOKEN` | expo.dev → account settings → Access tokens |
+   | `EAS_PROJECT_ID` | the project id from step 2 |
+
+Then **Actions → Android APK → Run workflow**, and give it your site's address.
+The APK comes back as a downloadable workflow artifact, and also sits on
+expo.dev with a QR code you can scan straight from the phone.
+
+The workflow bundles for Android before it queues the EAS build. That is the
+step that fails for a reason in *this* repository — a bad import, a version
+mismatch, an asset that is not where the config says — and catching it locally
+costs seconds instead of a twenty-minute queue.
+
+---
+
+## Build it on EAS from your machine (no local Android SDK)
 
 Expo's builders have the SDK, the NDK and a keystore. This is the shortest path
 from nothing to an APK on a phone.

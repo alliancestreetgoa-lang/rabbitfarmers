@@ -1,0 +1,107 @@
+# Build an installable Android APK on Expo's builders.
+#
+# Manual only — never on a push. Building costs a queue slot on the free tier,
+# and an APK is something you ask for, not something that should appear because
+# somebody fixed a typo.
+#
+# What you need first, once:
+#
+#   1. An Expo account. https://expo.dev
+#   2. A project on it. Either `eas init` from apps/mobile on any machine, or
+#      create one in the browser at expo.dev → Projects → Create. Copy its ID.
+#   3. Two repository secrets, under Settings → Secrets and variables → Actions:
+#        EXPO_TOKEN       expo.dev → account settings → Access tokens
+#        EAS_PROJECT_ID   the project id from step 2
+#
+# Then: Actions → Android APK → Run workflow, and give it the address of your
+# deployed site. The APK comes back as a workflow artifact you can download,
+# and also stays on expo.dev with a QR code you can scan from the phone.
+name: Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: >-
+          Your deployed API, e.g. https://yourfarm.netlify.app/api — compiled
+          into the build. Leave blank and the app asks for it on first run.
+        required: false
+        default: ''
+      profile:
+        description: 'preview = .apk you can install · production = .aab for Play'
+        required: true
+        default: preview
+        type: choice
+        options: [preview, production]
+
+jobs:
+  build:
+    name: Build ${{ inputs.profile }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail here rather than four minutes in, with a sentence that says what
+      # to do about it.
+      - name: Check the secrets are set
+        run: |
+          missing=
+          [ -n "${{ secrets.EXPO_TOKEN }}" ]     || missing="$missing EXPO_TOKEN"
+          [ -n "${{ secrets.EAS_PROJECT_ID }}" ] || missing="$missing EAS_PROJECT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing"
+            echo "Add them under Settings → Secrets and variables → Actions."
+            echo "EXPO_TOKEN comes from expo.dev → account settings → Access tokens."
+            echo "EAS_PROJECT_ID is the project id from \`eas init\`, or from expo.dev → Projects."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+
+      # Bundling is where a build fails for a reason in this repository rather
+      # than a reason on Expo's side — a bad import, a version mismatch, an
+      # asset that is not where the config says. Catching it here costs seconds;
+      # catching it on EAS costs a twenty-minute queue.
+      - name: Bundle for Android first
+        run: npx expo export --platform android --output-dir /tmp/preflight
+        env:
+          EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
+          EXPO_PUBLIC_API_URL: ${{ inputs.api_url }}
+
+      - name: Build on EAS
+        id: eas
+        run: eas build --platform android --profile ${{ inputs.profile }} --non-interactive --wait --json | tee build.json
+        env:
+          EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
+          # Overrides the empty value in eas.json. An APK with no address
+          # compiled in still works — it asks on the sign-in screen — but an
+          # app handed to farmers should not have to.
+          EXPO_PUBLIC_API_URL: ${{ inputs.api_url }}
+
+      - name: Fetch the binary
+        run: |
+          url=$(node -e "process.stdout.write(require('./build.json')[0].artifacts.buildUrl)")
+          echo "Built: $url"
+          curl -fsSL -o "rabbitry-${{ inputs.profile }}.${{ inputs.profile == 'production' && 'aab' || 'apk' }}" "$url"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rabbitry-android-${{ inputs.profile }}
+          path: apps/mobile/rabbitry-*.a*
+          if-no-files-found: error
+          retention-days: 30

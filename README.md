@@ -87,8 +87,9 @@ the app — which is why the app opens on Today rather than a dashboard.
 home screen from the browser. There is no APK in the repo: the icons, the native
 config and the EAS build profiles are here, but producing a binary needs the
 Android SDK and a signing key, and neither belongs in git. One command on a
-machine that has them — see
-[docs/12-android-and-ios-builds.md](docs/12-android-and-ios-builds.md).
+machine that has them, or none at all: **Actions → Android APK → Run workflow**
+builds it on Expo's servers and hands back a downloadable APK, once two secrets
+are set. See [docs/12-android-and-ios-builds.md](docs/12-android-and-ios-builds.md).
 
 ## Documents
 
