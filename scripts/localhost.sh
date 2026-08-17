@@ -227,6 +227,7 @@ $bold  Rabbitry is running.$reset
 
   the farmer's app     http://localhost:${SITE_PORT}
   the admin console    http://localhost:${SITE_PORT}/admin/login
+  the money screen     http://localhost:${SITE_PORT}/admin/billing
 
   admin                ${ADMIN_EMAIL}
                        ${ADMIN_PASSWORD}

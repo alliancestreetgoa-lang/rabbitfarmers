@@ -60,6 +60,10 @@ const PATHS = {
   '/admin': 'function',
   '/admin/login': 'function',
   '/admin/farms/abc': 'function',
+  // The platform's money screen. Its name collides with the farmer's /billing
+  // screen in the app, and only the /admin prefix keeps them apart.
+  '/admin/billing': 'function',
+  '/admin/billing/webhooks/evt_1': 'function',
   '/scheduler/run': 'function',
   '/scheduler/health': 'function',
   '/health': 'function',

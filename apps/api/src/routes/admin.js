@@ -1,88 +1,14 @@
 import { Hono } from 'hono';
 import { adminQuery } from '../db.js';
-import {
-  hashPassword, verifyPassword, newSessionToken, hashToken, HttpError,
-} from '../auth.js';
+import { hashPassword, verifyPassword, newSessionToken, hashToken, HttpError } from '../auth.js';
 import { renderLogin, renderFarms, renderFarm, renderImpersonation } from '../admin-ui.js';
+import {
+  ADMIN_COOKIE, ADMIN_SESSION_HOURS, readAdminToken, issueAdminSession,
+  requireAdmin, requireAdminRole, audit, readBody, wantsJson,
+} from '../admin-auth.js';
+import { adminBillingRoutes } from './admin-billing.js';
 
 export const adminRoutes = new Hono();
-
-const ADMIN_COOKIE = 'rb_admin';
-// Deliberately short. Farm staff get 30 days because they are in a shed; the
-// account that can read every farm on the platform does not.
-const ADMIN_SESSION_HOURS = 8;
-
-/* ------------------------------------------------------------------ auth -- */
-
-function readAdminToken(c) {
-  const auth = c.req.header('authorization');
-  if (auth?.startsWith('Bearer ')) return auth.slice(7).trim();
-  const cookie = c.req.header('cookie') ?? '';
-  for (const part of cookie.split(';')) {
-    const [k, ...v] = part.trim().split('=');
-    if (k === ADMIN_COOKIE) return decodeURIComponent(v.join('='));
-  }
-  return null;
-}
-
-// Admin sessions live in the database, not in a Map. On serverless each request
-// may hit a different instance, and an in-memory session store means the admin
-// console signs you out at random. They also get their own table rather than
-// sharing user_session, because platform admins are not tenants.
-async function issueAdminSession(adminId, ip, userAgent) {
-  const { token, hash } = newSessionToken();
-  await adminQuery(`
-    INSERT INTO admin_session (admin_id, token_hash, expires_at, ip, user_agent)
-    VALUES ($1, $2, now() + make_interval(hours => $3), $4, $5)`,
-    [adminId, hash, ADMIN_SESSION_HOURS, ip || null, userAgent ?? null]);
-  return token;
-}
-
-async function requireAdmin(c, next) {
-  const token = readAdminToken(c);
-  const wantsHtml = c.req.header('accept')?.includes('text/html');
-
-  if (!token) {
-    if (wantsHtml) return c.redirect('/admin/login');
-    throw new HttpError(401, 'Admin sign-in required');
-  }
-
-  const { rows } = await adminQuery(`
-    SELECT p.id, p.email, p.full_name, p.role
-    FROM admin_session s
-    JOIN platform_admin p ON p.id = s.admin_id
-    WHERE s.token_hash = $1
-      AND s.revoked_at IS NULL
-      AND s.expires_at > now()
-      AND p.is_active`, [hashToken(token)]);
-
-  if (!rows.length) {
-    if (wantsHtml) return c.redirect('/admin/login');
-    throw new HttpError(401, 'Admin sign-in required');
-  }
-  c.set('admin', rows[0]);
-  await next();
-}
-
-function requireAdminRole(...roles) {
-  return async (c, next) => {
-    const admin = c.get('admin');
-    if (!roles.includes(admin.role)) {
-      throw new HttpError(403, `This action needs the ${roles.join(' or ')} role`);
-    }
-    await next();
-  };
-}
-
-/** Every admin action against a farm lands here. Append-only, reason required. */
-async function audit(admin, action, farmId, before, after, reason, ip, table = 'subscription') {
-  await adminQuery(`
-    INSERT INTO admin_audit_log (admin_id, action, target_farm_id, target_table,
-                                 before_value, after_value, reason, ip)
-    VALUES ($1,$2,$3,$8,$4,$5,$6,$7)`,
-    [admin.id, action, farmId, before ? JSON.stringify(before) : null,
-     after ? JSON.stringify(after) : null, reason ?? null, ip ?? null, table]);
-}
 
 /* ------------------------------------------------------------------ pages -- */
 
@@ -132,6 +58,15 @@ adminRoutes.post('/logout', async (c) => {
 adminRoutes.use('/farms', requireAdmin);
 adminRoutes.use('/farms/*', requireAdmin);
 adminRoutes.use('/api/*', requireAdmin);
+/*
+ * The money screen. Guarded here rather than inside its own router, so that the
+ * one line that decides whether the platform's revenue is public sits in the
+ * same place as the others — an admin surface that is missing its guard is not
+ * something to discover by reading two files.
+ */
+adminRoutes.use('/billing', requireAdmin);
+adminRoutes.use('/billing/*', requireAdmin);
+adminRoutes.route('/billing', adminBillingRoutes);
 
 /* ------------------------------------------------------------------ farms -- */
 
@@ -159,7 +94,7 @@ adminRoutes.get('/farms', async (c) => {
 
 adminRoutes.get('/farms/:id', async (c) => {
   const id = c.req.param('id');
-  const [farm, audit_, subs] = await Promise.all([
+  const [farm, audit_, subs, payments] = await Promise.all([
     adminQuery('SELECT * FROM v_admin_farm_overview WHERE farm_id = $1', [id])
       .then((r) => r.rows[0]),
     adminQuery(`SELECT a.*, p.full_name AS admin_name FROM admin_audit_log a
@@ -167,10 +102,23 @@ adminRoutes.get('/farms/:id', async (c) => {
                 WHERE a.target_farm_id = $1 ORDER BY a.at DESC LIMIT 50`, [id])
       .then((r) => r.rows),
     adminQuery('SELECT * FROM subscription WHERE farm_id = $1', [id]).then((r) => r.rows[0]),
+    /*
+     * This farm's money, on this farm's page. Every admin sees it, including
+     * support — "did my payment go through" is the call support takes, and
+     * sending them to a separate screen they are not allowed into to answer it
+     * is how a farmer ends up on hold. The platform-wide totals are a different
+     * question and stay behind the billing role.
+     */
+    adminQuery(`SELECT * FROM v_admin_payment WHERE farm_id = $1
+                 ORDER BY created_at DESC LIMIT 24`, [id]).then((r) => r.rows),
   ]);
   if (!farm) throw new HttpError(404, 'Farm not found');
-  if (c.req.query('format') === 'json') return c.json({ farm, audit: audit_, subscription: subs });
-  return c.html(renderFarm({ farm, audit: audit_, subscription: subs, admin: c.get('admin') }));
+  if (c.req.query('format') === 'json') {
+    return c.json({ farm, audit: audit_, subscription: subs, payments });
+  }
+  return c.html(renderFarm({
+    farm, audit: audit_, subscription: subs, payments, admin: c.get('admin'),
+  }));
 });
 
 /* ----------------------------------------------------- subscription actions -- */
@@ -360,6 +308,74 @@ adminRoutes.post('/farms/:id/impersonate',
       });
     }
     return c.html(renderImpersonation(started));
+  });
+
+/**
+ * POST /admin/farms/:id/record_payment — money that arrived outside Razorpay.
+ *
+ * Farmers pay by UPI to a phone number and by bank transfer, and then they
+ * call. Before this the only way to credit that was `activate`, which sets a
+ * period end and leaves no payment row and no invoice — the money is in a bank
+ * statement and nowhere in this system, and the GST return is short by ₹999.
+ *
+ * The work is billing_record_offline_payment, which sends it through the same
+ * function Razorpay's webhook calls, so an offline payment extends a period and
+ * takes an invoice number by exactly the same rules as an online one.
+ *
+ * Registered above /farms/:id/:action for the reason the three routes above it
+ * are: Hono matches in registration order, and below the wildcard this would
+ * answer `Unknown action "record_payment"`.
+ */
+adminRoutes.post('/farms/:id/record_payment',
+  requireAdminRole('superadmin', 'billing'), async (c) => {
+    const admin = c.get('admin');
+    const farmId = c.req.param('id');
+    const body = await readBody(c);
+
+    const reason = String(body.reason ?? '').trim();
+    if (!reason) throw new HttpError(400, 'A reason is required to record a payment');
+
+    const period = String(body.billing_period ?? 'yearly');
+    if (!['monthly', 'yearly'].includes(period)) {
+      throw new HttpError(400, 'Billing period must be monthly or yearly',
+        { field: 'billing_period' });
+    }
+
+    // Blank means "what this farm actually pays", which is the locked price
+    // rather than today's list price. Typing the number by hand is for the case
+    // where a farmer sent a different amount, which happens.
+    const amount = String(body.amount_paise ?? '').trim();
+    if (amount && !/^\d+$/.test(amount)) {
+      throw new HttpError(400, 'Amount must be a whole number of paise',
+        { field: 'amount_paise' });
+    }
+
+    const before = await adminQuery(
+      'SELECT status, current_period_end FROM subscription WHERE farm_id = $1',
+      [farmId]).then((r) => r.rows[0]);
+    if (!before) throw new HttpError(404, 'That farm has no subscription');
+
+    let applied;
+    try {
+      const { rows } = await adminQuery(
+        'SELECT * FROM billing_record_offline_payment($1, $2::billing_period_t, $3, $4)',
+        [farmId, period, amount ? Number(amount) : null,
+         String(body.reference ?? '').trim() || null]);
+      applied = rows[0];
+    } catch (err) {
+      // The function raises for a farm with no subscription and for a farm with
+      // no price. Both are things a person can act on, so say which.
+      throw new HttpError(409, String(err.message ?? err).replace(/^ERROR:\s*/, ''));
+    }
+
+    await audit(admin, 'record_payment', farmId, before,
+      { amount_paise: applied.amount_paise, billing_period: period,
+        reference: String(body.reference ?? '').trim() || null,
+        invoice_number: applied.invoice_number, period_end: applied.period_end },
+      reason, c.req.header('x-forwarded-for') ?? null, 'payment');
+
+    if (wantsJson(c)) return c.json({ ok: true, payment: applied }, 201);
+    return c.redirect(`/admin/farms/${farmId}`);
   });
 
 adminRoutes.post('/farms/:id/:action', async (c) => {

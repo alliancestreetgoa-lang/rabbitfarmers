@@ -309,10 +309,14 @@ describe('the webhook is the only thing that can be trusted', () => {
     assert.equal(rows[0].n, 1);
   });
 
-  test('a link that belongs to nobody is ignored quietly', async () => {
+  test('a link that belongs to nobody is accepted and flagged', async () => {
     const res = await webhook(paidEvent('plink_not_ours', 99900), { eventId: evt('orphan') });
     assert.equal(res.status, 200, 'answer 200 or Razorpay retries it for a day');
-    assert.equal(res.body.result, 'already applied');
+    // Not "already applied". Somebody paid a link this system has no payment
+    // row for, which means money arrived that cannot be attributed to a farm —
+    // and it is this string the admin billing screen shows the person working
+    // out where it went.
+    assert.equal(res.body.result, 'no matching payment');
   });
 
   test('paying the wrong amount is not a payment', async () => {

@@ -230,6 +230,14 @@ ok "POST /admin/login — signed in, session stored in the database"
 curl -fsS -b "$JAR" -H 'accept: text/html' localhost:$PORT/admin/farms \
   | grep -q 'Verify Farm' || die "admin console did not list the new farm"
 ok "GET /admin/farms — the farm signed up above is listed"
+
+# The money screen renders and, more to the point, is not readable without the
+# session cookie. It shows what the whole platform earns.
+curl -fsS -b "$JAR" -H 'accept: text/html' localhost:$PORT/admin/billing \
+  | grep -q 'Needs attention' || die "the billing screen did not render"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' localhost:$PORT/admin/billing)
+[ "$CODE" = "401" ] || die "the billing screen answered $CODE without a session, expected 401"
+ok "GET /admin/billing — renders signed in, 401 signed out"
 rm -f "$JAR"
 
 printf '\n%s%sEverything verified.%s\n' "$bold" "$green" "$reset"

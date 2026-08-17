@@ -13,6 +13,72 @@ export const billingRoutes = new Hono();
 /* ------------------------------------------------------------- webhook -- */
 
 /**
+ * What a Razorpay event actually does to our records.
+ *
+ * Separated from the route because the admin console can replay a stored
+ * delivery — one that arrived while the database was down, say — and a replay
+ * that went through a second copy of these rules would be a second set of rules
+ * to keep in step. Everything it calls is idempotent, which is what makes a
+ * replay safe to run twice.
+ *
+ * The signature check and the once-only guard stay in the route. They are about
+ * whether to believe a request; this is about what a believed event means.
+ */
+export async function applyWebhookEvent(body) {
+  const event = String(body?.event ?? 'unknown');
+  const link = body?.payload?.payment_link?.entity;
+  const payment = body?.payload?.payment?.entity;
+
+  if (event === 'payment_link.paid' && link?.id) {
+    const applied = await adminQuery(
+      'SELECT * FROM billing_apply_payment($1,$2,$3)',
+      [link.id, payment?.id ?? link.id, link.amount ?? null]);
+    const row = applied.rows[0];
+    /*
+     * Three outcomes, and they are worth telling apart because this string is
+     * what the billing screen shows a person doing a reconciliation. A retry of
+     * something already paid is routine; a paid link we have no payment row for
+     * means money arrived that this system cannot attribute to a farm, and
+     * calling that "already applied" would hide it.
+     */
+    return {
+      farmId: row?.farm_id ?? null,
+      result: row?.applied ? 'applied'
+        : row?.farm_id ? 'already applied'
+        : 'no matching payment',
+    };
+  }
+
+  if ((event === 'payment_link.cancelled' || event === 'payment_link.expired') && link?.id) {
+    const upd = await adminQuery(`
+      UPDATE payment SET status = 'cancelled'
+       WHERE gateway_link_id = $1 AND status = 'created'
+      RETURNING farm_id`, [link.id]);
+    return {
+      farmId: upd.rows[0]?.farm_id ?? null,
+      result: upd.rowCount ? 'cancelled' : 'nothing to cancel',
+    };
+  }
+
+  if (event === 'payment.failed' && payment?.id) {
+    /*
+     * Noted, not acted on. A failed attempt is not a lapse — the farmer's card
+     * was declined and they will try again in a minute, and downgrading them
+     * for it would lock somebody out mid-round for a bank's decision. The
+     * period end is what decides access, and it has not moved.
+     */
+    const upd = await adminQuery(`
+      UPDATE payment SET failed_reason = $2
+       WHERE gateway_payment_id = $1 OR gateway_link_id = $1
+      RETURNING farm_id`,
+      [payment.id, payment.error_description ?? 'payment failed']);
+    return { farmId: upd.rows[0]?.farm_id ?? null, result: 'noted' };
+  }
+
+  return { farmId: null, result: 'ignored' };
+}
+
+/**
  * POST /webhooks/razorpay
  *
  * The only route here that is not behind a session, because Razorpay's servers
@@ -67,43 +133,11 @@ billingRoutes.post('/webhooks/razorpay', async (c) => {
     return c.json({ ok: true, duplicate: true });
   }
 
-  let result = 'ignored';
-  let farmId = null;
+  let result;
+  let farmId;
 
   try {
-    const link = body?.payload?.payment_link?.entity;
-    const payment = body?.payload?.payment?.entity;
-
-    if (event === 'payment_link.paid' && link?.id) {
-      const applied = await adminQuery(
-        'SELECT * FROM billing_apply_payment($1,$2,$3)',
-        [link.id, payment?.id ?? link.id, link.amount ?? null]);
-      farmId = applied.rows[0]?.farm_id ?? null;
-      result = applied.rows[0]?.applied ? 'applied' : 'already applied';
-    } else if ((event === 'payment_link.cancelled' || event === 'payment_link.expired')
-               && link?.id) {
-      const upd = await adminQuery(`
-        UPDATE payment SET status = $2::payment_status_t
-         WHERE gateway_link_id = $1 AND status = 'created'
-        RETURNING farm_id`,
-        [link.id, event.endsWith('expired') ? 'cancelled' : 'cancelled']);
-      farmId = upd.rows[0]?.farm_id ?? null;
-      result = upd.rowCount ? 'cancelled' : 'nothing to cancel';
-    } else if (event === 'payment.failed' && payment?.id) {
-      const upd = await adminQuery(`
-        UPDATE payment SET failed_reason = $2
-         WHERE gateway_payment_id = $1 OR gateway_link_id = $1
-        RETURNING farm_id`,
-        [payment.id, payment.error_description ?? 'payment failed']);
-      farmId = upd.rows[0]?.farm_id ?? null;
-      result = 'noted';
-      /*
-       * Noted, not acted on. A failed attempt is not a lapse — the farmer's
-       * card was declined and they will try again in a minute, and downgrading
-       * them for it would lock somebody out mid-round for a bank's decision.
-       * The period end is what decides access, and it has not moved.
-       */
-    }
+    ({ result, farmId } = await applyWebhookEvent(body));
   } catch (err) {
     result = `error: ${String(err.message ?? err).slice(0, 200)}`;
     await adminQuery(

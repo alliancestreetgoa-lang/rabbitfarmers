@@ -10,6 +10,10 @@ const esc = (v) => String(v ?? '')
 const rupees = (paise) =>
   paise == null ? '—' : `₹${(paise / 100).toLocaleString('en-IN')}`;
 
+/** Timestamps as 'YYYY-MM-DD HH:MM'. UTC, and labelled as such where it shows. */
+const when = (ts) =>
+  ts == null ? '—' : new Date(ts).toISOString().slice(0, 16).replace('T', ' ');
+
 const STYLE = `
   :root {
     --ground:#F6F8F4; --surface:#fff; --ink:#1B211D; --muted:#6E7A72;
@@ -67,6 +71,18 @@ const STYLE = `
     border:1px solid var(--rule);padding:28px}
   .login form{display:flex;flex-direction:column;gap:12px}
   .err{background:var(--crit-bg);color:var(--crit);padding:10px 12px;font-size:14px;margin-bottom:14px}
+  nav a{margin-right:16px;font:13px/1 ui-monospace,monospace;letter-spacing:.06em;
+    text-transform:uppercase}
+  nav a[aria-current]{color:var(--ink);text-decoration:none;border-bottom:2px solid var(--ink);
+    padding-bottom:3px}
+  .bar{background:var(--rule);height:9px;min-width:1px}
+  .quiet{background:var(--surface);border:1px solid var(--rule);padding:14px 16px;
+    color:var(--muted);font-size:14.5px}
+  form.rowform{display:flex;gap:6px;align-items:center;margin:0}
+  form.rowform input{padding:5px 8px;font-size:13px;max-width:170px}
+  form.rowform button{padding:5px 10px;font-size:13px}
+  pre{background:var(--surface);border:1px solid var(--rule);padding:14px;overflow-x:auto;
+    font:12.5px/1.5 ui-monospace,monospace}
 `;
 
 function page(title, body) {
@@ -105,6 +121,24 @@ const seen = (days) => {
   return `${days}d`;
 };
 
+/**
+ * The two screens, and only the ones this admin can open.
+ *
+ * A link to a page that answers 403 is worse than no link: it teaches whoever
+ * is on the support rota that the console is broken, and they stop trusting the
+ * next thing it tells them.
+ */
+function nav(here, admin) {
+  const links = [['/admin/farms', 'Farms', 'farms', true]];
+  if (['superadmin', 'billing'].includes(admin?.role)) {
+    links.push(['/admin/billing', 'Billing', 'billing', true]);
+  }
+  return `<nav style="display:inline">${links
+    .map(([href, label, key]) =>
+      `<a href="${href}"${here === key ? ' aria-current="page"' : ''}>${label}</a>`)
+    .join('')}</nav>`;
+}
+
 export function renderFarms({ farms, summary, q, status, admin }) {
   const s = summary ?? {};
   const rows = farms.map((f) => `
@@ -122,7 +156,7 @@ export function renderFarms({ farms, summary, q, status, admin }) {
   return page('Farms — Rabbitry admin', `
     <header>
       <h1>Farms</h1>
-      <div class="muted">${esc(admin?.full_name ?? '')} · ${esc(admin?.role ?? '')}
+      <div class="muted">${nav('farms', admin)}${esc(admin?.full_name ?? '')} · ${esc(admin?.role ?? '')}
         · <form method="post" action="/admin/logout" style="display:inline">
             <button class="ghost" type="submit" style="padding:2px 8px">Sign out</button>
           </form></div>
@@ -154,6 +188,227 @@ export function renderFarms({ farms, summary, q, status, admin }) {
     <p class="muted" style="margin-top:14px">
       “Last seen” is the column that matters most — a farm that has written nothing
       in two weeks is churning whether or not it is still paying.</p>`);
+}
+
+/* ---------------------------------------------------------------- billing -- */
+
+const payPill = (status) => {
+  const cls = { paid: 'ok', created: 'warn', failed: 'crit',
+    cancelled: 'crit', refunded: 'warn' }[status] ?? 'warn';
+  return `<span class="pill ${cls}">${esc(status)}</span>`;
+};
+
+const EXCEPTION_LABEL = {
+  paid_but_locked_out: 'Paid, still locked out',
+  paid_no_invoice: 'No invoice',
+  webhook_failed: 'Webhook failed',
+  unattributed_payment: 'Unattributed payment',
+  amount_mismatch: 'Wrong amount',
+  abandoned_link: 'Link never paid',
+};
+
+/**
+ * The money screen.
+ *
+ * Ordered by what somebody has to do rather than by what is pleasant to look
+ * at: the things that have gone wrong first, then the farms to talk to this
+ * week, then the ledger, then the totals. Revenue is the last thing on the page
+ * because it is the one number that never needs anybody to act.
+ */
+export function renderBilling({ summary, revenue, exceptions, renewals, payments,
+                                fy, months, filters, admin }) {
+  const s = summary ?? {};
+  const r = revenue ?? {};
+  const f = filters ?? {};
+
+  /* Everything that has gone wrong with money, worst first. */
+  const exceptionRows = exceptions.map((x) => `
+    <tr>
+      <td><span class="pill ${x.severity === 1 ? 'crit' : x.severity === 2 ? 'warn' : ''}">
+            ${esc(EXCEPTION_LABEL[x.kind] ?? x.kind)}</span></td>
+      <td>${x.farm_id
+            ? `<a href="/admin/farms/${esc(x.farm_id)}">${esc(x.farm_name)}</a>`
+            : '<span class="muted">no farm</span>'}</td>
+      <td>${esc(x.detail)}</td>
+      <td class="num">${when(x.at)}</td>
+      <td>${['webhook_failed', 'unattributed_payment'].includes(x.kind) ? `
+        <form class="rowform" method="post" action="/admin/billing/webhooks/${esc(x.ref)}/replay">
+          <input name="reason" placeholder="Reason" required>
+          <button type="submit">Replay</button>
+        </form>
+        <div class="muted" style="margin-top:4px">
+          <a href="/admin/billing/webhooks/${esc(x.ref)}">payload</a></div>` : ''}</td>
+    </tr>`).join('');
+
+  /* Who to ring this week. */
+  const renewalRows = renewals.map((x) => `
+    <tr>
+      <td><a href="/admin/farms/${esc(x.farm_id)}">${esc(x.farm_name)}</a>
+          <div class="muted">${esc(x.owner_name ?? '')} · ${esc(x.owner_phone ?? '')}</div></td>
+      <td><span class="pill ${x.kind === 'trial_ending' ? 'warn' : 'ok'}">
+            ${x.kind === 'trial_ending' ? 'trial ends' : 'renews'}</span></td>
+      <td class="num">${esc(x.due_on)}
+          <div class="muted">${x.days_left < 0 ? `${-x.days_left}d overdue` : `in ${x.days_left}d`}</div></td>
+      <td class="num">${rupees(x.renewal_paise)}
+          <div class="muted">${esc(x.billing_period ?? '')}</div></td>
+      <td>${statusPill(x.status)}${x.access === 'read_only'
+            ? ' <span class="pill crit">locked out</span>' : ''}</td>
+      <td>${x.has_open_link ? '<span class="pill warn">link open</span>' : ''}
+          <div class="muted">${seen(x.days_since_activity)}</div></td>
+    </tr>`).join('');
+
+  const paymentRows = payments.map((p) => `
+    <tr>
+      <td class="num">${when(p.created_at)}
+          ${p.paid_at ? `<div class="muted">paid ${when(p.paid_at)}</div>` : ''}</td>
+      <td><a href="/admin/farms/${esc(p.farm_id)}">${esc(p.farm_name)}</a>
+          ${p.gateway !== 'razorpay' ? `<div class="muted">${esc(p.gateway)}</div>` : ''}</td>
+      <td class="num">${rupees(p.amount_paise)}
+          <div class="muted">${esc(p.billing_period)} · ${p.covers_days}d</div></td>
+      <td>${payPill(p.status)}
+          ${p.failed_reason ? `<div class="muted">${esc(p.failed_reason)}</div>` : ''}</td>
+      <td>${p.invoice_number
+            ? `<code>${esc(p.invoice_number)}</code>
+               <div class="muted">${rupees(p.subtotal_paise)} + ${rupees(p.tax_paise)} GST</div>`
+            : (p.status === 'paid'
+                ? '<span class="pill crit">missing</span>' : '<span class="muted">—</span>')}</td>
+      <td class="muted">${esc(p.gateway_payment_id ?? p.gateway_link_id ?? '')}</td>
+    </tr>`).join('');
+
+  /*
+   * Twelve months, drawn. The number is in the row already; the bar is there so
+   * that a month where collections halved is visible without reading any of
+   * them.
+   */
+  const peak = Math.max(1, ...months.map((m) => Number(m.total_paise)));
+  const monthRows = months.map((m) => `
+    <tr>
+      <td class="num">${esc(String(m.month).slice(0, 7))}</td>
+      <td style="width:60%"><div class="bar" style="width:${
+        Math.round((Number(m.total_paise) / peak) * 100)}%;
+        background:${m.total_paise ? 'var(--accent)' : 'var(--rule)'}"></div></td>
+      <td class="num">${rupees(m.total_paise)}</td>
+      <td class="num muted">${m.invoices}</td>
+    </tr>`).join('');
+
+  const fyRows = fy.map((y) => `
+    <tr>
+      <td class="num">${esc(y.financial_year)}</td>
+      <td class="num">${y.invoices}</td>
+      <td class="num">${rupees(y.taxable_paise)}</td>
+      <td class="num">${rupees(y.tax_paise)}</td>
+      <td class="num">${rupees(y.total_paise)}</td>
+      <td class="muted"><code>${esc(y.first_number)}</code> → <code>${esc(y.last_number)}</code></td>
+    </tr>`).join('');
+
+  return page('Billing — Rabbitry admin', `
+    <header>
+      <h1>Billing</h1>
+      <div class="muted">${nav('billing', admin)}${esc(admin?.full_name ?? '')} · ${esc(admin?.role ?? '')}
+        · <form method="post" action="/admin/logout" style="display:inline">
+            <button class="ghost" type="submit" style="padding:2px 8px">Sign out</button>
+          </form></div>
+    </header>
+
+    <div class="cards">
+      <div class="card"><div class="n">${rupees(s.collected_month_paise)}</div>
+        <div class="k">Collected this month</div></div>
+      <div class="card"><div class="n">${rupees(s.collected_fy_paise)}</div>
+        <div class="k">This financial year</div></div>
+      <div class="card"><div class="n">${rupees(r.mrr_paise)}</div><div class="k">MRR</div></div>
+      <div class="card"><div class="n">${rupees(s.tax_fy_paise)}</div>
+        <div class="k">GST collected, FY</div></div>
+      <div class="card"><div class="n">${s.due_14d ?? 0}</div><div class="k">Due in 14 days</div></div>
+      <div class="card"><div class="n">${s.locked_out ?? 0}</div><div class="k">Locked out</div></div>
+    </div>
+
+    <h2>Needs attention</h2>
+    ${exceptions.length ? `<div class="tw"><table>
+      <thead><tr><th>What</th><th>Farm</th><th>Detail</th><th>When</th><th></th></tr></thead>
+      <tbody>${exceptionRows}</tbody>
+    </table></div>
+    <p class="muted" style="margin-top:10px">
+      A replay runs the stored delivery through the same code the live webhook
+      does. It is safe to press twice — a payment that has already been applied
+      is not applied again.</p>`
+    : `<div class="quiet">Nothing. Every payment taken has an invoice and a farm
+        that can use it, and no delivery is stuck.</div>`}
+
+    <h2>Renewals and trials, next fortnight</h2>
+    ${renewals.length ? `<div class="tw"><table>
+      <thead><tr><th>Farm</th><th></th><th>Due</th><th>Renewal</th><th>Status</th><th></th></tr></thead>
+      <tbody>${renewalRows}</tbody>
+    </table></div>` : '<div class="quiet">Nothing due in the next fortnight.</div>'}
+
+    <h2>Payments</h2>
+    <form class="inline" method="get" action="/admin/billing">
+      <input name="q" value="${esc(f.q ?? '')}" placeholder="Farm, invoice or gateway id">
+      <select name="status">
+        <option value="">Any status</option>
+        ${['created', 'paid', 'failed', 'cancelled', 'refunded']
+          .map((v) => `<option value="${v}"${f.status === v ? ' selected' : ''}>${v}</option>`)
+          .join('')}
+      </select>
+      <input name="from" type="date" value="${esc(f.from ?? '')}">
+      <input name="to" type="date" value="${esc(f.to ?? '')}">
+      <button type="submit">Filter</button>
+    </form>
+    <div class="tw"><table>
+      <thead><tr><th>Made</th><th>Farm</th><th>Amount</th><th>Status</th>
+        <th>Invoice</th><th>Gateway ref</th></tr></thead>
+      <tbody>${paymentRows || '<tr><td colspan="6" class="muted">No payments match.</td></tr>'}</tbody>
+    </table></div>
+    <p class="muted" style="margin-top:10px">Most recent hundred. Times are UTC.</p>
+
+    <h2>Collected by month</h2>
+    <div class="tw"><table style="min-width:0">
+      <thead><tr><th>Month</th><th></th><th>Collected</th><th class="num">Invoices</th></tr></thead>
+      <tbody>${monthRows}</tbody>
+    </table></div>
+
+    <h2>For the GST return</h2>
+    ${fy.length ? `<div class="tw"><table>
+      <thead><tr><th>Financial year</th><th class="num">Invoices</th><th>Taxable</th>
+        <th>GST</th><th>Total</th><th>Series</th></tr></thead>
+      <tbody>${fyRows}</tbody>
+    </table></div>
+    <p class="muted" style="margin-top:10px">
+      Prices are GST-inclusive, so taxable value is the total less 18%. The
+      series must be consecutive within a financial year: the count and the two
+      numbers either end of it should agree.</p>`
+    : '<div class="quiet">No paid invoices yet.</div>'}`);
+}
+
+/** One stored delivery, payload and all — the other half of a reconciliation. */
+export function renderWebhook({ webhook: w }) {
+  return page(`Webhook ${w.id}`, `
+    <header>
+      <h1>Webhook delivery</h1>
+      <div class="muted"><a href="/admin/billing">← Billing</a></div>
+    </header>
+
+    <div class="tw"><table style="min-width:0"><tbody>
+      <tr><td>Event</td><td><code>${esc(w.event)}</code></td></tr>
+      <tr><td>Id</td><td><code>${esc(w.id)}</code></td></tr>
+      <tr><td>Received</td><td class="num">${when(w.received_at)} UTC</td></tr>
+      <tr><td>Processed</td><td class="num">${when(w.processed_at)}</td></tr>
+      <tr><td>Result</td><td>${w.errored
+        ? `<span class="pill crit">${esc(w.result)}</span>` : esc(w.result ?? '—')}</td></tr>
+      <tr><td>Farm</td><td>${w.farm_id
+        ? `<a href="/admin/farms/${esc(w.farm_id)}">${esc(w.farm_name)}</a>`
+        : '<span class="muted">not attributed to any farm</span>'}</td></tr>
+      <tr><td>Link</td><td><code>${esc(w.link_id ?? '—')}</code></td></tr>
+      <tr><td>Payment</td><td><code>${esc(w.payment_id ?? '—')}</code></td></tr>
+    </tbody></table></div>
+
+    <form method="post" action="/admin/billing/webhooks/${esc(w.id)}/replay"
+          class="inline" style="margin-top:18px">
+      <input name="reason" placeholder="Reason (required)" required style="min-width:280px">
+      <button type="submit">Replay this delivery</button>
+    </form>
+
+    <h2>What Razorpay sent</h2>
+    <pre>${esc(JSON.stringify(w.payload, null, 2))}</pre>`);
 }
 
 /**
@@ -204,7 +459,7 @@ export function renderImpersonation({ impersonation, token, farm_name, admin }) 
       up. End it when you are done; the customer can see that you did.</p>`);
 }
 
-export function renderFarm({ farm, audit, subscription, admin }) {
+export function renderFarm({ farm, audit, subscription, payments = [], admin }) {
   const canBill = ['superadmin', 'billing'].includes(admin.role);
   const canComp = admin.role === 'superadmin';
 
@@ -224,6 +479,26 @@ export function renderFarm({ farm, audit, subscription, admin }) {
       <td>${esc(a.admin_name)}</td>
       <td><code>${esc(a.action)}</code></td>
       <td>${esc(a.reason ?? '')}</td>
+    </tr>`).join('');
+
+  /*
+   * This farm's money, on this farm's page, for every admin including support.
+   * "Did my payment go through" is the call support takes, and the platform-wide
+   * screen they are not allowed into is no help with it.
+   */
+  const paymentRows = payments.map((p) => `
+    <tr>
+      <td class="num">${when(p.created_at)}</td>
+      <td class="num">${rupees(p.amount_paise)}
+          <div class="muted">${esc(p.billing_period)}${
+            p.gateway !== 'razorpay' ? ` · ${esc(p.gateway)}` : ''}</div></td>
+      <td>${payPill(p.status)}
+          ${p.failed_reason ? `<div class="muted">${esc(p.failed_reason)}</div>` : ''}</td>
+      <td>${p.invoice_number
+            ? `<code>${esc(p.invoice_number)}</code>
+               <div class="muted">${esc(p.period_start ?? '')} → ${esc(p.period_end ?? '')}</div>`
+            : '<span class="muted">—</span>'}</td>
+      <td class="muted">${esc(p.gateway_payment_id ?? p.gateway_link_id ?? '')}</td>
     </tr>`).join('');
 
   return page(`${farm.farm_name} — Rabbitry admin`, `
@@ -285,6 +560,37 @@ export function renderFarm({ farm, audit, subscription, admin }) {
                 pattern="${esc(farm.farm_name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"
                 title="Type the farm's name exactly" required>`, canComp)}
     </div>
+
+    <h2>Payments</h2>
+    <div class="tw"><table style="min-width:620px">
+      <thead><tr><th>Made</th><th>Amount</th><th>Status</th><th>Invoice</th>
+        <th>Gateway ref</th></tr></thead>
+      <tbody>${paymentRows
+        || '<tr><td colspan="5" class="muted">Nothing paid yet.</td></tr>'}</tbody>
+    </table></div>
+
+    ${/*
+      Money that arrived by UPI or bank transfer. `activate` above moves the
+      period and leaves no payment row and no invoice, which is how the GST
+      return ends up short of a real ₹999 — this records the money as money.
+    */ ''}
+    ${canBill ? `
+    <div class="action" style="max-width:520px;margin-top:14px">
+      <h3>Record a payment taken outside Razorpay</h3>
+      <p>UPI to your phone, a bank transfer, cash. Extends the period and issues
+         a real invoice number, by the same rules a card payment would.</p>
+      <form method="post" action="/admin/farms/${esc(farm.farm_id)}/record_payment">
+        <select name="billing_period">
+          <option value="yearly">One year</option>
+          <option value="monthly">One month</option>
+        </select>
+        <input name="amount_paise" type="number" min="1"
+               placeholder="Amount in paise (blank = their price)">
+        <input name="reference" placeholder="UTR or reference">
+        <input name="reason" placeholder="Reason (required)" required>
+        <button type="submit">Record payment</button>
+      </form>
+    </div>` : ''}
 
     <h2>Audit trail</h2>
     <div class="tw"><table style="min-width:620px">

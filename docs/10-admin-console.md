@@ -108,7 +108,8 @@ thing you will do all week.
 | Change subscription status | Activate, suspend, cancel, reinstate |
 | Comp an account | Free for a case-study customer, a friend, a beta tester |
 | Change the plan or price | Assigns a different plan row; never edits a price in place |
-| Mark an invoice paid | For the customer who paid you by UPI directly |
+| Record an offline payment | For the customer who paid you by UPI or bank transfer. Real payment row, real invoice number |
+| Replay a webhook | For the delivery that arrived while the database was down. Idempotent |
 | Refund | Through Razorpay, recorded here |
 | Resend an invoice | GST invoices get lost; this is a weekly request |
 | Export a farm's data | For a customer asking, or a cancellation |
@@ -183,6 +184,47 @@ paying farms that have gone quiet for two weeks.
 
 Trials are excluded from MRR. A trial is not revenue, and counting it flatters the
 number in exactly the way that leads to bad decisions.
+
+### The billing screen
+
+`/admin/billing`, for `superadmin` and `billing` only. Support does not need to
+know what the platform earns; what support needs is one farm's payments while
+that farmer is on the phone, and those are on the farm's own page where every
+admin can see them.
+
+It is ordered by what somebody has to *do*, not by what is nice to look at:
+
+1. **Needs attention** — `v_admin_billing_exception`. Every way money can go
+   wrong, worst first. Severity 1 is reserved for the two that cost a customer:
+   a farm that **paid and is still locked out**, and a **payment we cannot
+   attribute to any farm**. Then a paid payment with no invoice (the farmer is
+   fine; the GST series has a gap), a webhook that failed or never finished, a
+   refused amount, and — as noise rather than emergency — a payment link that
+   was made and never paid.
+2. **Renewals and trials, next fortnight** — `v_admin_renewal_due`. Trials
+   ending and subscriptions lapsing are the same job: a conversation before the
+   money stops. One list, with the owner's phone number on it.
+3. **Payments** — every payment, filterable by farm, invoice number or gateway
+   id, which are the three things a person doing a reconciliation is holding.
+4. **Collected by month**, and **the GST return** — per financial year, with the
+   first and last invoice number so the consecutive series GST requires can be
+   checked against the count at a glance.
+
+Two actions live here, both audited with a required reason:
+
+- **Replay a stored webhook.** Razorpay retries for a while and then stops.
+  After that a delivery that arrived while the database was down is a payment
+  sitting in a row that nothing will ever apply on its own. Replay runs the
+  stored payload through the same code the live endpoint does; it is safe to
+  press twice, because `billing_apply_payment` refuses a payment it has already
+  applied.
+- **Record a payment taken outside Razorpay** (on the farm page). Farmers pay by
+  UPI to a phone number and by bank transfer, and then they call. `activate`
+  moves the period and leaves no payment row and no invoice — the money is in a
+  bank statement and nowhere in this system, and the return is short by ₹999.
+  This goes through the same function the webhook calls, so an offline payment
+  extends a period and takes an invoice number by exactly the same rules, and it
+  charges the farm's **locked** price rather than today's list price.
 
 ---
 
