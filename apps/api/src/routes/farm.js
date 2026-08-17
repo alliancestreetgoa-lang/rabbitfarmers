@@ -314,6 +314,47 @@ farmRoutes.patch('/animals/:id', write, canWriteAnimals, async (c) => {
 });
 
 /**
+ * DELETE /animals/:id — for the rabbit that should never have existed.
+ *
+ * NOT the way an animal leaves the herd — that is the status route below, and
+ * the difference matters for the numbers: a mistyped test row recorded as
+ * "died" pollutes the mortality figures for ever. This is erasure, for the
+ * mistake noticed a minute after tapping Add.
+ *
+ * The database draws the line about who can be erased. Operational leftovers
+ * (tasks, weights, health records, status changes) CASCADE away with her, but
+ * matings, litters and offspring RESTRICT — so an animal with any breeding
+ * history cannot be deleted even by the owner, and the 409 says to record a
+ * status instead. Owner only, like every permanent exit: employees are told
+ * who to ask.
+ */
+farmRoutes.delete('/animals/:id', write, canWriteAnimals, async (c) => {
+  requireInline(c.get('session'), 'animals:remove');
+  const id = c.req.param('id');
+
+  const result = await c.get('db')(async (client) => {
+    const { rows } = await client.query(
+      'SELECT tag, name FROM rabbit WHERE id = $1', [id]);
+    if (!rows.length) throw new HttpError(404, 'No such rabbit');
+    const who = rows[0].name ?? rows[0].tag;
+
+    try {
+      await client.query('DELETE FROM rabbit WHERE id = $1', [id]);
+    } catch (err) {
+      if (err.code === '23503') {
+        throw new HttpError(409,
+          `${who} has breeding history — matings, litters or offspring. `
+          + 'That record outlives her: mark her sold, culled or died instead.',
+          { has_history: true });
+      }
+      throw err;
+    }
+    return { deleted: true, name: who };
+  });
+  return c.json(result);
+});
+
+/**
  * POST /animals/:id/status — sold, culled, died, quarantined, or back in.
  *
  * The only way an animal leaves the herd. There is deliberately no endpoint

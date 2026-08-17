@@ -176,6 +176,32 @@ describe('what each role may do', () => {
     assert.equal(sold.status, 201, sold.text);
   });
 
+  test('delete erases a mistake, refuses a life, and obeys the owner rule', async () => {
+    const f = await signupFarm();
+    const mistake = await api('POST', '/animals', {
+      token: f.token, body: { name: 'm1', sex: 'doe' } });
+    const id = mistake.body.animal.id;
+
+    // An employee cannot delete, even the manager.
+    const manager = await hire(f, { name: 'M', phone: uniquePhone(), role: 'manager' });
+    assert.equal((await api('DELETE', `/animals/${id}`, { token: manager.token })).status, 403);
+
+    // The owner can, and she is gone without touching the exit statistics.
+    const gone = await api('DELETE', `/animals/${id}`, { token: f.token });
+    assert.equal(gone.status, 200, gone.text);
+    const list = await api('GET', '/animals?include=all', { token: f.token });
+    assert.ok(!list.body.animals.some((a) => a.id === id), 'erased, not archived');
+
+    // A doe with breeding history is protected by the database itself.
+    const doe = await api('POST', '/animals', {
+      token: f.token, body: { name: 'Bred Doe', sex: 'doe', date_of_birth: '2024-01-01' } });
+    await api('POST', '/matings', { token: f.token, body: { doe_id: doe.body.animal.id } });
+    const refused = await api('DELETE', `/animals/${doe.body.animal.id}`, { token: f.token });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /sold, culled or died/,
+      'the refusal points at the status flow that keeps the record');
+  });
+
   test('a caretaker records animals but never sees the team', async () => {
     const f = await signupFarm();
     const ravi = await hire(f, { name: 'Ravi', phone: uniquePhone(), role: 'caretaker' });

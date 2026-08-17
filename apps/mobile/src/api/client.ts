@@ -512,6 +512,16 @@ export class ApiClient {
    * The only way a rabbit leaves the herd. There is no delete — her matings,
    * litters and line stay on the farm's record.
    */
+  /**
+   * Erasure, not an exit — only for an animal added by mistake. The server
+   * answers 409 once she has breeding history, and 403 for anyone but the
+   * owner.
+   */
+  deleteAnimal(id: string) {
+    return this.request<{ deleted: boolean; name: string }>(
+      'DELETE', `/animals/${id}`);
+  }
+
   setAnimalStatus(id: string, input: {
     status: 'active' | 'quarantine' | 'sold' | 'culled' | 'dead';
     reason?: string; changed_on?: string; sale_price_paise?: number;

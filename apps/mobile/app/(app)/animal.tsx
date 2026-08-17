@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
+import { ApiError } from '../../src/api/client';
 import { Card, ConditionMark, H1, Loading, Muted, Pill, Screen } from '../../src/ui/components';
 import { sexLabelFull } from '../../src/ui/labels';
 import { STATE_LABEL, colors, radius, relativeDay, space, type as t } from '../../src/ui/theme';
@@ -15,6 +16,27 @@ export default function AnimalScreen() {
   // Server-enforced too (animals:remove, owner only). Hiding the button is
   // just not offering a tap that answers 403 on a shared phone.
   const canRemove = session?.user?.role === 'owner';
+  // Two taps to erase, never one. The first arms it and says what will happen;
+  // browser confirm() is off the table — it would freeze the web build's
+  // extension-driven testing, and reads terribly on a phone anyway.
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const reallyDelete = async () => {
+    if (!a) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await client.deleteAnimal(a.id);
+      router.replace('/(app)/herd');
+    } catch (err) {
+      setDeleteArmed(false);
+      setDeleteError(err instanceof ApiError ? err.message : 'Could not delete');
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
   // One call now, not two: the history endpoint returns the animal, her
   // lifetime totals, her timeline and her offspring. It also works for an
   // animal who has left the herd, which the herd list deliberately does not
@@ -159,6 +181,44 @@ export default function AnimalScreen() {
                   Sold, culled or died
                 </Text>
               </Pressable>
+            )}
+            {canRemove && !deleteArmed && (
+              <Pressable style={[s.action, s.leave]} testID="a-delete"
+                         onPress={() => { setDeleteError(null); setDeleteArmed(true); }}>
+                <Text style={[s.actionText, { color: colors.crit }]}>Delete</Text>
+              </Pressable>
+            )}
+            {canRemove && deleteArmed && (
+              <Card>
+                <Text style={{ ...t.title, color: colors.crit }}>
+                  Delete {a.name ?? a.tag} forever?
+                </Text>
+                <Muted>
+                  Only for a rabbit added by mistake — everything about her is
+                  erased. An animal that was sold, culled or died should be
+                  recorded as that instead, so the record survives.
+                </Muted>
+                <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.md }}>
+                  <Pressable style={[s.action, { flex: 1, borderColor: colors.crit, marginBottom: 0 }]}
+                             testID="a-delete-confirm" disabled={deleteBusy}
+                             onPress={reallyDelete}>
+                    <Text style={[s.actionText, { color: colors.crit }]}>
+                      {deleteBusy ? 'Deleting…' : 'Yes, delete forever'}
+                    </Text>
+                  </Pressable>
+                  <Pressable style={[s.action, { flex: 1, marginBottom: 0 }]}
+                             testID="a-delete-cancel"
+                             onPress={() => setDeleteArmed(false)}>
+                    <Text style={s.actionText}>Keep her</Text>
+                  </Pressable>
+                </View>
+              </Card>
+            )}
+            {!!deleteError && (
+              <Text style={{ ...t.small, color: colors.crit, marginBottom: space.md }}
+                    testID="a-delete-error">
+                {deleteError}
+              </Text>
             )}
           </>
         )}

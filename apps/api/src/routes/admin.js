@@ -196,8 +196,15 @@ adminRoutes.post('/farms/:id/reset_password',
       ? await c.req.json().catch(() => ({}))
       : Object.fromEntries(await c.req.formData());
 
-    const reason = String(body.reason ?? '').trim();
-    if (!reason) throw new HttpError(400, 'A reason is required to reset a password');
+    /*
+     * No reason required here, alone among the admin actions — the owner's
+     * call. The justification: a reset is what the sign-in screen's "call this
+     * number" points at, the farmer is on the phone locked out right now, and
+     * a compulsory form field between them and working again serves nobody.
+     * The audit row still lands, attributed and timestamped; the reason column
+     * records that none was asked for.
+     */
+    const reason = String(body.reason ?? '').trim() || 'password reset by admin (no reason required)';
 
     const { rows: owner } = await adminQuery(`
       SELECT e.id, e.full_name, e.email::text AS email, f.name AS farm_name

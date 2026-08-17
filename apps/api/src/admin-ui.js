@@ -616,12 +616,12 @@ export function renderFarm({ farm, audit, subscription, payments = [], admin }) 
   const canBill = ['superadmin', 'billing'].includes(admin.role);
   const canComp = admin.role === 'superadmin';
 
-  const action = (name, title, blurb, extra = '', enabled = true) => `
+  const action = (name, title, blurb, extra = '', enabled = true, needsReason = true) => `
     <div class="action">
       <h3>${esc(title)}</h3><p>${esc(blurb)}</p>
       ${enabled ? `<form method="post" action="/admin/farms/${esc(farm.farm_id)}/${name}">
         ${extra}
-        <input name="reason" placeholder="Reason (required)" required>
+        ${needsReason ? `<input name="reason" placeholder="Reason (required)" required>` : ''}
         <button type="submit">${esc(title)}</button>
       </form>` : `<p class="muted"><em>Needs a different role.</em></p>`}
     </div>`;
@@ -712,7 +712,7 @@ export function renderFarm({ farm, audit, subscription, payments = [], admin }) 
         '', admin.role === 'superadmin' || admin.role === 'support')}
       ${action('reset_password', 'Reset password',
         'They are locked out. Sets a temporary one and signs every device out.',
-        '', admin.role === 'superadmin' || admin.role === 'support')}
+        '', admin.role === 'superadmin' || admin.role === 'support', false)}
       ${/*
         The only irreversible action on this page, so it asks for the farm's
         name as well as a reason. `pattern` makes the browser refuse the wrong

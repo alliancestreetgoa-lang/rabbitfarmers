@@ -428,13 +428,17 @@ describe('specific admin routes are not swallowed by the wildcard', () => {
     const f = await signupFarm();
     const admin = await makeAdmin('superadmin');
 
-    for (const action of ['delete', 'reset_password', 'impersonate']) {
+    // reset_password answers 200 to an empty body since no reason is required
+    // any more — which proves the same thing more directly: the wildcard would
+    // have said 404 "Unknown action".
+    const expected = { delete: 400, reset_password: 200, impersonate: 400 };
+    for (const [action, status] of Object.entries(expected)) {
       const res = await api('POST', `/admin/farms/${f.farm.id}/${action}`, {
         token: admin.token, body: {} });
       assert.ok(!/Unknown action/.test(res.body?.error ?? ''),
         `${action} is being answered by the wildcard, not its own handler`);
-      assert.equal(res.status, 400,
-        `${action} should reach its handler and ask for what it needs`);
+      assert.equal(res.status, status,
+        `${action} should reach its own handler`);
     }
   });
 });
@@ -477,16 +481,17 @@ describe('passwords can be changed and recovered', () => {
     assert.equal(res.status, 400);
   });
 
-  test('support can get a locked-out farmer back in, with a reason and a trail', async () => {
+  test('support can get a locked-out farmer back in, no reason demanded', async () => {
     const f = await signupFarm();
     const admin = await makeAdmin('support');
 
-    const noReason = await api('POST', `/admin/farms/${f.farm.id}/reset_password`, {
-      token: admin.token, body: {} });
-    assert.equal(noReason.status, 400);
-
+    /*
+     * Alone among admin actions, no reason is required — the owner's call.
+     * The farmer is on the phone locked out right now; the audit row still
+     * lands either way, attributed and timestamped.
+     */
     const res = await api('POST', `/admin/farms/${f.farm.id}/reset_password`, {
-      token: admin.token, body: { reason: 'Owner called, locked out, verified by phone' } });
+      token: admin.token, body: {} });
     assert.equal(res.status, 200, res.text);
     assert.ok(res.body.temporary_password?.length >= 12);
 
@@ -502,7 +507,8 @@ describe('passwords can be changed and recovered', () => {
       `SELECT action, reason FROM admin_audit_log
        WHERE target_farm_id = $1 AND action = 'reset_password'`, [f.farm.id]);
     assert.equal(rows.length, 1);
-    assert.match(rows[0].reason, /locked out/);
+    assert.match(rows[0].reason, /no reason required/,
+      'the trail says none was asked for, rather than sitting blank');
   });
 
   test('billing cannot reset a password', async () => {
