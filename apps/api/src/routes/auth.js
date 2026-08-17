@@ -149,7 +149,11 @@ authRoutes.get('/me', requireAuth, async (c) => {
   const data = await db(async (client) => {
     const ent = await client.query(`
       SELECT plan_code, status, billing_period, access, trial_days_left,
-             current_period_end, effective_price_paise, is_grandfathered
+             current_period_end, effective_price_paise, is_grandfathered,
+             -- The last day writing is allowed, grace included, and how far off
+             -- that is. "Ends in 3 days" is the sentence that gets somebody to
+             -- renew; "active" is the one that gets them a surprise.
+             covered_until, covered_days_left, reminders_active
       FROM v_farm_entitlement`);
     const farm = await client.query(
       'SELECT id, name, timezone, city, state FROM farm');

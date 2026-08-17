@@ -258,7 +258,8 @@ billingRoutes.get('/billing', requireCan('billing:read'), async (c) => {
   const data = await db(async (client) => {
     const ent = await client.query(`
       SELECT plan_code, status, billing_period, access, trial_days_left,
-             current_period_end, effective_price_paise, is_grandfathered
+             current_period_end, effective_price_paise, is_grandfathered,
+             covered_until, covered_days_left
       FROM v_farm_entitlement`);
     const price = await client.query('SELECT * FROM v_farm_renewal_price');
     const history = await client.query(

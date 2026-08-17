@@ -5,6 +5,7 @@ import { useApp, useQuery } from '../../src/state';
 import { TabBar } from '../../src/ui/nav';
 import { Card, H1, Muted, Pill, Screen } from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
+import { coverageLine, subscriptionLabel } from '../../src/ui/subscription';
 
 const ROLE_LABEL: Record<string, string> = {
   owner: 'owner', manager: 'manager', caretaker: 'farm hand',
@@ -36,10 +37,18 @@ export default function More() {
         <Card>
           <Text style={s.label}>SUBSCRIPTION</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-            <Text style={s.value} testID="sub-status">{sub?.status ?? '—'}</Text>
+            <Text style={s.value} testID="sub-status">{subscriptionLabel(sub?.status)}</Text>
             {sub?.access === 'read_only' && <Pill text="read only" urgency="critical" />}
           </View>
-          {sub?.trial_days_left != null && (
+          {/* The same sentence the Billing tab shows, from the same function.
+              Two screens describing one farm differently is how a farmer ends
+              up ringing to ask which of them is right. */}
+          {!!coverageLine(sub) && (
+            <Text style={sub?.access === 'read_only' ? s.warn : s.soon} testID="coverage">
+              {coverageLine(sub)}
+            </Text>
+          )}
+          {sub?.trial_days_left != null && sub.trial_days_left > 0 && (
             <Muted>{sub.trial_days_left} days left in your free trial</Muted>
           )}
           {sub?.effective_price_paise != null && (
@@ -121,6 +130,7 @@ const s = StyleSheet.create({
   label: { ...t.label, color: colors.muted, marginBottom: space.xs },
   value: { ...t.h2, color: colors.ink, textTransform: 'capitalize' },
   warn: { ...t.small, color: colors.warn, marginTop: space.sm, fontWeight: '600' },
+  soon: { ...t.small, color: colors.warn, marginTop: space.xs, fontWeight: '600' },
   action: {
     minHeight: 52, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.accent,
     alignItems: 'center', justifyContent: 'center', marginBottom: space.sm,

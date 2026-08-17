@@ -40,12 +40,13 @@ with grandfathering enforced in the schema.
 | Staff: logins by phone, five roles enforced server-side, sections, attendance | Built, 26 tests |
 | Push delivery — quiet hours, no duplicates, dead tokens retired | Built, 19 tests against a stub provider |
 | Scheduler (task generation, 2-hourly reminders, heartbeat) | Built, 25 tests |
-| Expo app — Today, Breeding, Herd, Team, Billing, recording, offline outbox | Built, 33 tests — 22 against the real API |
+| Expo app — Today, Breeding, Herd, Team, Billing, recording, offline outbox | Built, 40 tests — 22 against the real API |
 | Android / iOS binaries | Icons, native config and EAS profiles ready. **No APK built** — needs the Android SDK and a signing key |
 | Netlify deployment | Configured and deployment-ready, **not deployed** |
 | Razorpay billing — payment links, signed webhooks, GST invoices | Built, 25 tests against a stub gateway, plus a 27-check browser pass. Recurring mandates deferred |
 | Admin billing — reconciliation, renewals, GST totals, offline payments | Built, 32 tests |
 | Refunds — credit notes, part refunds, goodwill, period claw-back | Built, 28 tests plus an 18-check browser pass |
+| Subscriptions that end — grace, read-only, warnings before and after | Built, 26 tests plus a 14-check browser pass |
 
 ### Verify it yourself
 
@@ -54,7 +55,7 @@ with grandfathering enforced in the schema.
 ```
 
 From nothing: applies the migrations, runs the 41 breeding-rule assertions, runs
-the 274 API tests, then boots the server and hits real endpoints over HTTP —
+the 300 API tests, then boots the server and hits real endpoints over HTTP —
 including running the scheduler and confirming the day-28 nest box task reaches
 the daily list. Uses `$DATABASE_URL` if you have one, otherwise starts a
 throwaway `postgres:16` container and removes it afterwards.

@@ -284,14 +284,29 @@ export function renderBilling({ summary, revenue, exceptions, renewals, payments
     </tr>`).join('');
 
   /* Who to ring this week. */
+  const STAGE = {
+    trial_ending: 'trial ends', trial_over: 'trial over',
+    ending_soon: 'renews', in_grace: 'in grace', lapsed: 'lapsed',
+  };
   const renewalRows = renewals.map((x) => `
     <tr>
       <td><a href="/admin/farms/${esc(x.farm_id)}">${esc(x.farm_name)}</a>
           <div class="muted">${esc(x.owner_name ?? '')} · ${esc(x.owner_phone ?? '')}</div></td>
-      <td><span class="pill ${x.kind === 'trial_ending' ? 'warn' : 'ok'}">
-            ${x.kind === 'trial_ending' ? 'trial ends' : 'renews'}</span></td>
+      <td><span class="pill ${
+        x.stage === 'lapsed' || x.stage === 'trial_over' ? 'crit'
+          : x.stage === 'in_grace' ? 'warn' : 'ok'}">
+            ${esc(STAGE[x.stage] ?? x.kind)}</span></td>
+      ${/*
+        Two dates, because they are up to a month apart and mean different
+        things: the money was due on one, and the farm stops being able to
+        record on the other. Phoning about the first is the job.
+      */ ''}
       <td class="num">${esc(x.due_on)}
-          <div class="muted">${x.days_left < 0 ? `${-x.days_left}d overdue` : `in ${x.days_left}d`}</div></td>
+          <div class="muted">${x.days_left < 0 ? `${-x.days_left}d overdue` : `in ${x.days_left}d`}</div>
+          ${x.covered_days_left != null && x.days_left < 0
+            ? `<div class="muted">${x.covered_days_left >= 0
+                ? `works for ${x.covered_days_left} more days`
+                : `read-only since ${esc(x.covered_until)}`}</div>` : ''}</td>
       <td class="num">${rupees(x.renewal_paise)}
           <div class="muted">${esc(x.billing_period ?? '')}</div></td>
       <td>${statusPill(x.status)}${x.access === 'read_only'

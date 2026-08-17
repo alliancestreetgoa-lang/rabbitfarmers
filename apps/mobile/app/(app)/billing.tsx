@@ -4,6 +4,7 @@ import { useApp, useQuery } from '../../src/state';
 import { TabBar } from '../../src/ui/nav';
 import { Banner, Card, Empty, H1, H2, Loading, Muted, Screen } from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
+import { coverageLine, subscriptionLabel } from '../../src/ui/subscription';
 
 const rupees = (paise: number | null | undefined) =>
   paise == null ? '—' : `₹${(paise / 100).toLocaleString('en-IN')}`;
@@ -22,6 +23,7 @@ export default function Billing() {
   const renew = billing.data?.renew;
   const history = billing.data?.history ?? [];
   const ready = billing.data?.gateway_ready ?? false;
+  const coverage = coverageLine(sub);
 
   const pay = async (period: 'monthly' | 'yearly') => {
     setBusy(period);
@@ -57,8 +59,18 @@ export default function Billing() {
 
         <Card>
           <Text style={s.label}>SUBSCRIPTION</Text>
-          <Text style={s.value} testID="billing-status">{sub?.status ?? '—'}</Text>
-          {sub?.trial_days_left != null && (
+          <Text style={s.value} testID="billing-status">
+            {subscriptionLabel(sub?.status)}
+          </Text>
+          {/* When it runs out, in the farmer's own terms. Silent while there is
+              more than a fortnight left — a countdown that is always on the
+              screen has stopped being read by the time it matters. */}
+          {!!coverage && (
+            <Text style={sub?.access === 'read_only' ? s.warn : s.soon} testID="coverage">
+              {coverage}
+            </Text>
+          )}
+          {sub?.trial_days_left != null && sub.trial_days_left > 0 && (
             <Muted>{sub.trial_days_left} days left in your free trial</Muted>
           )}
           {/* Only while it means something. After a refund the period end is
@@ -171,6 +183,8 @@ const s = StyleSheet.create({
   label: { ...t.label, color: colors.muted, marginBottom: space.xs },
   value: { ...t.h2, color: colors.ink, textTransform: 'capitalize' },
   kept: { ...t.small, color: colors.accent, marginTop: space.sm, fontWeight: '600' },
+  soon: { ...t.small, color: colors.warn, marginTop: space.xs, fontWeight: '600' },
+  warn: { ...t.small, color: colors.crit, marginTop: space.xs, fontWeight: '600' },
   pay: {
     borderWidth: 1, borderColor: colors.accent, borderRadius: radius.md,
     padding: space.lg, marginBottom: space.sm, alignItems: 'center',

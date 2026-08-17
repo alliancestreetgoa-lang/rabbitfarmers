@@ -270,6 +270,32 @@ trialing ──► active ──► past_due ──► grace ──► suspended
 | `suspended` | Read-only + export + **reminders keep firing**. No new records |
 | `cancelled` | Read-only + export. Data retained 12 months minimum |
 
+### What is actually built (migration 0029)
+
+**Access is derived, not stored.** `v_farm_entitlement` computes it from
+`current_period_end` — status alone never grants it. So the scheduler being dead
+cannot hand anybody a free month, and the failure direction is always the safe
+one. The scheduler moves the *status* (`active` → `past_due` → `suspended`) for
+the console and MRR; if that stops, the numbers go stale and access stays right.
+
+**The grace window depends on the plan, and this is the one deliberate departure
+from the table above.** Thirty days for the yearly plan, as written. Seven for
+the monthly one — because thirty days was designed around auto-debit, where not
+paying means a charge *failed*. There are no mandates yet, so not paying is a
+choice, and thirty days of grace on a thirty-day subscription is an invitation to
+pay every other month for ever: a late payment runs from the day it is made, so
+the skipped month is never paid for. One function, `billing_grace_days()`, holds
+both numbers.
+
+`grace_until` overrides the arithmetic in **both** directions — a fortnight more
+for a farmer whose bank is being difficult, a shorter leash for a defaulter.
+
+**They are told before it happens.** A notice a week out, another on the last
+day, and one when it has happened, into the same list the nest-box reminders
+arrive in. Never `critical`, so push holds them until quiet hours are over. The
+lapse notice says the two things a farmer actually wants to know: the records are
+all still there, and the alerts have not stopped.
+
 **Reminders survive suspension.** They cost you almost nothing to keep running
 and they are the difference between a lapsed customer who comes back and a former
 customer who tells people you killed his litter. Withhold the *product* — new

@@ -197,12 +197,27 @@ describe('the money', () => {
     assert.equal(inv.rows[0].status, 'paid',
       'a GST invoice is offset by a credit note, never deleted or edited');
 
-    // Collections come down by what went back.
+    /*
+     * Collections come down by what went back — and the same arithmetic the
+     * summary does, scoped to this farm, because the suite runs its files
+     * concurrently and a global total is a different number by the time it is
+     * read twice. That raciness is not hypothetical: this assertion used to
+     * compare two global reads and failed the first time two refund tests
+     * happened to overlap.
+     */
+    const { rows: net } = await adminQuery(`
+      SELECT (SELECT COALESCE(sum(amount_paise), 0) FROM payment
+               WHERE farm_id = $1 AND status IN ('paid','refunded'))
+           - (SELECT COALESCE(sum(amount_paise), 0) FROM refund
+               WHERE farm_id = $1 AND status = 'processed') AS collected`,
+      [farm.farm.id]);
+    assert.equal(Number(net[0].collected), 0,
+      'a farm that paid and was refunded in full has contributed nothing');
+
     const after = await api('GET', '/admin/billing?format=json', { token: admin.token });
-    assert.equal(
-      Number(before.body.summary.collected_total_paise)
-        - Number(after.body.summary.collected_total_paise),
-      99900, 'a refund must come off the collected total');
+    assert.ok(Number(after.body.summary.collected_total_paise)
+              < Number(before.body.summary.collected_total_paise),
+      'a refund must bring the collected total down');
     assert.ok(Number(after.body.summary.refunded_fy_paise)
               >= Number(before.body.summary.refunded_fy_paise) + 99900);
   });

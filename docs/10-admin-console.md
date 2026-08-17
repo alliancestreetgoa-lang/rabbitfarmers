@@ -203,7 +203,12 @@ It is ordered by what somebody has to *do*, not by what is nice to look at:
    was made and never paid.
 2. **Renewals and trials, next fortnight** — `v_admin_renewal_due`. Trials
    ending and subscriptions lapsing are the same job: a conversation before the
-   money stops. One list, with the owner's phone number on it.
+   money stops. One list, with the owner's phone number on it. It carries two
+   dates because they are up to a month apart: `days_left` counts to the day the
+   **money** is due, which is the call worth making, and `covered_days_left`
+   counts to the day the farm actually stops being able to record. The `stage`
+   column names where they are — `ending_soon`, `in_grace`, `lapsed`,
+   `trial_ending`, `trial_over`.
 3. **Payments** — every payment, filterable by farm, invoice number or gateway
    id, which are the three things a person doing a reconciliation is holding.
 4. **Collected by month**, and **the GST return** — per financial year, with the

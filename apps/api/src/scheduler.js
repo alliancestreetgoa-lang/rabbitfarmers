@@ -56,6 +56,20 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
     // worse than work on everybody's list.
     const assigned = await client.query('SELECT assign_tasks_by_section() AS n');
     const notes = await client.query('SELECT generate_notifications() AS n');
+    /*
+     * Subscriptions that have run out.
+     *
+     * The advance is reporting only — what a farm may do is derived from its
+     * period end by v_farm_entitlement, so a pass that never runs cannot hand
+     * out free access, and one that runs twice changes nothing. What it does
+     * change is MRR: without it, a farm that stopped paying in March is still
+     * counted as revenue in December.
+     *
+     * The notices come after it so that a farm suspended in this pass is told
+     * in the same pass rather than fifteen minutes later.
+     */
+    const advanced = await client.query('SELECT * FROM billing_advance_subscriptions()');
+    const billing = await client.query('SELECT generate_billing_notifications() AS n');
     // Sessions nobody can use any more. Expired ones were always rejected at
     // sign-in, so this is housekeeping rather than a fix — but nothing ever
     // deleted them, and user_session grows by a row per device per sign-in for
@@ -90,7 +104,10 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
       ok: true,
       tasksCreated: tasks.rows[0].n,
       tasksAssigned: assigned.rows[0].n,
-      notificationsCreated: notes.rows[0].n,
+      notificationsCreated: notes.rows[0].n + billing.rows[0].n,
+      billingNoticesCreated: billing.rows[0].n,
+      subscriptionsPastDue: advanced.rows[0].past_due,
+      subscriptionsSuspended: advanced.rows[0].suspended,
       sessionsPurged: purged.rows[0].n,
       pushSent: push.sent ?? 0,
       pushFailed: push.failed ?? 0,

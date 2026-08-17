@@ -222,6 +222,14 @@ export interface Subscription {
   current_period_end: string | null;
   effective_price_paise: number | null;
   is_grandfathered: boolean | null;
+  /* The last day this farm's money (or its trial) covers, grace included, and
+     how far off that is. Negative once it has gone. Null on a subscription that
+     was never given an end date. */
+  covered_until: string | null;
+  covered_days_left: number | null;
+  /* Always true, and said out loud rather than assumed: a farm that has lapsed
+     keeps every reminder. See migration 0029. */
+  reminders_active?: boolean;
 }
 
 export interface MatingSchedule {
