@@ -143,11 +143,24 @@ console.log('health    1 open case of loose motion, seen 5 hours ago');
 
 /* ------------------------------------------------------------- scheduler -- */
 
-const secret = process.env.SCHEDULER_SECRET ?? 'dev-secret';
+/*
+ * The same default scripts/localhost.sh exports. They have to agree: a
+ * mismatch is refused with a 401 and this script then prints "undefined
+ * task(s)" and hands over a farm whose Today tab is empty for no visible
+ * reason — which is exactly the screen the demo exists to show.
+ */
+const secret = process.env.SCHEDULER_SECRET ?? 'local-dev-secret';
 const run = await fetch(`${API}/scheduler/run`, {
   method: 'POST', headers: { 'x-scheduler-secret': secret },
 }).then((r) => r.json());
-console.log(`scheduler ${run.tasksCreated} task(s), ${run.notificationsCreated} notification(s)`);
+
+if (run.error) {
+  console.log(`scheduler REFUSED: ${run.error}`);
+  console.log('  the farm is seeded, but nothing has generated its tasks yet.');
+  console.log('  set SCHEDULER_SECRET to whatever the API is running with and re-run.');
+} else {
+  console.log(`scheduler ${run.tasksCreated} task(s), ${run.notificationsCreated} notification(s)`);
+}
 
 // Zero notifications overnight is correct, not broken, and worth saying out
 // loud — otherwise the next person to run this spends an hour looking for a bug

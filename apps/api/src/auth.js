@@ -93,8 +93,11 @@ export function isKnownTimezone(tz) {
  *
  * Email is NOT verified — that is a deliberate product decision (see
  * docs/10-admin-console.md). But it is still format-checked and normalised,
- * because the one thing an unverified address must not be is un-parseable:
- * password reset falls back to SMS, and receipts still have to go somewhere.
+ * because the one thing an unverified address must not be is un-parseable: it
+ * is where every receipt and every renewal warning goes (migration 0030), and
+ * there is no second channel to fall back to. SMS was considered and decided
+ * against; recovery for somebody locked out is an admin resetting the password,
+ * not a code.
  */
 export function validateSignup(body) {
   const errors = {};

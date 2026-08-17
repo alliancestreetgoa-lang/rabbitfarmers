@@ -231,7 +231,7 @@ collecting and not collecting from a smallholder.
 | Concern | Approach |
 |---|---|
 | Mandate | UPI Autopay first, e-NACH fallback, card for those who prefer it |
-| Retries | Razorpay's retry scheduling; then your own dunning emails/SMS |
+| Retries | Razorpay's retry scheduling; then your own dunning emails. **No SMS** — decided against, see below |
 | Invoices | GST-compliant, sequential numbering, your GSTIN, downloadable |
 | Switching cycle | Monthly ↔ yearly at the next renewal, at the farm's locked-in prices |
 | Mandate max | Register a few thousand rupees of headroom. It can never be raised without the customer re-authorising |
@@ -332,6 +332,19 @@ bounce for a competitor's address would silently stop that farm's mail.
 Configuration is `EMAIL_API_KEY`, `EMAIL_FROM`, `SUPPORT_EMAIL` and
 `EMAIL_WEBHOOK_SECRET`; with none of them set, mail queues and nothing is sent,
 which is what a local run should do.
+
+**No SMS. Decided, not deferred.** Earlier drafts of this document suggested SMS
+for dunning and for password reset. That is off the table: nothing in the system
+sends a text message and nothing is going to. Three channels already reach a
+farmer — the in-app list, a push notification, and email — and a fourth that
+costs money per message and lands in the same inbox as every loan advertisement
+in India is not worth the ₹99 it would be chasing. Razorpay is explicitly told
+not to text either (`notify: { sms: false }` when a payment link is made), so a
+farmer never gets a message about a payment they have not made yet.
+
+Password recovery therefore stays where it is: an admin resets it (docs/10),
+which is a person and a phone call rather than a code. If that ever becomes the
+bottleneck, the answer is an emailed reset link, not a text.
 
 **Reminders survive suspension.** They cost you almost nothing to keep running
 and they are the difference between a lapsed customer who comes back and a former

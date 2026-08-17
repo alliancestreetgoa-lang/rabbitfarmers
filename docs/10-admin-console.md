@@ -20,7 +20,7 @@ Exactly what gets collected:
 | Field | Notes |
 |---|---|
 | **Email** | The login identity. Stored `citext`, so `Ravi@Farm.in` and `ravi@farm.in` are one account |
-| **Phone** | Contact, and the fallback channel for password reset |
+| **Phone** | Contact, and a login identity for staff (migration 0024). Not a messaging channel — nothing texts it |
 | **Address** | Also what a GST invoice needs, so it is not a wasted field |
 | **Password** | Argon2id or bcrypt. Never anything reversible |
 | Farm name | Needed to create the farm itself |
@@ -39,10 +39,18 @@ using it**, and that shows up in exactly one place: *password reset*. A farmer w
 mistypes his email at signup and later forgets his password has no way back in,
 and it becomes a support ticket — which at ₹82 net per farm per month is expensive.
 
-Cheap fix that adds no signup friction: **send the reset code to the phone
-number**, which you are collecting anyway. Reset by SMS is not signup
-verification; it costs the farmer nothing at signup and gives you a recovery path.
-Offer email reset too for whoever typed theirs correctly.
+An earlier draft of this document suggested sending a reset code by SMS. **That
+is decided against** — nothing in the system sends a text message and nothing is
+going to. See docs/09 for the reasoning; the short version is that a fourth
+channel costing money per message, landing in the same inbox as every loan
+advertisement in India, is not worth it at ₹99.
+
+So recovery is a person: **Reset password** on the farm's page in this console
+sets a temporary one, reads it out, and signs every device on the farm out. It
+is audited and needs a reason, and it is the only way back in for somebody
+locked out of their own records. If that ever becomes the bottleneck, the answer
+is an emailed reset link — the mail sender exists now (migration 0030) — not a
+text message.
 
 Two smaller things to handle while you are there:
 
