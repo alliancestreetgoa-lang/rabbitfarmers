@@ -64,9 +64,12 @@ describe('tenant isolation', () => {
         -- audit_log is NOT on this list any more. It was, and it was only safe
         -- because nothing ever wrote to it; migration 0013 started writing farm
         -- corrections there and gave it a policy at the same time.
+        -- condition_catalog is the superadmin's master list of sicknesses and
+        -- treatments (0037): platform-wide by design, granted to the admin role
+        -- only, pressed onto farms through SECURITY DEFINER functions.
         AND c.relname NOT IN ('schema_migration','plan','platform_admin',
                               'admin_audit_log','admin_impersonation',
-                              'admin_session','scheduler_run',
+                              'admin_session','scheduler_run','condition_catalog',
         -- invoice_series is one row per financial year, shared by every farm:
         -- a GST invoice number series has no tenant to scope it to. Revoked
         -- from the farmer-facing role entirely (migration 0026), which is the

@@ -1,12 +1,16 @@
 import { Hono } from 'hono';
 import { adminQuery } from '../db.js';
 import { hashPassword, verifyPassword, newSessionToken, hashToken, HttpError } from '../auth.js';
-import { renderLogin, renderFarms, renderFarm, renderImpersonation } from '../admin-ui.js';
+import {
+  renderLogin, renderFarms, renderFarm, renderFarmAnimals, renderFarmAnimal,
+  renderFarmStaff, renderImpersonation, renderSicknesses,
+} from '../admin-ui.js';
 import {
   ADMIN_COOKIE, ADMIN_SESSION_HOURS, readAdminToken, issueAdminSession,
   requireAdmin, requireAdminRole, audit, readBody, wantsJson,
 } from '../admin-auth.js';
 import { clientIp } from '../middleware.js';
+import { payslipPdf } from '../pdf.js';
 import { adminBillingRoutes } from './admin-billing.js';
 
 export const adminRoutes = new Hono();
@@ -66,6 +70,8 @@ adminRoutes.use('/api/*', requireAdmin);
  * something to discover by reading two files.
  */
 adminRoutes.use('/billing', requireAdmin);
+adminRoutes.use('/sicknesses', requireAdmin);
+adminRoutes.use('/sicknesses/*', requireAdmin);
 adminRoutes.use('/billing/*', requireAdmin);
 adminRoutes.route('/billing', adminBillingRoutes);
 
@@ -93,9 +99,100 @@ adminRoutes.get('/farms', async (c) => {
   return c.html(renderFarms({ farms, summary, q, status, admin: c.get('admin') }));
 });
 
+/* -------------------------------------------------------------- sicknesses -- */
+
+const slugify = (name) =>
+  name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
+
+/** Press the catalogue onto every farm. Called after each catalogue change. */
+async function applyCatalogEverywhere() {
+  await adminQuery('SELECT apply_condition_catalog(id) FROM farm');
+}
+
+/**
+ * The sickness catalogue: what every farm's report screen offers, and what
+ * each sickness gets. Superadmin only — a farmer reports, they never curate.
+ */
+adminRoutes.get('/sicknesses', requireAdminRole('superadmin'), async (c) => {
+  const { rows } = await adminQuery(
+    'SELECT * FROM condition_catalog ORDER BY is_active DESC, name');
+  const { rows: farms } = await adminQuery('SELECT count(*)::int AS n FROM farm');
+  if (c.req.query('format') === 'json') return c.json({ sicknesses: rows });
+  return c.html(renderSicknesses({ rows, farmCount: farms[0].n, admin: c.get('admin') }));
+});
+
+adminRoutes.post('/sicknesses', requireAdminRole('superadmin'), async (c) => {
+  const ct = c.req.header('content-type') ?? '';
+  const b = ct.includes('json') ? await c.req.json()
+    : Object.fromEntries((await c.req.formData()).entries());
+
+  const name = String(b.name ?? '').trim();
+  if (!name) throw new HttpError(400, 'The sickness needs a name', { field: 'name' });
+  const code = String(b.code ?? '').trim() || slugify(name);
+  if (!code) throw new HttpError(400, 'The sickness needs a name', { field: 'name' });
+
+  const medicine = String(b.medicine ?? '').trim() || null;
+  const days = b.days === undefined || b.days === '' ? null : Number(b.days);
+  if (medicine && (!Number.isInteger(days) || days < 1 || days > 60)) {
+    throw new HttpError(400, 'For how many days? 1 to 60.', { field: 'days' });
+  }
+  const reminder = b.reminder_interval_hours == null || b.reminder_interval_hours === ''
+    ? null : Number(b.reminder_interval_hours);
+  if (reminder !== null && (!Number.isFinite(reminder) || reminder < 0.5 || reminder > 168)) {
+    throw new HttpError(400, 'Remind every how many hours? 0.5 to 168, or leave it empty.',
+      { field: 'reminder_interval_hours' });
+  }
+
+  await adminQuery(`
+    INSERT INTO condition_catalog
+      (code, name, colour, reminder_interval_hours, is_contagious,
+       medicine, treatment_days, interval_days, dose_note, withdrawal_days)
+    VALUES ($1, $2, COALESCE($3, '#EA580C'), $4, COALESCE($5, false),
+            $6, $7, COALESCE($8, 1), $9, $10)
+    ON CONFLICT (code) DO UPDATE
+      SET name = EXCLUDED.name,
+          colour = EXCLUDED.colour,
+          reminder_interval_hours = EXCLUDED.reminder_interval_hours,
+          is_contagious = EXCLUDED.is_contagious,
+          medicine = EXCLUDED.medicine,
+          treatment_days = EXCLUDED.treatment_days,
+          interval_days = EXCLUDED.interval_days,
+          dose_note = EXCLUDED.dose_note,
+          withdrawal_days = EXCLUDED.withdrawal_days,
+          is_active = true,
+          updated_at = now()`,
+    [code, name, b.colour || null, reminder,
+     b.is_contagious === 'on' || b.is_contagious === true,
+     medicine, medicine ? days : null,
+     b.interval_days ? Number(b.interval_days) : null,
+     String(b.dose_note ?? '').trim() || null,
+     b.withdrawal_days ? Number(b.withdrawal_days) : null]);
+
+  await applyCatalogEverywhere();
+
+  if (ct.includes('json')) {
+    const { rows } = await adminQuery(
+      'SELECT * FROM condition_catalog WHERE code = $1', [code]);
+    return c.json({ sickness: rows[0] }, 201);
+  }
+  return c.redirect('/admin/sicknesses', 303);
+});
+
+adminRoutes.post('/sicknesses/:code/deactivate',
+  requireAdminRole('superadmin'), async (c) => {
+    const code = c.req.param('code');
+    const { rowCount } = await adminQuery(
+      'UPDATE condition_catalog SET is_active = false, updated_at = now() WHERE code = $1',
+      [code]);
+    if (!rowCount) throw new HttpError(404, 'No such sickness in the catalogue');
+    await applyCatalogEverywhere();
+    if ((c.req.header('content-type') ?? '').includes('json')) return c.json({ ok: true });
+    return c.redirect('/admin/sicknesses', 303);
+  });
+
 adminRoutes.get('/farms/:id', async (c) => {
   const id = c.req.param('id');
-  const [farm, audit_, subs, payments] = await Promise.all([
+  const [farm, audit_, subs, payments, staff] = await Promise.all([
     adminQuery('SELECT * FROM v_admin_farm_overview WHERE farm_id = $1', [id])
       .then((r) => r.rows[0]),
     adminQuery(`SELECT a.*, p.full_name AS admin_name FROM admin_audit_log a
@@ -112,14 +209,185 @@ adminRoutes.get('/farms/:id', async (c) => {
      */
     adminQuery(`SELECT * FROM v_admin_payment WHERE farm_id = $1
                  ORDER BY created_at DESC LIMIT 24`, [id]).then((r) => r.rows),
+    // The farm's people: who works there, what they are paid, and how much
+    // of this month they have worked — half the picture of an account.
+    adminQuery(`
+      SELECT e.id, e.full_name, e.role, e.phone, e.is_active,
+             (e.password_hash IS NOT NULL) AS can_sign_in, e.joined_on,
+             cs.monthly_amount AS monthly_salary,
+             att.days_worked   AS month_days_worked
+      FROM employee e
+      LEFT JOIN v_current_salary cs ON cs.employee_id = e.id
+      LEFT JOIN v_attendance_summary att
+             ON att.employee_id = e.id
+            AND att.month = to_char(farm_today(e.farm_id), 'YYYY-MM')
+      WHERE e.farm_id = $1
+      ORDER BY e.is_active DESC, e.role = 'owner' DESC, e.full_name`, [id])
+      .then((r) => r.rows),
   ]);
   if (!farm) throw new HttpError(404, 'Farm not found');
   if (c.req.query('format') === 'json') {
-    return c.json({ farm, audit: audit_, subscription: subs, payments });
+    return c.json({ farm, audit: audit_, subscription: subs, payments, staff });
   }
   return c.html(renderFarm({
-    farm, audit: audit_, subscription: subs, payments, admin: c.get('admin'),
+    farm, audit: audit_, subscription: subs, payments, staff, admin: c.get('admin'),
   }));
+});
+
+/* --------------------------------------------------------- a farm's herd -- */
+
+/**
+ * The Animals card opens here: the herd as the farmer sees it, read-only.
+ * "What is actually on this farm" is the first question when a farmer calls
+ * about anything, and impersonation is a heavier tool than the question needs.
+ */
+adminRoutes.get('/farms/:id/animals', async (c) => {
+  const id = c.req.param('id');
+  const [farm, animals] = await Promise.all([
+    adminQuery('SELECT farm_id, farm_name FROM v_admin_farm_overview WHERE farm_id = $1', [id])
+      .then((r) => r.rows[0]),
+    adminQuery(`
+      SELECT r.id, r.tag, r.name, r.sex, r.status, r.date_of_birth,
+             b.name AS breed, c2.code AS cage
+      FROM rabbit r
+      LEFT JOIN breed b ON b.id = r.breed_id
+      LEFT JOIN cage c2 ON c2.id = r.cage_id
+      WHERE r.farm_id = $1
+      ORDER BY (r.status = 'active') DESC, r.tag`, [id]).then((r) => r.rows),
+  ]);
+  if (!farm) throw new HttpError(404, 'Farm not found');
+  if (c.req.query('format') === 'json') return c.json({ farm, animals });
+  return c.html(renderFarmAnimals({ farm, animals, admin: c.get('admin') }));
+});
+
+/** One animal, its whole story: matings, litters, sickness, medicine, moves. */
+adminRoutes.get('/farms/:id/animals/:animalId', async (c) => {
+  const id = c.req.param('id');
+  const animalId = c.req.param('animalId');
+  const [farm, animal, events] = await Promise.all([
+    adminQuery('SELECT farm_id, farm_name FROM v_admin_farm_overview WHERE farm_id = $1', [id])
+      .then((r) => r.rows[0]),
+    adminQuery(`
+      SELECT r.id, r.tag, r.name, r.sex, r.status, r.date_of_birth,
+             b.name AS breed, c2.code AS cage
+      FROM rabbit r
+      LEFT JOIN breed b ON b.id = r.breed_id
+      LEFT JOIN cage c2 ON c2.id = r.cage_id
+      WHERE r.farm_id = $1 AND r.id = $2`, [id, animalId]).then((r) => r.rows[0]),
+    adminQuery(`
+      SELECT on_date, kind, title FROM v_rabbit_history
+      WHERE farm_id = $1 AND rabbit_id = $2
+      ORDER BY on_date DESC, ord DESC`, [id, animalId]).then((r) => r.rows),
+  ]);
+  if (!farm) throw new HttpError(404, 'Farm not found');
+  if (!animal) throw new HttpError(404, 'No such animal on this farm');
+  if (c.req.query('format') === 'json') return c.json({ farm, animal, events });
+  return c.html(renderFarmAnimal({ farm, animal, events, admin: c.get('admin') }));
+});
+
+/* ------------------------------------------------- a farm's person & pay -- */
+
+/** Month-by-month pay for one employee, computed exactly as the farmer sees it. */
+async function adminPayMonths(farmId, employeeId) {
+  const { rows } = await adminQuery(`
+    WITH span AS (
+      SELECT date_trunc('month', LEAST(
+               COALESCE((SELECT min(work_date) FROM attendance WHERE employee_id = $2),
+                        farm_today($1)),
+               COALESCE((SELECT joined_on FROM employee WHERE id = $2), farm_today($1)),
+               COALESCE((SELECT min(effective_from) FROM staff_salary WHERE employee_id = $2),
+                        farm_today($1))))::date AS a,
+             date_trunc('month', farm_today($1)::timestamp)::date AS b
+    )
+    SELECT to_char(gs, 'YYYY-MM')                                        AS month,
+           extract(day FROM (gs + interval '1 month' - interval '1 day'))::int AS days_in_month,
+           COALESCE(s.present, 0)   AS present,
+           COALESCE(s.half_days, 0) AS half_days,
+           COALESCE(s.holiday, 0)   AS holiday,
+           COALESCE(s.absent, 0)    AS absent,
+           COALESCE(s.leave, 0)     AS leave,
+           sal.monthly_amount,
+           (COALESCE(s.present, 0) + 0.5 * COALESCE(s.half_days, 0)
+            + COALESCE(s.holiday, 0))::numeric(6,1)                      AS paid_days,
+           CASE WHEN sal.monthly_amount IS NULL THEN NULL
+                ELSE round(sal.monthly_amount
+                     * (COALESCE(s.present, 0) + 0.5 * COALESCE(s.half_days, 0)
+                        + COALESCE(s.holiday, 0))
+                     / extract(day FROM (gs + interval '1 month' - interval '1 day')), 2)
+           END                                                           AS amount
+    FROM span, generate_series(span.a, span.b, interval '1 month') gs
+    LEFT JOIN v_attendance_summary s
+           ON s.employee_id = $2 AND s.month = to_char(gs, 'YYYY-MM')
+    LEFT JOIN LATERAL (
+      SELECT monthly_amount FROM staff_salary
+      WHERE employee_id = $2
+        AND effective_from <= (gs + interval '1 month' - interval '1 day')::date
+      ORDER BY effective_from DESC, created_at DESC LIMIT 1
+    ) sal ON true
+    ORDER BY month DESC`, [farmId, employeeId]);
+  return rows;
+}
+
+/** One person on one farm: salary, its history, every month's attendance & pay. */
+adminRoutes.get('/farms/:id/staff/:employeeId', async (c) => {
+  const id = c.req.param('id');
+  const employeeId = c.req.param('employeeId');
+  const [farm, person] = await Promise.all([
+    adminQuery('SELECT farm_id, farm_name FROM v_admin_farm_overview WHERE farm_id = $1', [id])
+      .then((r) => r.rows[0]),
+    adminQuery(`
+      SELECT e.id, e.full_name, e.role, e.phone, e.is_active, e.joined_on,
+             cs.monthly_amount, cs.effective_from
+      FROM employee e
+      LEFT JOIN v_current_salary cs ON cs.employee_id = e.id
+      WHERE e.farm_id = $1 AND e.id = $2`, [id, employeeId]).then((r) => r.rows[0]),
+  ]);
+  if (!farm) throw new HttpError(404, 'Farm not found');
+  if (!person) throw new HttpError(404, 'No such person on this farm');
+
+  const [history, months] = await Promise.all([
+    adminQuery(`
+      SELECT ss.monthly_amount, ss.effective_from, ss.created_at,
+             e2.full_name AS set_by_name
+      FROM staff_salary ss LEFT JOIN employee e2 ON e2.id = ss.set_by
+      WHERE ss.employee_id = $1
+      ORDER BY ss.effective_from DESC, ss.created_at DESC`, [employeeId])
+      .then((r) => r.rows),
+    adminPayMonths(id, employeeId),
+  ]);
+
+  if (c.req.query('format') === 'json') {
+    return c.json({ farm, person, history, months });
+  }
+  return c.html(renderFarmStaff({ farm, person, history, months, admin: c.get('admin') }));
+});
+
+/** The same payslip PDF the farmer prints, for the month asked. */
+adminRoutes.get('/farms/:id/staff/:employeeId/payslip', async (c) => {
+  const id = c.req.param('id');
+  const employeeId = c.req.param('employeeId');
+  const month = c.req.query('month');
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    throw new HttpError(400, 'month should look like 2026-08', { field: 'month' });
+  }
+  const [farm, person] = await Promise.all([
+    adminQuery('SELECT farm_name FROM v_admin_farm_overview WHERE farm_id = $1', [id])
+      .then((r) => r.rows[0]),
+    adminQuery(`
+      SELECT full_name, phone, role FROM employee
+      WHERE farm_id = $1 AND id = $2`, [id, employeeId]).then((r) => r.rows[0]),
+  ]);
+  if (!farm) throw new HttpError(404, 'Farm not found');
+  if (!person) throw new HttpError(404, 'No such person on this farm');
+
+  const pay = (await adminPayMonths(id, employeeId)).find((m) => m.month === month);
+  if (!pay || pay.monthly_amount == null) {
+    throw new HttpError(409, 'No salary was in force for that month.');
+  }
+  const slug = person.full_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  c.header('content-type', 'application/pdf');
+  c.header('content-disposition', `attachment; filename="payslip-${slug}-${month}.pdf"`);
+  return c.body(payslipPdf({ farmName: farm.farm_name, person, pay }));
 });
 
 /* ----------------------------------------------------- subscription actions -- */

@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
 import {
-  Button, H1, Loading, Muted, Screen, SupportReadOnly,
+  Button, Dropdown, H1, Loading, Muted, Screen, SupportReadOnly,
 } from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 
@@ -17,22 +17,27 @@ export default function ReportCondition() {
   const { rabbit } = useLocalSearchParams<{ rabbit?: string }>();
   const { client, outbox, refreshOutbox, readOnly, session } = useApp();
   const [rabbitId, setRabbitId] = useState<string | undefined>(rabbit);
+  const [code, setCode] = useState<string | null>(null);
   const [severity, setSeverity] = useState<typeof SEVERITY[number]>('moderate');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { data, loading } = useQuery('animals', () => client.animals());
   const animals = data?.animals ?? [];
+  const typesQ = useQuery('condition-types', () => client.conditionTypes());
+  const types = typesQ.data?.types ?? [];
+  const picked = types.find((t) => t.code === code);
 
   const save = async () => {
     if (!rabbitId) { setError('Which rabbit?'); return; }
+    if (!code) { setError('What sickness is it?'); return; }
     setBusy(true); setError(null);
     try {
       await outbox.enqueue('condition', {
-        rabbit_id: rabbitId, code: 'loose_motion', severity,
+        rabbit_id: rabbitId, code, severity,
       });
       await refreshOutbox();
-      router.replace('/(app)/daily');
+      router.replace('/(app)/health');
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   };
@@ -44,20 +49,47 @@ export default function ReportCondition() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ padding: space.lg, paddingBottom: space.xxl }}>
-        <H1>Loose motion</H1>
+        <H1>Report a problem</H1>
         <Muted>
-          You will be reminded every two hours until someone marks it stopped.
-          The rabbit is held out of breeding meanwhile.
+          You will be reminded until someone marks it stopped. If a medicine is
+          set for the sickness, its doses start today.
         </Muted>
 
-        <Text style={s.label}>WHICH RABBIT</Text>
-        {loading && !data && <Loading />}
-        {animals.map((a) => (
-          <Pressable key={a.id} testID={`crab-${a.id}`} onPress={() => setRabbitId(a.id)}
-                     style={[s.pick, rabbitId === a.id && s.pickOn]}>
-            <Text style={[s.pickText, rabbitId === a.id && s.pickTextOn]}>{a.name ?? a.tag}</Text>
-          </Pressable>
-        ))}
+        {(typesQ.loading && !typesQ.data) || (loading && !data)
+          ? <Loading />
+          : (
+            <>
+              <Dropdown
+                label="What sickness"
+                testID="ctype"
+                value={code}
+                placeholder="Choose the sickness…"
+                options={types.map((ty) => ({
+                  id: ty.code, label: ty.name,
+                  sub: ty.treatment ? `${ty.treatment.medicine} · ${ty.treatment.days} day${ty.treatment.days === 1 ? '' : 's'}` : undefined,
+                }))}
+                onSelect={setCode}
+              />
+              {picked && (
+                <Text style={s.rx}>
+                  {picked.treatment
+                    ? `Give ${picked.treatment.medicine} within 24 hours` +
+                      `${picked.treatment.dose_note ? ` — ${picked.treatment.dose_note}` : ''}` +
+                      `${picked.treatment.days > 1 ? `. ${picked.treatment.days} days while it lasts.` : '.'}`
+                    : 'No medicine set for this one — reminders only.'}
+                </Text>
+              )}
+
+              <Dropdown
+                label="Which rabbit"
+                testID="crab"
+                value={rabbitId ?? null}
+                placeholder="Choose the rabbit…"
+                options={animals.map((a) => ({ id: a.id, label: a.name ?? a.tag }))}
+                onSelect={setRabbitId}
+              />
+            </>
+          )}
 
         <Text style={s.label}>HOW BAD</Text>
         <View style={{ flexDirection: 'row', gap: space.sm }}>
@@ -80,6 +112,7 @@ export default function ReportCondition() {
 }
 
 const s = StyleSheet.create({
+  rx: { ...t.small, color: colors.muted, marginTop: -space.sm, marginBottom: space.lg },
   label: { ...t.label, color: colors.muted, marginTop: space.lg, marginBottom: space.sm },
   pick: {
     minHeight: 56, paddingHorizontal: space.lg, justifyContent: 'center',

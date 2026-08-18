@@ -365,7 +365,8 @@ staffRoutes.get('/staff/:id/salary', requireCan('payroll:manage'), async (c) => 
   const db = c.get('db');
   const data = await db(async (client) => {
     const { rows: person } = await client.query(
-      `SELECT id, full_name, phone, role, joined_on, is_active
+      `SELECT id, full_name, phone, role, joined_on, is_active,
+              (password_hash IS NOT NULL) AS can_sign_in
        FROM employee WHERE id = $1`, [id]);
     if (!person.length) throw new HttpError(404, 'No such person on this farm');
 

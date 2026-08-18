@@ -588,7 +588,14 @@ farmRoutes.get('/summary', canRead, async (c) => {
                -- Rabbits, not cases: one animal with two conditions is one
                -- sick rabbit on the dashboard, not two.
                (SELECT count(DISTINCT rabbit_id)::int FROM v_open_conditions) AS sick_rabbits,
-               (SELECT count(*)::int FROM v_medication_due)   AS doses_due`),
+               -- The same filter GET /medication applies: lapsed doses cannot
+               -- be recorded any more and doses for a rabbit already gone are
+               -- nobody's job, so a card counting them reads as a broken list.
+               (SELECT count(*)::int FROM v_medication_due md
+                 JOIN rabbit r ON r.id = md.rabbit_id
+                WHERE NOT md.lapsed
+                  AND md.due_on <= farm_today(md.farm_id) + 2
+                  AND r.status NOT IN ('sold', 'culled', 'dead')) AS doses_due`),
       client.query(`
         SELECT count(*)::int                                          AS open,
                count(*) FILTER (WHERE urgency = 'critical')::int      AS urgent
@@ -1125,6 +1132,45 @@ farmRoutes.get('/conditions', canRead, async (c) => {
   return c.json(data);
 });
 
+/**
+ * GET /condition-types — every sickness this farm knows, with its treatment.
+ * This is what the report screen's picker shows, so it is readable by anyone.
+ * There is deliberately no POST: the catalogue is veterinary knowledge and
+ * only the superadmin curates it, from the admin console.
+ */
+farmRoutes.get('/condition-types', canRead, async (c) => {
+  const db = c.get('db');
+  const rows = await db(async (client) => {
+    const { rows } = await client.query(`
+      SELECT ct.id, ct.code, ct.name, ct.colour, ct.reminder_interval_hours,
+             ct.blocks_breeding, ct.is_contagious,
+             p.id   AS protocol_id,
+             regexp_replace(p.name, '\\s*\\([^)]*\\)$', '') AS medicine,
+             p.doses AS treatment_days,
+             p.interval_days,
+             p.dose_note,
+             p.withdrawal_days
+      FROM condition_type ct
+      LEFT JOIN medication_protocol p
+             ON p.condition_type_id = ct.id AND p.is_active
+      WHERE ct.is_active
+      ORDER BY ct.name`);
+    return rows;
+  });
+  return c.json({
+    types: rows.map((r) => ({
+      id: r.id, code: r.code, name: r.name, colour: r.colour,
+      reminder_interval_hours: r.reminder_interval_hours,
+      blocks_breeding: r.blocks_breeding, is_contagious: r.is_contagious,
+      treatment: r.protocol_id ? {
+        protocol_id: r.protocol_id, medicine: r.medicine,
+        days: r.treatment_days, interval_days: r.interval_days,
+        dose_note: r.dose_note, withdrawal_days: r.withdrawal_days,
+      } : null,
+    })),
+  });
+});
+
 /** POST /conditions — anyone can report loose motion, no permission needed. */
 farmRoutes.post('/conditions', write, canWriteHealth, async (c) => {
   const b = await c.req.json();
@@ -1161,9 +1207,18 @@ farmRoutes.post('/conditions', write, canWriteHealth, async (c) => {
       [types[0].id, b.rabbit_id ?? null, b.litter_id ?? null,
        b.severity ?? 'moderate', b.notes ?? null, session.employeeId, b.id ?? null,
        observedAt]);
-    return rows[0];
+
+    // Tell whoever just reported it what to give. The course itself is already
+    // running — v_medication_schedule anchors on the open condition.
+    const { rows: rx } = await client.query(`
+      SELECT regexp_replace(name, '\\s*\\([^)]*\\)$', '') AS medicine,
+             doses AS days, interval_days, dose_note
+      FROM medication_protocol
+      WHERE condition_type_id = $1 AND is_active
+      LIMIT 1`, [types[0].id]);
+    return { ...rows[0], treatment: rx[0] ?? null };
   });
-  return c.json({ condition: row }, 201);
+  return c.json({ condition: row, treatment: row.treatment }, 201);
 });
 
 /**

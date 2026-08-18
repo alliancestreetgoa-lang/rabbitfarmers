@@ -88,6 +88,21 @@ export async function apiPost<T>(path: string, data?: unknown): Promise<T> {
   return body as T;
 }
 
+export async function apiPatch<T>(path: string, data?: unknown): Promise<T> {
+  const session = getSession();
+  const res = await fetch(`/api${path}`, {
+    method: 'PATCH',
+    headers: {
+      'content-type': 'application/json',
+      ...(session ? { authorization: `Bearer ${session.token}` } : {}),
+    },
+    body: data === undefined ? undefined : JSON.stringify(data),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(res.status, body?.error ?? `Request failed (${res.status})`);
+  return body as T;
+}
+
 /**
  * Where the complete product lives — the full app, same credentials. It is
  * served under /app on the same origin (the Expo export's baseUrl agrees);

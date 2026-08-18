@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { apiGet, apiPost, getSession } from '@/lib/api';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { apiGet, apiPatch, apiPost, getSession } from '@/lib/api';
 import {
   Shell, useIdentity, PageTitle, Section, Table, Empty, Btn, Input, Select,
 } from '@/components/ui/shell';
@@ -26,15 +26,16 @@ export function TeamPage() {
   const id = useIdentity();
   const isOwner = id.userRole === 'owner';
   const [staff, setStaff] = useState<Person[] | null>(null);
+  const [past, setPast] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ full_name: '', phone: '', role: 'caretaker', monthly_salary: '' });
   const [oneTime, setOneTime] = useState<{ name: string; password: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = () => apiGet<{ staff: Person[] }>('/staff')
+  const load = (which = past) => apiGet<{ staff: Person[] }>(`/staff?include=${which ? 'past' : 'active'}`)
     .then((d) => setStaff(d.staff)).catch((e) => setError(e.message));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [past]);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy('add'); setError(null);
@@ -78,7 +79,10 @@ export function TeamPage() {
         </div>
       )}
 
-      <div className="mb-4 flex justify-end">
+      <div className="mb-4 flex justify-end gap-3">
+        <Btn tone="quiet" onClick={() => setPast((p) => !p)}>
+          {past ? 'Back to the team' : 'People who left'}
+        </Btn>
         <Btn onClick={() => setShowAdd((s) => !s)} tone={showAdd ? 'quiet' : 'accent'}>
           {showAdd ? 'Cancel' : 'Add a person'}
         </Btn>
@@ -118,7 +122,7 @@ export function TeamPage() {
         </form>
       )}
 
-      {staff && staff.length === 0 && <Empty>Just you so far.</Empty>}
+      {staff && staff.length === 0 && <Empty>{past ? 'Nobody has left.' : 'Just you so far.'}</Empty>}
       {staff && staff.length > 0 && (
         <>
           <Table head={head}>
@@ -152,7 +156,7 @@ export function TeamPage() {
           </Table>
           {isOwner && (
             <p className="mt-3 text-sm text-farm-muted">
-              Click a name for their salary, monthly pay from attendance, and payslip PDFs.
+              Click a name to edit them — role, phone, salary, a new password, payslip PDFs.
             </p>
           )}
         </>
@@ -169,7 +173,8 @@ interface PayMonth {
   monthly_amount: string | null; paid_days: string; amount: string | null;
 }
 interface SalaryData {
-  person: { id: string; full_name: string; phone: string | null; role: string; joined_on: string | null };
+  person: { id: string; full_name: string; phone: string | null; role: string;
+            joined_on: string | null; is_active: boolean; can_sign_in: boolean };
   current: { monthly_amount: string; effective_from: string } | null;
   history: { id: string; monthly_amount: string; effective_from: string; created_at: string; set_by_name: string | null }[];
   months: PayMonth[];
@@ -181,16 +186,56 @@ const monthName = (m: string) =>
 /** One person's pay: what they are on, every month's slip, every change. */
 export function TeamPersonPage() {
   const id = useIdentity();
+  const navigate = useNavigate();
   const { personId } = useParams<{ personId: string }>();
   const [data, setData] = useState<SalaryData | null>(null);
+  const [profile, setProfile] = useState({ full_name: '', phone: '', role: 'caretaker' });
   const [amount, setAmount] = useState('');
   const [from, setFrom] = useState('');
+  const [oneTime, setOneTime] = useState<string | null>(null);
+  const [armed, setArmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = () => apiGet<SalaryData>(`/staff/${personId}/salary`)
-    .then(setData).catch((e) => setError(e.message));
+    .then((d) => {
+      setData(d);
+      setProfile({ full_name: d.person.full_name, phone: d.person.phone ?? '', role: d.person.role });
+    })
+    .catch((e) => setError(e.message));
   useEffect(() => { load(); }, [personId]);
+
+  const saveProfile = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy('profile'); setError(null);
+    try {
+      await apiPatch(`/staff/${personId}`, {
+        full_name: profile.full_name.trim(), phone: profile.phone.trim(), role: profile.role,
+      });
+      await load();
+    } catch (err) { setError((err as Error).message); }
+    finally { setBusy(null); }
+  };
+
+  const newPassword = async () => {
+    setBusy('password'); setError(null); setOneTime(null);
+    try {
+      const res = await apiPost<{ temporary_password: string }>(`/staff/${personId}/login`);
+      setOneTime(res.temporary_password);
+      await load();
+    } catch (err) { setError((err as Error).message); }
+    finally { setBusy(null); }
+  };
+
+  const setActive = async (is_active: boolean) => {
+    setBusy('active'); setError(null);
+    try {
+      await apiPatch(`/staff/${personId}`, { is_active });
+      if (!is_active) { navigate('/dashboard/team'); return; }
+      setArmed(false);
+      await load();
+    } catch (err) { setError((err as Error).message); setArmed(false); }
+    finally { setBusy(null); }
+  };
 
   const setSalary = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy('set'); setError(null);
@@ -237,8 +282,71 @@ export function TeamPersonPage() {
       />
       {error && <p className="mb-4 rounded-xl bg-farm-crit-soft px-4 py-3 text-sm font-medium text-farm-crit">{error}</p>}
 
+      {oneTime && data && (
+        <div className="mb-5 rounded-xl border border-farm-accent-soft bg-farm-accent-soft/50 p-4">
+          <p className="text-sm font-bold">
+            {data.person.full_name} signs in with {data.person.phone} and this password.
+          </p>
+          <p className="mt-1 text-sm">
+            Shown exactly once, so pass it on now:{' '}
+            <code className="rounded bg-farm-surface px-2 py-0.5 font-bold">{oneTime}</code>
+          </p>
+          <div className="mt-2"><Btn tone="quiet" onClick={() => setOneTime(null)}>I've passed it on</Btn></div>
+        </div>
+      )}
+
       {data && (
         <>
+          {!data.person.is_active && (
+            <p className="mb-5 rounded-xl bg-farm-surface-alt px-4 py-3 text-sm font-medium">
+              They have left the farm. Their records stay; you can bring them back below.
+            </p>
+          )}
+
+          <Section title="Who they are">
+            <form onSubmit={saveProfile}
+              className="flex flex-wrap items-end gap-3 rounded-xl border border-farm-rule bg-farm-surface p-4">
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Name</span>
+                <Input required value={profile.full_name}
+                  onChange={(e) => setProfile({ ...profile, full_name: e.target.value })} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Phone (their sign-in)</span>
+                <Input required value={profile.phone}
+                  onChange={(e) => setProfile({ ...profile, phone: e.target.value })} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Role</span>
+                <Select value={profile.role}
+                  onChange={(e) => setProfile({ ...profile, role: e.target.value })}>
+                  <option value="caretaker">Farm hand</option>
+                  <option value="manager">Manager</option>
+                  <option value="vet">Vet</option>
+                  <option value="accountant">Accountant</option>
+                  <option value="owner">Owner</option>
+                </Select>
+              </label>
+              <Btn type="submit" disabled={busy === 'profile'}>
+                {busy === 'profile' ? 'Saving…' : 'Save changes'}
+              </Btn>
+            </form>
+          </Section>
+
+          <Section title="Signing in">
+            <div className="flex flex-wrap items-center gap-4 rounded-xl border border-farm-rule bg-farm-surface px-4 py-3">
+              <p className="flex-1 text-sm">
+                {data.person.can_sign_in
+                  ? 'They have a login. A new password signs them out everywhere first.'
+                  : 'They cannot sign in yet — plenty of staff never need to.'}
+              </p>
+              <Btn tone="quiet" disabled={busy === 'password'} onClick={newPassword}>
+                {busy === 'password' ? '…'
+                  : data.person.can_sign_in ? 'Set a new password' : 'Give them a login'}
+              </Btn>
+            </div>
+          </Section>
+
           <Section title="Salary">
             <div className="flex flex-wrap items-end gap-6 rounded-xl border border-farm-rule bg-farm-surface p-4">
               <div>
@@ -313,6 +421,36 @@ export function TeamPersonPage() {
                   ))}
                 </Table>
               )}
+          </Section>
+
+          <Section title="Leaving the farm">
+            <div className="flex flex-wrap items-center gap-4 rounded-xl border border-farm-rule bg-farm-surface px-4 py-3">
+              {data.person.is_active ? (
+                <>
+                  <p className="flex-1 text-sm">
+                    Nothing is deleted — their name stays on everything they recorded.
+                    It ends their sessions and takes them off the team.
+                  </p>
+                  {!armed ? (
+                    <Btn tone="crit" onClick={() => setArmed(true)}>They have left the farm</Btn>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <Btn tone="crit" disabled={busy === 'active'} onClick={() => setActive(false)}>
+                        {busy === 'active' ? '…' : `Yes, remove ${data.person.full_name.split(' ')[0]}`}
+                      </Btn>
+                      <Btn tone="quiet" onClick={() => setArmed(false)}>Cancel</Btn>
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="flex-1 text-sm">Back on the farm? This puts them back on the team.</p>
+                  <Btn disabled={busy === 'active'} onClick={() => setActive(true)}>
+                    {busy === 'active' ? '…' : 'They are back'}
+                  </Btn>
+                </>
+              )}
+            </div>
           </Section>
         </>
       )}

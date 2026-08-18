@@ -1,7 +1,7 @@
 import type { Storage } from './storage.ts';
 import { MemoryStorage } from './storage.ts';
 import type {
-  Animal, Breed, BuckSuggestion, Cage, DailyItem, HistoryEvent, Litter, MatingSchedule,
+  Animal, Breed, BuckSuggestion, Cage, ConditionType, DailyItem, HistoryEvent, Litter, MatingSchedule,
   MedicationDose, OpenCondition, PregnancySummary, PregnantDoe, RabbitLifetime,
   ReadyDoe,
   Attendance, AttendanceSummary, BillingRow, PayMonth, Session, Shed, Staff, StaffRole, Subscription,
@@ -528,6 +528,11 @@ export class ApiClient {
     weaned_on?: string; weaned_count?: number; avg_weaning_weight_g?: number;
   }) {
     return this.request<{ litter: unknown }>('POST', `/litters/${litterId}/wean`, input);
+  }
+
+  /** Every sickness this farm knows, with what to give for it. */
+  conditionTypes() {
+    return this.request<{ types: ConditionType[] }>('GET', '/condition-types');
   }
 
   reportCondition(input: {

@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
-import { apiGet, apiPost, getSession } from '@/lib/api';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { apiGet, apiPatch, apiPost, getSession } from '@/lib/api';
 import {
   Shell, useIdentity, PageTitle, Section, Table, Empty, Btn, Input, Select,
 } from '@/components/ui/shell';
@@ -97,7 +97,7 @@ export function HerdPage() {
       )}
 
       {shown.length > 0 && (
-        <Table head={['Name', 'Sex', 'State', 'Born', 'Breed', 'Cage', 'Health']}>
+        <Table head={['Name', 'Sex', 'State', 'Born', 'Breed', 'Cage', 'Health', '']}>
           {shown.map((a) => (
             <tr key={a.id} className="border-b border-farm-rule last:border-0 hover:bg-farm-ground">
               <td className="px-4 py-2.5">
@@ -114,6 +114,13 @@ export function HerdPage() {
                 {a.primary_condition
                   ? <span className="font-semibold" style={{ color: a.primary_colour ?? undefined }}>{a.primary_condition}</span>
                   : '—'}
+              </td>
+              <td className="px-4 py-2.5 whitespace-nowrap text-sm">
+                <Link className="font-semibold text-farm-accent hover:underline"
+                      to={`/dashboard/herd/${a.id}`}>History</Link>
+                <span className="mx-1.5 text-farm-rule">·</span>
+                <Link className="font-semibold text-farm-accent hover:underline"
+                      to={`/dashboard/herd/${a.id}?edit=1`}>Edit</Link>
               </td>
             </tr>
           ))}
@@ -136,12 +143,19 @@ interface History {
   offspring: { id: string; tag: string; name: string | null; status: string }[];
 }
 
+const BREEDING_KINDS = new Set(['born', 'mating', 'kindling', 'weaning']);
+const HEALTH_KINDS = new Set(['condition', 'dose', 'health_event']);
+
 export function AnimalPage() {
   const identity = useIdentity();
   const { animalId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [data, setData] = useState<History | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(searchParams.get('edit') === '1');
+  const [edit, setEdit] = useState({ name: '', tag: '', sex: 'doe', date_of_birth: '', notes: '' });
+  const [filter, setFilter] = useState<'all' | 'breeding' | 'health'>('all');
   const [leaving, setLeaving] = useState(false);
   const [leave, setLeave] = useState({ status: 'sold', reason: '' });
   const [deleteArmed, setDeleteArmed] = useState(false);
@@ -149,8 +163,29 @@ export function AnimalPage() {
   const isOwner = getSession()?.user?.role === 'owner';
 
   const load = () => apiGet<History>(`/animals/${animalId}/history`)
-    .then(setData).catch((e) => setError(e.message));
+    .then((d) => {
+      setData(d);
+      setEdit({
+        name: d.animal.name ?? '', tag: d.animal.tag, sex: d.animal.sex,
+        date_of_birth: d.animal.date_of_birth ?? '', notes: d.animal.notes ?? '',
+      });
+    })
+    .catch((e) => setError(e.message));
   useEffect(() => { load(); }, [animalId]);
+
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy(true); setError(null);
+    try {
+      await apiPatch(`/animals/${animalId}`, {
+        name: edit.name.trim() || undefined, tag: edit.tag.trim(), sex: edit.sex,
+        date_of_birth: edit.date_of_birth || undefined,
+        notes: edit.notes.trim() || undefined,
+      });
+      setEditing(false);
+      await load();
+    } catch (err) { setError((err as Error).message); }
+    finally { setBusy(false); }
+  };
 
   const recordLeave = async () => {
     setBusy(true); setError(null);
@@ -199,16 +234,91 @@ export function AnimalPage() {
         </p>
       )}
 
+      {a && !editing && (
+        <div className="mb-6 flex gap-3">
+          <Btn tone="quiet" onClick={() => setEditing(true)}>Edit this rabbit</Btn>
+          <Link to={`/dashboard/sick/${animalId}`}
+            className="rounded-lg border border-farm-rule bg-farm-surface px-3.5 py-2 text-sm font-semibold text-farm-accent">
+            Full health record →
+          </Link>
+        </div>
+      )}
+
+      {a && editing && (
+        <Section title="Edit">
+          <form onSubmit={saveEdit}
+            className="flex flex-wrap items-end gap-3 rounded-xl border border-farm-rule bg-farm-surface p-4">
+            <label className="text-sm">
+              <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Name</span>
+              <Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Tag</span>
+              <Input required value={edit.tag} onChange={(e) => setEdit({ ...edit, tag: e.target.value })} className="w-28" />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Sex</span>
+              <Select value={edit.sex} onChange={(e) => setEdit({ ...edit, sex: e.target.value })}>
+                <option value="doe">Female (doe)</option>
+                <option value="buck">Male (buck)</option>
+                <option value="unknown">Not sure</option>
+              </Select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Born</span>
+              <Input type="date" value={edit.date_of_birth}
+                onChange={(e) => setEdit({ ...edit, date_of_birth: e.target.value })} />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Notes</span>
+              <Input value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })}
+                placeholder="Anything worth remembering" className="w-64" />
+            </label>
+            <Btn type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</Btn>
+            <Btn tone="quiet" onClick={() => setEditing(false)}>Cancel</Btn>
+          </form>
+        </Section>
+      )}
+
       {data && data.events.length > 0 && (
-        <Section title="Everything recorded, newest first">
-          <div className="rounded-xl border border-farm-rule bg-farm-surface">
-            {data.events.map((e, i) => (
-              <div key={i} className="flex gap-4 border-b border-farm-rule px-4 py-2.5 text-sm last:border-0">
-                <span className="w-24 flex-none text-farm-muted">{e.on_date}</span>
-                <span>{e.title}</span>
-              </div>
-            ))}
-          </div>
+        <Section title="History"
+          action={
+            <span className="flex gap-1.5">
+              {([['all', 'Everything'], ['breeding', 'Matings & litters'], ['health', 'Sickness & medicine']] as const)
+                .map(([key, label]) => (
+                  <button key={key} onClick={() => setFilter(key)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${
+                      filter === key
+                        ? 'bg-farm-accent text-white'
+                        : 'border border-farm-rule bg-farm-surface text-farm-muted'}`}>
+                    {label}
+                  </button>
+                ))}
+            </span>
+          }>
+          {(() => {
+            const shown = data.events.filter((e) =>
+              filter === 'all' ? true
+                : filter === 'breeding' ? BREEDING_KINDS.has(e.kind)
+                : HEALTH_KINDS.has(e.kind));
+            return shown.length === 0
+              ? <Empty>{filter === 'breeding' ? 'No matings or litters recorded yet.' : 'No sickness or medicine recorded — healthy so far.'}</Empty>
+              : (
+                <div className="rounded-xl border border-farm-rule bg-farm-surface">
+                  {shown.map((e, i) => (
+                    <div key={i} className="flex gap-4 border-b border-farm-rule px-4 py-2.5 text-sm last:border-0">
+                      <span className="w-24 flex-none text-farm-muted">{e.on_date}</span>
+                      <span className="flex-1">{e.title}</span>
+                      <span className={`flex-none text-xs font-semibold uppercase ${
+                        HEALTH_KINDS.has(e.kind) ? 'text-farm-warn'
+                          : BREEDING_KINDS.has(e.kind) ? 'text-farm-accent' : 'text-farm-muted'}`}>
+                        {e.kind.replace('_', ' ')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+          })()}
         </Section>
       )}
 

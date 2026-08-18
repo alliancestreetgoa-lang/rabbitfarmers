@@ -242,6 +242,21 @@ export interface MatingSchedule {
 /* --------------------------------------------------------------------- team */
 
 /** The five roles from docs/04. Enforced by the API, mirrored here for the UI. */
+export interface ConditionType {
+  id: string;
+  code: string;
+  name: string;
+  colour: string;
+  reminder_interval_hours: string | number | null;
+  blocks_breeding: boolean;
+  is_contagious: boolean;
+  /** What to give when this is reported; null until the owner sets one. */
+  treatment: {
+    protocol_id: string; medicine: string; days: number;
+    interval_days: number; dose_note: string | null; withdrawal_days: number | null;
+  } | null;
+}
+
 export type StaffRole = 'owner' | 'manager' | 'caretaker' | 'vet' | 'accountant';
 
 /** One month of pay, computed from attendance by the server. */

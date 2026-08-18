@@ -1,7 +1,7 @@
 import React from 'react';
 import {
-  ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View,
-  type TextInputProps, type ViewStyle,
+  ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput,
+  View, type TextInputProps, type ViewStyle,
 } from 'react-native';
 import { TAP_MIN, colors, radius, space, type as t, urgencyColor } from './theme';
 
@@ -74,6 +74,64 @@ export function Field({
         style={[s.input, !!error && { borderColor: colors.crit }]}
       />
       {!!error && <Text style={s.error}>{error}</Text>}
+    </View>
+  );
+}
+
+/**
+ * A dropdown, because a phone screen is short and a herd is long. Collapsed it
+ * is one row showing what is picked; tapping opens a sheet with the options.
+ * No native <select> exists in React Native, so the sheet is a Modal — which
+ * also works identically in the web export.
+ */
+export function Dropdown({ label, value, placeholder, options, onSelect, testID }: {
+  label: string;
+  value: string | null;
+  placeholder: string;
+  options: { id: string; label: string; sub?: string }[];
+  onSelect: (id: string) => void;
+  testID?: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const picked = options.find((o) => o.id === value);
+  return (
+    <View style={{ marginBottom: space.lg }}>
+      <Text style={s.fieldLabel}>{label}</Text>
+      <Pressable
+        testID={testID}
+        accessibilityRole="button"
+        onPress={() => setOpen(true)}
+        style={s.ddTrigger}
+      >
+        <Text style={[s.ddValue, !picked && { color: colors.muted }]} numberOfLines={1}>
+          {picked ? picked.label : placeholder}
+        </Text>
+        <Text style={s.ddChevron}>▾</Text>
+      </Pressable>
+      <Modal visible={open} transparent animationType="fade"
+             onRequestClose={() => setOpen(false)}>
+        <Pressable style={s.ddBackdrop} onPress={() => setOpen(false)}>
+          <Pressable style={s.ddSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={s.ddSheetTitle}>{label.toUpperCase()}</Text>
+            <ScrollView style={{ maxHeight: 420 }}>
+              {options.map((o) => (
+                <Pressable
+                  key={o.id}
+                  testID={testID ? `${testID}-${o.id}` : undefined}
+                  onPress={() => { onSelect(o.id); setOpen(false); }}
+                  style={[s.ddOption, o.id === value && s.ddOptionOn]}
+                >
+                  <Text style={[s.ddOptionText,
+                    o.id === value && { color: colors.accent, fontWeight: '700' }]}>
+                    {o.label}
+                  </Text>
+                  {!!o.sub && <Text style={s.ddOptionSub}>{o.sub}</Text>}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -176,6 +234,35 @@ const s = StyleSheet.create({
   },
   buttonText: { ...t.title },
   fieldLabel: { ...t.label, color: colors.muted, marginBottom: space.xs },
+  ddTrigger: {
+    minHeight: TAP_MIN,
+    flexDirection: 'row', alignItems: 'center',
+    borderWidth: 1, borderColor: colors.rule, borderRadius: radius.sm,
+    paddingHorizontal: space.md,
+    backgroundColor: colors.surface,
+  },
+  ddValue: { ...t.body, color: colors.ink, flex: 1 },
+  ddChevron: { ...t.body, color: colors.muted, marginLeft: space.sm },
+  ddBackdrop: {
+    flex: 1, backgroundColor: 'rgba(27,33,29,0.45)',
+    justifyContent: 'center', padding: space.lg,
+  },
+  ddSheet: {
+    backgroundColor: colors.surface, borderRadius: radius.lg,
+    paddingVertical: space.sm, maxWidth: 480, width: '100%', alignSelf: 'center',
+  },
+  ddSheetTitle: {
+    ...t.label, color: colors.muted,
+    paddingHorizontal: space.lg, paddingVertical: space.sm,
+  },
+  ddOption: {
+    minHeight: TAP_MIN, justifyContent: 'center',
+    paddingHorizontal: space.lg, paddingVertical: space.sm,
+    borderTopWidth: 1, borderTopColor: colors.rule,
+  },
+  ddOptionOn: { backgroundColor: colors.accentSoft },
+  ddOptionText: { ...t.body, color: colors.ink },
+  ddOptionSub: { ...t.small, color: colors.muted, marginTop: 2 },
   input: {
     minHeight: TAP_MIN,
     borderWidth: 1, borderColor: colors.rule, borderRadius: radius.sm,

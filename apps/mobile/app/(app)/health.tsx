@@ -80,6 +80,7 @@ export default function Health() {
           );
         })}
         {loading && !conditions.data && <Loading />}
+
       </ScrollView>
       <TabBar />
     </Screen>

@@ -17,13 +17,27 @@ interface Dose {
   dose_note: string | null;
 }
 interface Animal { id: string; name: string | null; tag: string }
+interface Treatment {
+  medicine: string; days: number; interval_days: number; dose_note: string | null;
+}
+interface CondType {
+  id: string; code: string; name: string; colour: string;
+  reminder_interval_hours: string | number | null;
+  treatment: Treatment | null;
+}
+
+const treatmentLine = (t: Treatment) =>
+  `${t.medicine} — ${t.days === 1 ? 'one dose' : `${t.days} days`}` +
+  `${t.dose_note ? ` · ${t.dose_note}` : ''}`;
 
 export function HealthPage() {
   const id = useIdentity();
   const [open, setOpen] = useState<Condition[] | null>(null);
   const [due, setDue] = useState<Dose[] | null>(null);
   const [animals, setAnimals] = useState<Animal[]>([]);
-  const [report, setReport] = useState({ rabbit_id: '', note: '' });
+  const [types, setTypes] = useState<CondType[]>([]);
+  const [report, setReport] = useState({ rabbit_id: '', code: '', note: '' });
+  const [reported, setReported] = useState<{ rabbit: string; sickness: string; treatment: Treatment | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -31,6 +45,7 @@ export function HealthPage() {
     apiGet<{ open: Condition[] }>('/conditions').then((d) => setOpen(d.open)),
     apiGet<{ due: Dose[] }>('/medication').then((d) => setDue(d.due)),
     apiGet<{ animals: Animal[] }>('/animals').then((d) => setAnimals(d.animals)),
+    apiGet<{ types: CondType[] }>('/condition-types').then((d) => setTypes(d.types)),
   ]).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
 
@@ -43,10 +58,16 @@ export function HealthPage() {
   const reportProblem = (e: React.FormEvent) => {
     e.preventDefault();
     return act('report', async () => {
-      await apiPost('/conditions', {
-        rabbit_id: report.rabbit_id, note: report.note || undefined,
+      const res = await apiPost<{ treatment: Treatment | null }>('/conditions', {
+        rabbit_id: report.rabbit_id, code: report.code,
+        note: report.note || undefined,
       });
-      setReport({ rabbit_id: '', note: '' });
+      setReported({
+        rabbit: name(report.rabbit_id),
+        sickness: types.find((t) => t.code === report.code)?.name ?? report.code,
+        treatment: res.treatment,
+      });
+      setReport({ rabbit_id: '', code: '', note: '' });
     });
   };
 
@@ -57,8 +78,24 @@ export function HealthPage() {
 
   return (
     <Shell {...id}>
-      <PageTitle title="Health" />
+      <PageTitle title="Report a sick rabbit" />
       {error && <p className="mb-4 rounded-xl bg-farm-crit-soft px-4 py-3 text-sm font-medium text-farm-crit">{error}</p>}
+
+      {reported && (
+        <div className="mb-5 rounded-xl border border-farm-accent-soft bg-farm-accent-soft/50 p-4">
+          <p className="text-sm font-bold">{reported.sickness} reported for {reported.rabbit}.</p>
+          <p className="mt-1 text-sm">
+            {reported.treatment
+              ? <>Treatment: <b>give {reported.treatment.medicine} within 24 hours</b>
+                  {reported.treatment.dose_note ? ` — ${reported.treatment.dose_note}` : ''}.
+                  {reported.treatment.days > 1
+                    ? ` If it is still going on, keep giving it daily — ${reported.treatment.days} days in all.`
+                    : ''} The doses are on the list below and on Today.</>
+              : 'No medicine is set for this sickness yet.'}
+          </p>
+          <div className="mt-2"><Btn tone="quiet" onClick={() => setReported(null)}>Okay</Btn></div>
+        </div>
+      )}
 
       <Section title="Report a problem">
         <form onSubmit={reportProblem}
@@ -71,15 +108,31 @@ export function HealthPage() {
               {animals.map((a) => <option key={a.id} value={a.id}>{a.name ?? a.tag}</option>)}
             </Select>
           </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Sickness</span>
+            <Select required value={report.code}
+              onChange={(e) => setReport({ ...report, code: e.target.value })}>
+              <option value="">Choose…</option>
+              {types.map((t) => <option key={t.id} value={t.code}>{t.name}</option>)}
+            </Select>
+          </label>
           <label className="flex-1 text-sm">
             <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Note (optional)</span>
             <Input className="w-full" value={report.note} placeholder="What you saw"
               onChange={(e) => setReport({ ...report, note: e.target.value })} />
           </label>
-          <Btn type="submit" disabled={busy === 'report' || !report.rabbit_id}>
+          <Btn type="submit" disabled={busy === 'report' || !report.rabbit_id || !report.code}>
             {busy === 'report' ? 'Saving…' : 'Report'}
           </Btn>
         </form>
+        {report.code && (() => {
+          const t = types.find((x) => x.code === report.code);
+          return t?.treatment
+            ? <p className="mt-2 text-sm text-farm-muted">
+                Treatment on file: <b>{treatmentLine(t.treatment)}</b> — starts as soon as you report it.
+              </p>
+            : null;
+        })()}
       </Section>
 
       <Section title={`Open cases · ${open?.length ?? '…'}`}>
@@ -148,6 +201,7 @@ export function HealthPage() {
             </div>
           )}
       </Section>
+
     </Shell>
   );
 }

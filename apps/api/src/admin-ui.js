@@ -137,6 +137,9 @@ function nav(here, admin) {
   if (['superadmin', 'billing'].includes(admin?.role)) {
     links.push(['/admin/billing', 'Billing', 'billing', true]);
   }
+  if (admin?.role === 'superadmin') {
+    links.push(['/admin/sicknesses', 'Sicknesses', 'sicknesses', true]);
+  }
   return `<nav style="display:inline">${links
     .map(([href, label, key]) =>
       `<a href="${href}"${here === key ? ' aria-current="page"' : ''}>${label}</a>`)
@@ -612,7 +615,7 @@ export function renderImpersonation({ impersonation, token, farm_name, admin }) 
       up. End it when you are done; the customer can see that you did.</p>`);
 }
 
-export function renderFarm({ farm, audit, subscription, payments = [], admin }) {
+export function renderFarm({ farm, audit, subscription, payments = [], staff = [], admin }) {
   const canBill = ['superadmin', 'billing'].includes(admin.role);
   const canComp = admin.role === 'superadmin';
 
@@ -676,7 +679,10 @@ export function renderFarm({ farm, audit, subscription, payments = [], admin }) 
       <div class="card"><div class="n">${rupees(farm.effective_price_paise)}</div>
         <div class="k">${esc(farm.billing_period ?? '')}</div></div>
       <div class="card"><div class="n">${farm.breeding_does ?? 0}</div><div class="k">Breeding does</div></div>
-      <div class="card"><div class="n">${farm.animals ?? 0}</div><div class="k">Animals</div></div>
+      <a class="card" href="/admin/farms/${esc(farm.farm_id)}/animals"
+         style="text-decoration:none;display:block">
+        <div class="n">${farm.animals ?? 0}</div>
+        <div class="k">Animals →</div></a>
       <div class="card"><div class="n">${seen(farm.days_since_activity)}</div><div class="k">Last write</div></div>
     </div>
 
@@ -688,6 +694,25 @@ export function renderFarm({ farm, audit, subscription, payments = [], admin }) 
       ${farm.trial_ends_on ? ` · trial ends ${farm.trial_ends_on}` : ''}
       ${farm.is_grandfathered ? ' · <strong>on introductory pricing</strong>' : ''}
     </p>
+
+    <h2>The team</h2>
+    <div class="tw"><table style="min-width:640px">
+      <thead><tr><th>Name</th><th>Role</th><th>Phone</th><th>Salary</th>
+        <th>This month</th><th>Login</th><th>Joined</th></tr></thead>
+      <tbody>${staff.map((p) => `
+        <tr${p.is_active ? '' : ' style="opacity:.45"'}>
+          <td><a href="/admin/farms/${esc(farm.farm_id)}/staff/${esc(p.id)}">
+            <b>${esc(p.full_name)}</b></a>${p.is_active ? '' : ' <span class="muted">left</span>'}</td>
+          <td>${esc(p.role)}</td>
+          <td>${esc(p.phone ?? '')}</td>
+          <td>${p.monthly_salary != null ? rupees(Math.round(Number(p.monthly_salary) * 100)) + '/mo' : '<span class="muted">—</span>'}</td>
+          <td>${p.month_days_worked != null ? esc(String(p.month_days_worked)) + ' days' : '<span class="muted">—</span>'}</td>
+          <td>${p.can_sign_in ? 'has one' : '<span class="muted">none</span>'}</td>
+          <td class="muted">${p.joined_on ? esc(String(p.joined_on).slice(0, 10)) : ''}</td>
+        </tr>`).join('')
+        || '<tr><td colspan="7" class="muted">Just the owner.</td></tr>'}</tbody>
+    </table></div>
+    <p class="muted">Click a name for their attendance, month-by-month pay and payslips.</p>
 
     <h2>Actions</h2>
     <div class="actions">
@@ -763,4 +788,212 @@ export function renderFarm({ farm, audit, subscription, payments = [], admin }) 
     </table></div>
     ${subscription?.gateway_subscription_id
       ? `<p class="muted">Razorpay: <code>${esc(subscription.gateway_subscription_id)}</code></p>` : ''}`);
+}
+
+
+/**
+ * The sickness catalogue: every farm's report screen offers exactly this list,
+ * and each row's medicine is what the farmer is told to give. Superadmin only.
+ */
+export function renderSicknesses({ rows, farmCount, admin }) {
+  const rx = (r) => r.medicine
+    ? `${esc(r.medicine)} — ${r.treatment_days === 1 ? 'one dose' : `${r.treatment_days} days`}`
+      + (r.dose_note ? ` · ${esc(r.dose_note)}` : '')
+    : '<span class="muted">reminders only</span>';
+
+  const rowHtml = rows.map((r) => `
+    <tr${r.is_active ? '' : ' style="opacity:.45"'}>
+      <td><b>${esc(r.name)}</b><div class="muted">${esc(r.code)}</div></td>
+      <td>${rx(r)}</td>
+      <td>${r.reminder_interval_hours ? `every ${Number(r.reminder_interval_hours)}h` : '—'}</td>
+      <td>${r.is_contagious ? 'contagious' : '—'}</td>
+      <td>
+        ${r.is_active ? `
+        <details>
+          <summary>Edit</summary>
+          <form method="post" action="/admin/sicknesses" style="display:grid;gap:6px;max-width:340px;margin:8px 0">
+            <input type="hidden" name="code" value="${esc(r.code)}">
+            <label>Name <input name="name" value="${esc(r.name)}" required></label>
+            <label>Medicine <input name="medicine" value="${esc(r.medicine ?? '')}"
+                   placeholder="empty = reminders only"></label>
+            <label>Days <input name="days" type="number" min="1" max="60"
+                   value="${r.treatment_days ?? ''}"></label>
+            <label>How to give it <input name="dose_note" value="${esc(r.dose_note ?? '')}"></label>
+            <label>Remind every (hours) <input name="reminder_interval_hours" type="number"
+                   step="0.5" min="0.5" max="168" value="${r.reminder_interval_hours ?? ''}"></label>
+            <label><input type="checkbox" name="is_contagious"${r.is_contagious ? ' checked' : ''}>
+                   Contagious</label>
+            <button>Save & apply to every farm</button>
+          </form>
+          <form method="post" action="/admin/sicknesses/${esc(r.code)}/deactivate"
+                onsubmit="return confirm('Remove ${esc(r.name)} from every farm\u2019s report screen?')">
+            <button class="ghost" style="margin-top:6px;color:#8c332b;border-color:#8c332b">Retire it</button>
+          </form>
+        </details>` : '<span class="muted">retired</span>'}
+      </td>
+    </tr>`).join('');
+
+  return page('Sicknesses — rabbitfarmers admin', `
+    <header>
+      <h1>Sicknesses & treatments</h1>
+      <div class="muted">${nav('sicknesses', admin)}${esc(admin?.full_name ?? '')} · ${esc(admin?.role ?? '')}
+        · <form method="post" action="/admin/logout" style="display:inline">
+            <button class="ghost" type="submit" style="padding:2px 8px">Sign out</button>
+          </form>
+      </div>
+    </header>
+
+    <p class="muted">What every farm's "Report a problem" screen offers, and what the
+    farmer is told to give. Saving applies to all ${farmCount} farm${farmCount === 1 ? '' : 's'}
+    immediately, and to every farm that signs up later. Farmers cannot edit this.</p>
+
+    <h2>Add a sickness</h2>
+    <form method="post" action="/admin/sicknesses" style="display:grid;gap:8px;max-width:420px">
+      <label>Name <input name="name" placeholder="Head tilt" required></label>
+      <label>Medicine <input name="medicine" placeholder="O2M (leave empty for reminders only)"></label>
+      <label>For how many days <input name="days" type="number" min="1" max="60" placeholder="3"></label>
+      <label>How to give it <input name="dose_note" placeholder="1 bottle in drinking water"></label>
+      <label>Remind every (hours) <input name="reminder_interval_hours" type="number"
+             step="0.5" min="0.5" max="168" placeholder="empty = no repeating reminder"></label>
+      <label><input type="checkbox" name="is_contagious"> Contagious</label>
+      <button>Add & apply to every farm</button>
+    </form>
+
+    <h2>The catalogue</h2>
+    <table>
+      <thead><tr><th>Sickness</th><th>Treatment</th><th>Check-in</th><th></th><th></th></tr></thead>
+      <tbody>${rowHtml || '<tr><td colspan="5" class="muted">Nothing yet — the farms only have the five built-in sicknesses.</td></tr>'}</tbody>
+    </table>
+  `);
+}
+
+
+const SEX_LABEL = { doe: 'Female', buck: 'Male', unknown: '—' };
+
+/** A farm's herd, read-only, for whoever is on the phone with the farmer. */
+export function renderFarmAnimals({ farm, animals, admin }) {
+  const rows = animals.map((a) => `
+    <tr${a.status === 'active' ? '' : ' style="opacity:.55"'}>
+      <td><a href="/admin/farms/${esc(farm.farm_id)}/animals/${esc(a.id)}">
+        <b>${esc(a.name ?? a.tag)}</b></a>
+        ${a.name ? `<div class="muted">${esc(a.tag)}</div>` : ''}</td>
+      <td>${SEX_LABEL[a.sex] ?? esc(a.sex)}</td>
+      <td>${a.status === 'active' ? 'active' : esc(a.status)}</td>
+      <td class="muted">${a.date_of_birth ? esc(String(a.date_of_birth).slice(0, 10)) : '—'}</td>
+      <td>${esc(a.breed ?? '—')}</td>
+      <td>${esc(a.cage ?? '—')}</td>
+    </tr>`).join('');
+
+  return page(`${farm.farm_name} — animals`, `
+    <header>
+      <h1>${esc(farm.farm_name)} — the herd</h1>
+      <div class="muted">${nav('farms', admin)}
+        <a href="/admin/farms/${esc(farm.farm_id)}">← Back to the farm</a></div>
+    </header>
+    <p class="muted">${animals.length} animal${animals.length === 1 ? '' : 's'} ·
+      read-only — click one for its full history.</p>
+    <div class="tw"><table style="min-width:560px">
+      <thead><tr><th>Name</th><th>Sex</th><th>State</th><th>Born</th><th>Breed</th><th>Cage</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6" class="muted">No animals yet.</td></tr>'}</tbody>
+    </table></div>`);
+}
+
+/** One animal's whole story — matings, litters, sickness, medicine, moves. */
+export function renderFarmAnimal({ farm, animal, events, admin }) {
+  const kindMark = (k) =>
+    ['condition', 'dose', 'health_event'].includes(k) ? 'style="color:#b45309"'
+      : ['mating', 'kindling', 'weaning', 'born'].includes(k) ? 'style="color:#2e7d32"' : '';
+  const rows = events.map((e) => `
+    <tr>
+      <td class="num">${e.on_date ? esc(String(e.on_date).slice(0, 10)) : ''}</td>
+      <td>${esc(e.title)}</td>
+      <td ${kindMark(e.kind)}><code>${esc(e.kind.replace('_', ' '))}</code></td>
+    </tr>`).join('');
+
+  return page(`${animal.name ?? animal.tag} — ${farm.farm_name}`, `
+    <header>
+      <h1>${esc(animal.name ?? animal.tag)}</h1>
+      <div class="muted">${nav('farms', admin)}
+        <a href="/admin/farms/${esc(farm.farm_id)}/animals">← The herd</a></div>
+    </header>
+    <p class="muted">
+      ${esc(farm.farm_name)} · ${SEX_LABEL[animal.sex] ?? esc(animal.sex)}
+      ${animal.date_of_birth ? ` · born ${esc(String(animal.date_of_birth).slice(0, 10))}` : ''}
+      ${animal.breed ? ` · ${esc(animal.breed)}` : ''}
+      ${animal.cage ? ` · cage ${esc(animal.cage)}` : ''}
+      ${animal.status !== 'active' ? ` · <strong>${esc(animal.status)}</strong>` : ''}
+    </p>
+    <h2>Everything recorded, newest first</h2>
+    <div class="tw"><table style="min-width:520px">
+      <thead><tr><th>When</th><th>What</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="3" class="muted">Nothing recorded yet.</td></tr>'}</tbody>
+    </table></div>`);
+}
+
+
+/**
+ * One person on one farm: what they are paid, every change ever made, and
+ * each month's attendance with the amount it computes to — the same numbers
+ * the farmer's own salary page shows, read-only.
+ */
+export function renderFarmStaff({ farm, person, history, months, admin }) {
+  const inr = (n) => n == null ? '<span class="muted">—</span>'
+    : rupees(Math.round(Number(n) * 100));
+
+  const monthRows = months.map((m) => `
+    <tr>
+      <td><b>${esc(m.month)}</b></td>
+      <td class="num">${m.present}</td>
+      <td class="num">${m.half_days}</td>
+      <td class="num">${m.holiday}</td>
+      <td class="num">${m.absent}</td>
+      <td class="num">${m.leave}</td>
+      <td class="num">${esc(String(m.paid_days))} / ${m.days_in_month}</td>
+      <td class="num">${inr(m.amount)}</td>
+      <td>${m.amount != null
+        ? `<a href="/admin/farms/${esc(farm.farm_id)}/staff/${esc(person.id)}/payslip?month=${esc(m.month)}">payslip</a>`
+        : ''}</td>
+    </tr>`).join('');
+
+  const historyRows = history.map((h) => `
+    <tr>
+      <td class="num">${esc(String(h.effective_from).slice(0, 10))}</td>
+      <td class="num">${inr(h.monthly_amount)}</td>
+      <td>${esc(h.set_by_name ?? '')}</td>
+      <td class="muted num">${new Date(h.created_at).toISOString().slice(0, 10)}</td>
+    </tr>`).join('');
+
+  return page(`${person.full_name} — ${farm.farm_name}`, `
+    <header>
+      <h1>${esc(person.full_name)}</h1>
+      <div class="muted">${nav('farms', admin)}
+        <a href="/admin/farms/${esc(farm.farm_id)}">← Back to the farm</a></div>
+    </header>
+    <p class="muted">
+      ${esc(farm.farm_name)} · ${esc(person.role)}
+      ${person.phone ? ` · ${esc(person.phone)}` : ''}
+      ${person.joined_on ? ` · joined ${esc(String(person.joined_on).slice(0, 10))}` : ''}
+      ${person.is_active ? '' : ' · <strong>left the farm</strong>'}
+    </p>
+
+    <div class="cards">
+      <div class="card"><div class="n">${inr(person.monthly_amount)}</div>
+        <div class="k">Salary / month${person.effective_from
+          ? ` · since ${esc(String(person.effective_from).slice(0, 10))}` : ''}</div></div>
+    </div>
+
+    <h2>Attendance & pay, month by month</h2>
+    <p class="muted">Present and half days count, farm holidays are paid, absence and
+      leave are not. Salary × days paid ÷ days in the month.</p>
+    <div class="tw"><table style="min-width:640px">
+      <thead><tr><th>Month</th><th>Present</th><th>Half</th><th>Holiday</th><th>Absent</th>
+        <th>Leave</th><th>Days paid</th><th>Payable</th><th></th></tr></thead>
+      <tbody>${monthRows || '<tr><td colspan="9" class="muted">Nothing recorded yet.</td></tr>'}</tbody>
+    </table></div>
+
+    <h2>Salary changes</h2>
+    <div class="tw"><table style="min-width:420px">
+      <thead><tr><th>From</th><th>Monthly salary</th><th>Set by</th><th>On</th></tr></thead>
+      <tbody>${historyRows || '<tr><td colspan="4" class="muted">No salary set yet.</td></tr>'}</tbody>
+    </table></div>`);
 }
