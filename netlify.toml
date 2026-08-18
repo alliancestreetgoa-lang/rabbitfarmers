@@ -9,10 +9,16 @@
   # export — the same code the APK runs — moves under /app, which is why its
   # config sets experiments.baseUrl to '/app'. It is copied into the web
   # app's dist because Netlify publishes exactly one directory.
+  # --include=dev is load-bearing: NODE_ENV=production is set as an
+  # environment variable (the function needs it for Secure cookies, and the
+  # free tier cannot scope a variable to runtime only), and npm ci under
+  # NODE_ENV=production silently skips devDependencies — which is where a
+  # Vite app keeps tsc and vite themselves. The first deploy after setting
+  # the variable died with "tsc: not found".
   command = """
-    npm --prefix apps/mobile ci &&
+    npm --prefix apps/mobile ci --include=dev &&
     npm --prefix apps/mobile run build:web &&
-    npm --prefix apps/web ci &&
+    npm --prefix apps/web ci --include=dev &&
     npm --prefix apps/web run build &&
     cp -R apps/mobile/dist apps/web/dist/app
   """
