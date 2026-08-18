@@ -69,6 +69,62 @@ export function createApp() {
    * built back on. Restoring the endpoint is a paste of five lines.
    */
 
+  /*
+   * The Android app, from GitHub Releases.
+   *
+   * There is deliberately no APK in the repository (docs/12); the built one is
+   * attached to the latest release of the public repo, and these two routes are
+   * what the dashboard's card runs on. /info says whether one exists at all —
+   * the card shows "not published yet" rather than a button that 404s — and
+   * /download 302s to the asset. The redirect target is public either way
+   * (public repo), so neither route demands a session; the card lives behind
+   * one, and gating a redirect to a public URL would be theatre.
+   *
+   * Cached for five minutes so a burst of dashboard loads is one GitHub call,
+   * and a GitHub outage degrades to "not published yet" rather than a 500.
+   */
+  const APK_REPO = 'alliancestreetgoa-lang/rabbitfarmers';
+  let apkCache = { at: 0, info: null };
+  async function latestApk() {
+    if (Date.now() - apkCache.at < 5 * 60 * 1000) return apkCache.info;
+    let info = null;
+    try {
+      const res = await fetch(`https://api.github.com/repos/${APK_REPO}/releases/latest`, {
+        headers: { accept: 'application/vnd.github+json' },
+      });
+      if (res.ok) {
+        const rel = await res.json();
+        const asset = (rel.assets ?? []).find((a) => a.name.endsWith('.apk'));
+        if (asset) {
+          info = {
+            version: rel.tag_name,
+            size_bytes: asset.size,
+            published_at: rel.published_at,
+            url: asset.browser_download_url,
+          };
+        }
+      }
+    } catch { /* GitHub unreachable — reported as unavailable, never as a 500 */ }
+    apkCache = { at: Date.now(), info };
+    return info;
+  }
+
+  app.get('/download/apk/info', async (c) => {
+    const info = await latestApk();
+    return c.json(info
+      ? { available: true, version: info.version, size_bytes: info.size_bytes,
+          published_at: info.published_at }
+      : { available: false });
+  });
+
+  app.get('/download/apk', async (c) => {
+    const info = await latestApk();
+    if (!info) {
+      return c.json({ error: 'No Android app has been published yet' }, 404);
+    }
+    return c.redirect(info.url, 302);
+  });
+
   app.route('/auth', authRoutes);
   // Admin must be mounted BEFORE the farm routes. Those are mounted at '/' and
   // carry a use('*') auth guard, which would otherwise run for /admin/* too and

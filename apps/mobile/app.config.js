@@ -65,7 +65,16 @@ module.exports = {
       output: 'single',
       favicon: './assets/favicon.png',
     },
-    plugins: ['expo-router'],
+    plugins: [
+      'expo-router',
+      /*
+       * Pins Kotlin to the version the Compose Compiler on SDK 52's build
+       * image actually requires. Without it the first EAS build died in
+       * :expo-modules-core:compileReleaseKotlin — Compose Compiler 1.5.15
+       * wants Kotlin 1.9.25, the image defaulted to 1.9.24.
+       */
+      ['expo-build-properties', { android: { kotlinVersion: '1.9.25' } }],
+    ],
     extra: {
       /*
        * Empty means "same origin as the page", which is what a Netlify deploy

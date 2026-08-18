@@ -42,6 +42,13 @@ interface Me {
   farm: { id: string; name: string; city: string | null; state: string | null };
 }
 
+interface ApkInfo {
+  available: boolean;
+  version?: string;
+  size_bytes?: number;
+  published_at?: string;
+}
+
 interface DailyItem {
   ref_id: string; title: string; tag: string | null;
   urgency: 'critical' | 'high' | 'medium' | string; due_on: string | null;
@@ -113,6 +120,7 @@ export function DashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [daily, setDaily] = useState<DailyItem[]>([]);
+  const [apk, setApk] = useState<ApkInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -127,6 +135,11 @@ export function DashboardPage() {
     ])
       .then(([s, d, m]) => { setSummary(s); setDaily(d.items ?? []); setMe(m); })
       .catch((e) => setError(e.message));
+    // Separate and forgiving: the dashboard must not fail because GitHub is slow.
+    fetch('/api/download/apk/info')
+      .then((r) => r.json())
+      .then(setApk)
+      .catch(() => setApk({ available: false }));
   }, [session, navigate]);
 
   useEffect(() => {
@@ -302,8 +315,26 @@ export function DashboardPage() {
                     desc="Who worked which day. Month totals, CSV." />
               <Card title="Litters & kits" href={FULL_APP_URL}
                     desc={`${summary.kits.unweaned} kits to record individually or wean.`} />
-              <Card title="Android app" href={FULL_APP_URL}
-                    desc="Install on a phone for the shed — works offline." />
+              <div className="flex flex-col rounded-xl border border-farm-accent-soft bg-gradient-to-b from-farm-accent-soft/40 to-farm-surface p-5">
+                <p className="font-display text-xl text-farm-ink">Android app</p>
+                <p className="mt-1.5 flex-1 text-sm leading-relaxed text-farm-muted">
+                  {apk?.available
+                    ? `${apk.version} · ${((apk.size_bytes ?? 0) / 1024 / 1024).toFixed(0)} MB — install on a phone for the shed. Works offline.`
+                    : 'Install on a phone for the shed — works offline.'}
+                </p>
+                {apk?.available ? (
+                  <a
+                    href="/api/download/apk"
+                    className="mt-3 rounded-lg bg-farm-accent px-4 py-2.5 text-center text-sm font-semibold text-white"
+                  >
+                    Download APK
+                  </a>
+                ) : (
+                  <span className="mt-3 rounded-lg border border-farm-rule bg-farm-surface-alt px-4 py-2.5 text-center text-sm font-semibold text-farm-muted">
+                    {apk === null ? 'Checking…' : 'Not published yet'}
+                  </span>
+                )}
+              </div>
             </div>
           </>
         )}

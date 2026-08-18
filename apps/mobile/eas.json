@@ -16,6 +16,9 @@
       "channel": "preview",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://rabbitfarmers.com/api"
       }
     },
     "production": {
