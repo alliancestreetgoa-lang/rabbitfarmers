@@ -14,9 +14,31 @@ export interface Session {
 }
 
 const KEY = 'rf.session';
+/*
+ * The full app (the Expo export under /app, same origin) keeps its session in
+ * localStorage under these keys. One person, one origin, one login: signing in
+ * here writes the session in BOTH dialects, so opening any card lands in the
+ * app already signed in — and signing in over there first is honoured here via
+ * the fallback in getSession. Asking a farmer to sign in twice on one website
+ * is how they conclude it is broken.
+ */
+const APP_TOKEN_KEY = 'rb.token';
+const APP_SESSION_KEY = 'rb.session';
+
+export function saveSession(session: Session, remember: boolean) {
+  const store = remember ? window.localStorage : window.sessionStorage;
+  store.setItem(KEY, JSON.stringify(session));
+  // The app has no sessionStorage mode; its session always persists. That is
+  // its own long-standing behaviour, not something this write introduces.
+  window.localStorage.setItem(APP_TOKEN_KEY, session.token);
+  window.localStorage.setItem(APP_SESSION_KEY, JSON.stringify(session));
+}
 
 export function getSession(): Session | null {
-  const raw = window.localStorage.getItem(KEY) ?? window.sessionStorage.getItem(KEY);
+  const raw = window.localStorage.getItem(KEY)
+    ?? window.sessionStorage.getItem(KEY)
+    // Signed in inside the full app first? Same person, same origin — honour it.
+    ?? window.localStorage.getItem(APP_SESSION_KEY);
   if (!raw) return null;
   try { return JSON.parse(raw) as Session; } catch { return null; }
 }
@@ -24,6 +46,8 @@ export function getSession(): Session | null {
 export function clearSession() {
   window.localStorage.removeItem(KEY);
   window.sessionStorage.removeItem(KEY);
+  window.localStorage.removeItem(APP_TOKEN_KEY);
+  window.localStorage.removeItem(APP_SESSION_KEY);
 }
 
 export class ApiError extends Error {

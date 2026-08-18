@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Eye, EyeOff, ArrowLeft, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { BRAND_IMAGE, BRAND_TAGLINE } from '@/lib/brand';
+import { saveSession } from '@/lib/api';
 
 /**
  * Create a farm. Free, instant, no card, no verification step.
@@ -78,7 +79,8 @@ export function SignUpPage() {
         return;
       }
 
-      window.localStorage.setItem('rf.session', JSON.stringify(body));
+      // One login for the whole site: this also signs the full app in.
+      saveSession(body, true);
       navigate('/dashboard');
     } catch {
       setMessage('No connection. Creating a farm needs internet.');

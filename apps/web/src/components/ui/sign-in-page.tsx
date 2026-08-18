@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Eye, EyeOff, ArrowLeft, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { BRAND_IMAGE, BRAND_TAGLINE } from '@/lib/brand';
+import { saveSession } from '@/lib/api';
 
 /**
  * Sign in.
@@ -73,9 +74,8 @@ export function LoginPage() {
         setError(body?.error ?? 'Could not sign in');
         return;
       }
-      // Where "remember me" actually lands. sessionStorage dies with the tab.
-      const store = formData.rememberMe ? window.localStorage : window.sessionStorage;
-      store.setItem('rf.session', JSON.stringify(body));
+      // One login for the whole site: this also signs the full app in.
+      saveSession(body, formData.rememberMe);
       navigate('/dashboard');
     } catch {
       setError('No connection. Signing in needs internet.');
