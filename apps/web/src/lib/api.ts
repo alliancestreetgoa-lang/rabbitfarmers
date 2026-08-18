@@ -64,5 +64,9 @@ export async function apiPost<T>(path: string, data?: unknown): Promise<T> {
   return body as T;
 }
 
-/** Where the complete product lives — the full app, same credentials. */
-export const FULL_APP_URL = import.meta.env.DEV ? 'http://localhost:8080' : '/';
+/**
+ * Where the complete product lives — the full app, same credentials. It is
+ * served under /app on the same origin (the Expo export's baseUrl agrees);
+ * in dev the Vite server has no /app, so it points at the one-origin site.
+ */
+export const FULL_APP_URL = import.meta.env.DEV ? 'http://localhost:8080/app' : '/app';

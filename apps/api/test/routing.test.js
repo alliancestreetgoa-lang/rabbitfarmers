@@ -71,8 +71,16 @@ const PATHS = {
   '/webhooks/email': 'function',
   '/billing/return': 'function',
 
-  // The app's. Every one of these is a screen whose name looks like an API.
+  // The two SPAs' side. The web dashboard owns the root; the Expo export owns
+  // /app and below. Both are "app" here because this test's split is
+  // function-vs-static — WHICH shell answers is the dev server's own logic.
   '/': 'app',
+  '/dashboard': 'app',
+  '/signup': 'app',
+  '/app': 'app',
+  '/app/daily': 'app',
+  '/app/record/mating': 'app',
+  // Old phone-app screen names with no /app prefix fall to the web shell now.
   '/daily': 'app',
   '/herd': 'app',
   '/breeding': 'app',

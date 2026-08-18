@@ -1,13 +1,27 @@
 [build]
-  # Two installs: the API's runtime dependencies, which the function imports
-  # directly from source, and the app's build toolchain, which produces the
-  # static site. The web export is what farmers actually open.
+  # Three builds and one copy.
+  #
+  # The API's runtime dependencies are copied to the repo root because the
+  # function imports the API from source: esbuild resolves imports by walking
+  # up from netlify/functions, the root had no node_modules, and the first
+  # real deploy failed with "Cannot find package 'hono'". The copy also gives
+  # the pg external below somewhere to be packaged from. Copy, not symlink —
+  # the bundler's file walker is not guaranteed to follow links.
+  #
+  # The web app (apps/web) is the front door and takes the root. The Expo
+  # export — the same code the APK runs — moves under /app, which is why its
+  # config sets experiments.baseUrl to '/app'. It is copied into the web
+  # app's dist because Netlify publishes exactly one directory.
   command = """
     npm --prefix apps/api ci --omit=dev &&
+    cp -R apps/api/node_modules node_modules &&
     npm --prefix apps/mobile ci &&
-    npm --prefix apps/mobile run build:web
+    npm --prefix apps/mobile run build:web &&
+    npm --prefix apps/web ci &&
+    npm --prefix apps/web run build &&
+    cp -R apps/mobile/dist apps/web/dist/app
   """
-  publish = "apps/mobile/dist"
+  publish = "apps/web/dist"
 
   [build.environment]
     # Empty on purpose. The app then talks to /api on whatever origin it was
@@ -81,9 +95,16 @@
 # apps/api/test/routing.test.js is what keeps this file and scripts/dev-site.mjs
 # from disagreeing about that.
 
-# Everything else is a screen. Expo exports a single index.html and routes on
-# the client, so a deep link like /record/mating must return that shell with a
-# 200 — a 301 would lose the path and a 404 would break a bookmarked page.
+# Two single-page apps now, and the order matters. The full app (the Expo
+# export, same code as the APK) lives under /app: a deep link like
+# /app/record/mating must return ITS shell. Everything else is the web app's —
+# /dashboard, /signup, and any path neither router knows. Both are 200
+# rewrites: a 301 would lose the path and a 404 would break a bookmark.
+[[redirects]]
+  from = "/app/*"
+  to = "/app/index.html"
+  status = 200
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -93,7 +114,7 @@
   command = "npm --prefix apps/api start"
   targetPort = 3000
   port = 8888
-  publish = "apps/mobile/dist"
+  publish = "apps/web/dist"
 
 # Migrations are deliberately NOT run in the build.
 #

@@ -17,6 +17,15 @@ module.exports = {
     userInterfaceStyle: 'automatic',
     newArchEnabled: true,
     icon: './assets/icon.png',
+    /*
+     * The web export is served under /app — the root belongs to apps/web, the
+     * owner's dashboard. baseUrl prefixes every asset URL and router path in
+     * the export; without it the shell at /app/index.html asks for /_expo/...,
+     * the catch-all answers with the OTHER app's HTML, and the screen is
+     * blank with nothing in the console but a MIME error. Web only: the APK
+     * ignores it.
+     */
+    experiments: { baseUrl: '/app' },
     // Drawn by scripts/make-icons.mjs — a script, not four checked-in binaries,
     // because an icon is the one asset nobody can read a diff of.
     splash: {

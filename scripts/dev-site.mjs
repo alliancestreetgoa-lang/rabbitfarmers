@@ -21,7 +21,10 @@ import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-const DIST = process.env.SITE_DIR ?? join(ROOT, 'apps/mobile/dist');
+// Two single-page apps, mirroring netlify.toml exactly: the web dashboard at
+// the root, the Expo export (whose baseUrl is /app) underneath /app.
+const WEB_DIST = join(ROOT, 'apps/web/dist');
+const APP_DIST = join(ROOT, 'apps/mobile/dist');
 const API = process.env.API_ORIGIN ?? 'http://localhost:3000';
 const PORT = Number(process.env.PORT ?? 8080);
 
@@ -113,16 +116,22 @@ const server = createServer(async (req, res) => {
     return res.end(Buffer.from(await upstream.arrayBuffer()));
   }
 
-  // Static file, if there is one. normalize + the prefix check keep `..` from
-  // escaping the publish directory.
-  const target = normalize(join(DIST, url.pathname));
-  if (target.startsWith(DIST) && await serveFile(res, target)) return;
+  // Which app owns this path? /app and below is the Expo export, whose files
+  // are addressed /app/... because of its baseUrl; everything else is the web
+  // dashboard. normalize + the prefix check keep `..` from escaping either.
+  const isApp = url.pathname === '/app' || url.pathname.startsWith('/app/');
+  const dist = isApp ? APP_DIST : WEB_DIST;
+  const rel = isApp ? url.pathname.replace(/^\/app/, '') || '/' : url.pathname;
+  const target = normalize(join(dist, rel));
+  if (target.startsWith(dist) && await serveFile(res, target)) return;
 
-  // Otherwise the SPA shell, with a 200 so a deep link keeps its path.
-  if (await serveFile(res, join(DIST, 'index.html'))) return;
+  // Otherwise the owning app's shell, with a 200 so a deep link keeps its path.
+  if (await serveFile(res, join(dist, 'index.html'))) return;
 
   res.writeHead(404, { 'content-type': 'text/plain' });
-  res.end(`Nothing built yet. Run: npm --prefix apps/mobile run build:web\n`);
+  res.end(isApp
+    ? `Nothing built yet. Run: npm --prefix apps/mobile run build:web\n`
+    : `Nothing built yet. Run: npm --prefix apps/web run build\n`);
 });
 
 // Only when run as a command. Importing this to check the routing table must
@@ -132,6 +141,7 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
     console.log(`site      http://localhost:${PORT}`);
     console.log(`admin     http://localhost:${PORT}/admin/login`);
     console.log(`api       proxied to ${API}`);
-    console.log(`serving   ${DIST}`);
+    console.log(`serving   / -> ${WEB_DIST}`);
+    console.log(`          /app -> ${APP_DIST}`);
   });
 }
