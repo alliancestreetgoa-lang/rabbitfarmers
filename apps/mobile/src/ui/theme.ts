@@ -8,18 +8,21 @@ import { Platform } from 'react-native';
  * pure grey so the palette reads as chosen.
  */
 export const colors = {
-  ground: '#F6F8F4',
+  // Sampled from the rabbitfarmers logo: leaf-green wordmark (#025312-#045814),
+  // chocolate brown (#693303), carrot orange for warnings.
+  ground: '#F4F9F1',
   surface: '#FFFFFF',
-  surfaceAlt: '#EDF1EA',
+  surfaceAlt: '#EAF4E4',
   ink: '#1B211D',
-  inkSoft: '#4A554D',
-  muted: '#6E7A72',
-  rule: '#D3DBD2',
-  ruleStrong: '#B6C1B5',
-  accent: '#2C5F53',
-  accentSoft: '#DCE9E3',
-  warn: '#8A6510',
-  warnSoft: '#F5EBD3',
+  inkSoft: '#465544',
+  muted: '#64775F',
+  rule: '#CFE0C8',
+  ruleStrong: '#AECBA4',
+  accent: '#075E17',
+  accentSoft: '#DDF0D5',
+  brown: '#693303',
+  warn: '#A85400',
+  warnSoft: '#FBE9D3',
   crit: '#8C332B',
   critSoft: '#F5DFDC',
   /** The loose-motion mark. Always drawn with the words beside it. */

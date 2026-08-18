@@ -4,7 +4,7 @@ import type {
   Animal, Breed, BuckSuggestion, Cage, DailyItem, HistoryEvent, Litter, MatingSchedule,
   MedicationDose, OpenCondition, PregnancySummary, PregnantDoe, RabbitLifetime,
   ReadyDoe,
-  Attendance, AttendanceSummary, BillingRow, Session, Shed, Staff, Subscription,
+  Attendance, AttendanceSummary, BillingRow, PayMonth, Session, Shed, Staff, StaffRole, Subscription,
   SupportAccess,
 } from './types.ts';
 
@@ -250,6 +250,30 @@ export class ApiClient {
 
   /* ------------------------------------------------------------------ read */
 
+  /** The farm at a glance — the home screen's one round trip. */
+  summary() {
+    return this.request<{
+      herd: { total: number; bucks: number; does: number; growers: number };
+      pregnant: { total_pregnant: number; confirmed_pregnant: number;
+        presumed_pregnant: number; due_within_7_days: number };
+      ready: { ready: number; overdue: number };
+      kits: { unweaned: number; litters_open: number; weaned_total: number };
+      health: { open_conditions: number; sick_rabbits: number; doses_due: number };
+      today: { open: number; urgent: number };
+      team: { staff: number };
+    }>('GET', '/summary');
+  }
+
+  /** Every litter, newest first, with the doe named. */
+  littersList() {
+    return this.request<{ litters: {
+      id: string; doe_id: string; doe_name: string | null; doe_tag: string;
+      kindled_on: string; born_alive: number; born_dead: number;
+      weaned_on: string | null; weaned_count: number | null;
+      recorded: number | null; not_yet_recorded: number | null;
+    }[] }>('GET', '/litters');
+  }
+
   daily() {
     return this.request<{ date: string; open: number; items: DailyItem[] }>('GET', '/daily');
   }
@@ -319,6 +343,35 @@ export class ApiClient {
 
   editStaff(id: string, input: Partial<Staff> & { shed_ids?: string[] }) {
     return this.request<{ staff: Staff }>('PATCH', `/staff/${id}`, input);
+  }
+
+  /** Salary, pay history and month-by-month amounts — the owner's screen. */
+  staffSalary(id: string) {
+    return this.request<{
+      person: { id: string; full_name: string; phone: string | null; role: StaffRole;
+                joined_on: string | null; is_active: boolean };
+      current: { monthly_amount: string; effective_from: string } | null;
+      history: { id: string; monthly_amount: string; effective_from: string;
+                 created_at: string; set_by_name: string | null }[];
+      months: PayMonth[];
+    }>('GET', `/staff/${id}/salary`);
+  }
+
+  setStaffSalary(id: string, input: { monthly_salary: number; effective_from?: string }) {
+    return this.request<{ salary: { id: string; monthly_amount: string; effective_from: string } }>(
+      'POST', `/staff/${id}/salary`, input);
+  }
+
+  /** The payslip endpoint with the auth header attached — for web downloads. */
+  async payslipBlob(id: string, month: string): Promise<Blob> {
+    const res = await this.fetchImpl(`${this.baseUrl}/staff/${id}/payslip?month=${month}`, {
+      headers: this.token ? { authorization: `Bearer ${this.token}` } : {},
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new ApiError(res.status, body?.error ?? 'Could not make the payslip');
+    }
+    return res.blob();
   }
 
   /** Shown once, never stored in readable form. */

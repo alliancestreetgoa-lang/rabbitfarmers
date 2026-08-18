@@ -56,16 +56,20 @@ export function LoginPage() {
     setError(null);
     try {
       /*
-       * The field is `email`, not `identifier`. /auth/signin reads `email` or
-       * `phone` and looks the account up through auth_lookup_by_email; anything
-       * else arrives as an empty string and comes back "Email or password is
-       * incorrect", which reads exactly like a wrong password.
+       * /auth/signin reads `email` or `phone`, nothing else. The owner signs in
+       * with an email; a farm hand's login IS their phone number, so a value
+       * with no @ and only digits is sent as `phone` — otherwise it would go
+       * through the email lookup and come back "incorrect password".
        */
+      const id = formData.email.trim();
+      const looksLikePhone = !id.includes('@') && /^[+]?[\d\s-]{6,}$/.test(id);
       const res = await fetch('/api/auth/signin', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          email: formData.email.trim(),
+          ...(looksLikePhone
+            ? { phone: id.replace(/[\s-]/g, '') }
+            : { email: id }),
           password: formData.password,
         }),
       });
@@ -122,10 +126,7 @@ export function LoginPage() {
       <div className="flex flex-1 items-center justify-center bg-white">
         <div className="w-full max-w-md p-8">
           <div className="mb-8">
-            <p className="mb-6 font-display text-2xl">
-              <span className="text-farm-accent">rabbit</span>
-              <span className="text-[#5a3a22]">farmers</span>
-            </p>
+            <img src="/logo.png" alt="rabbitfarmers" className="mb-6 h-36 w-auto" />
             <h1 className="mb-2 text-3xl font-bold text-gray-900">Welcome back</h1>
             <p className="text-gray-600">
               Don&apos;t have an account?{' '}
@@ -142,16 +143,16 @@ export function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label htmlFor="email" className="mb-2 block text-sm font-medium text-gray-700">
-                Email address
+                Email or phone number
               </label>
               <input
                 id="email"
-                type="email"
+                type="text"
                 name="email"
-                autoComplete="email"
+                autoComplete="username"
                 value={formData.email}
                 onChange={handleInputChange}
-                placeholder="you@example.com"
+                placeholder="you@example.com or +91…"
                 className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-farm-accent"
                 required
               />
@@ -211,7 +212,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={busy}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-3 font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-farm-accent px-4 py-3 font-medium text-white transition-colors hover:bg-farm-accent-deep disabled:opacity-60"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
               {busy ? 'Signing in…' : 'Sign in'}

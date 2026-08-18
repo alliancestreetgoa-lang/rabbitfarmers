@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { requireAuth, requireWriteAccess } from '../middleware.js';
-import { requireCan, can } from '../permissions.js';
+import { requireCan, requireInline, can } from '../permissions.js';
 import { HttpError, hashPassword, newSessionToken } from '../auth.js';
+import { payslipPdf } from '../pdf.js';
 
 export const staffRoutes = new Hono();
 staffRoutes.use('*', requireAuth);
@@ -58,12 +59,17 @@ const ROLES = ['owner', 'manager', 'caretaker', 'vet', 'accountant'];
 staffRoutes.get('/staff', requireCan('staff:read'), async (c) => {
   const db = c.get('db');
   const include = c.req.query('include') ?? 'active';
+  // The salary column rides along only for whoever manages payroll. A manager
+  // reads the team; what each person is paid is between them and the owner.
+  const seesPay = can(c.get('session'), 'payroll:manage');
   const rows = await db(async (client) => {
     const { rows } = await client.query(`
-      SELECT * FROM v_staff
-       WHERE ($1 = 'all') OR ($1 = 'active' AND is_active)
-          OR ($1 = 'past' AND NOT is_active)
-       ORDER BY is_active DESC, full_name`, [include]);
+      SELECT s.*, CASE WHEN $2 THEN cs.monthly_amount END AS monthly_salary
+      FROM v_staff s
+      LEFT JOIN v_current_salary cs ON cs.employee_id = s.id
+       WHERE ($1 = 'all') OR ($1 = 'active' AND s.is_active)
+          OR ($1 = 'past' AND NOT s.is_active)
+       ORDER BY s.is_active DESC, s.full_name`, [include, seesPay]);
     return rows;
   });
   return c.json({ staff: rows });
@@ -102,6 +108,18 @@ staffRoutes.post('/staff', write, requireCan('staff:write'), async (c) => {
       { field: 'employment_type' });
   }
 
+  // Salary is set at hire when the owner adds somebody — one form, not two
+  // trips. Anybody else adding staff cannot smuggle a salary past the owner.
+  let salary = null;
+  if (b.monthly_salary !== undefined && b.monthly_salary !== null && b.monthly_salary !== '') {
+    requireInline(session, 'payroll:manage');
+    salary = Number(b.monthly_salary);
+    if (!Number.isFinite(salary) || salary < 0) {
+      throw new HttpError(400, 'Monthly salary should be a number of rupees',
+        { field: 'monthly_salary' });
+    }
+  }
+
   const db = c.get('db');
   const row = await db(async (client) => {
     const { rows } = await client.query(`
@@ -110,9 +128,17 @@ staffRoutes.post('/staff', write, requireCan('staff:write'), async (c) => {
       VALUES (current_farm_id(), $1, $2, NULLIF($3,'')::citext, $4::employee_role_t,
               $5::employment_type_t, COALESCE($6::date, farm_today(current_farm_id())),
               COALESCE($7,'en'), COALESCE($8,false), $9)
-      RETURNING id`,
+      RETURNING id, joined_on`,
       [full_name, phone, String(b.email ?? '').trim().toLowerCase(), role, employment_type,
        b.joined_on ?? null, b.language ?? null, b.can_palpate ?? null, session.employeeId]);
+
+    if (salary !== null) {
+      await client.query(`
+        INSERT INTO staff_salary (farm_id, employee_id, monthly_amount, effective_from, set_by)
+        VALUES (current_farm_id(), $1, $2,
+                COALESCE($3::date, farm_today(current_farm_id())), $4)`,
+        [rows[0].id, salary, rows[0].joined_on, session.employeeId]);
+    }
 
     if (Array.isArray(b.shed_ids) && b.shed_ids.length) {
       await setSections(client, rows[0].id, b.shed_ids);
@@ -256,6 +282,170 @@ staffRoutes.post('/staff/:id/login', write, requireCan('staff:write'), async (c)
     message: `${person.full_name} signs in with their phone number, ${person.phone}, `
       + 'and this password. Read it to them once — it is not shown again.',
   });
+});
+
+/* --------------------------------------------------------------- salaries -- */
+
+/**
+ * Pay for one person and one month, straight from the attendance record.
+ *
+ * The convention, printed on every slip so nobody has to trust the arithmetic:
+ * paid days = present + half days at half + farm holidays; absence and leave
+ * are unpaid. Amount = monthly salary x paid days / days in the month. The
+ * salary used is whichever was in force by the end of that month.
+ */
+async function monthPay(client, employeeId, month) {
+  const { rows } = await client.query(`
+    WITH bounds AS (
+      SELECT ym, (ym || '-01')::date AS first_day,
+             ((ym || '-01')::date + interval '1 month' - interval '1 day')::date AS last_day
+      FROM (SELECT COALESCE($2, to_char(farm_today(current_farm_id()), 'YYYY-MM')) AS ym) m
+    )
+    SELECT b.ym                                             AS month,
+           extract(day FROM b.last_day)::int                AS days_in_month,
+           COALESCE(s.present, 0)                           AS present,
+           COALESCE(s.half_days, 0)                         AS half_days,
+           COALESCE(s.holiday, 0)                           AS holiday,
+           COALESCE(s.absent, 0)                            AS absent,
+           COALESCE(s.leave, 0)                             AS leave,
+           sal.monthly_amount,
+           (COALESCE(s.present, 0) + 0.5 * COALESCE(s.half_days, 0)
+            + COALESCE(s.holiday, 0))::numeric(6,1)         AS paid_days,
+           CASE WHEN sal.monthly_amount IS NULL THEN NULL
+                ELSE round(sal.monthly_amount
+                     * (COALESCE(s.present, 0) + 0.5 * COALESCE(s.half_days, 0)
+                        + COALESCE(s.holiday, 0))
+                     / extract(day FROM b.last_day), 2) END AS amount
+    FROM bounds b
+    LEFT JOIN v_attendance_summary s ON s.employee_id = $1 AND s.month = b.ym
+    LEFT JOIN LATERAL (
+      SELECT monthly_amount FROM staff_salary
+      WHERE employee_id = $1 AND effective_from <= b.last_day
+      ORDER BY effective_from DESC, created_at DESC LIMIT 1
+    ) sal ON true`,
+    [employeeId, month ?? null]);
+  return rows[0];
+}
+
+/** POST /staff/:id/salary — set what this person is paid, from a date. */
+staffRoutes.post('/staff/:id/salary', write, requireCan('payroll:manage'), async (c) => {
+  const id = c.req.param('id');
+  const b = await c.req.json();
+  const session = c.get('session');
+
+  const amount = Number(b.monthly_salary ?? b.monthly_amount);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new HttpError(400, 'Monthly salary should be a number of rupees',
+      { field: 'monthly_salary' });
+  }
+
+  const db = c.get('db');
+  const row = await db(async (client) => {
+    const { rows: person } = await client.query(
+      'SELECT id FROM employee WHERE id = $1', [id]);
+    if (!person.length) throw new HttpError(404, 'No such person on this farm');
+    const { rows } = await client.query(`
+      INSERT INTO staff_salary (farm_id, employee_id, monthly_amount, effective_from, set_by)
+      VALUES (current_farm_id(), $1, $2,
+              COALESCE($3::date, farm_today(current_farm_id())), $4)
+      RETURNING id, monthly_amount, effective_from, created_at`,
+      [id, amount, b.effective_from ?? null, session.employeeId]);
+    return rows[0];
+  });
+  return c.json({ salary: row }, 201);
+});
+
+/**
+ * GET /staff/:id/salary — everything the salary screen shows in one call:
+ * who they are, what they are on now, every change ever made, and each month
+ * since they joined with the attendance-computed amount.
+ */
+staffRoutes.get('/staff/:id/salary', requireCan('payroll:manage'), async (c) => {
+  const id = c.req.param('id');
+  const db = c.get('db');
+  const data = await db(async (client) => {
+    const { rows: person } = await client.query(
+      `SELECT id, full_name, phone, role, joined_on, is_active
+       FROM employee WHERE id = $1`, [id]);
+    if (!person.length) throw new HttpError(404, 'No such person on this farm');
+
+    const { rows: history } = await client.query(`
+      SELECT ss.id, ss.monthly_amount, ss.effective_from, ss.created_at,
+             e.full_name AS set_by_name
+      FROM staff_salary ss LEFT JOIN employee e ON e.id = ss.set_by
+      WHERE ss.employee_id = $1
+      ORDER BY ss.effective_from DESC, ss.created_at DESC`, [id]);
+
+    const { rows: months } = await client.query(`
+      WITH span AS (
+        SELECT date_trunc('month', LEAST(
+                 COALESCE((SELECT min(work_date) FROM attendance WHERE employee_id = $1),
+                          farm_today(current_farm_id())),
+                 COALESCE((SELECT joined_on FROM employee WHERE id = $1),
+                          farm_today(current_farm_id())),
+                 COALESCE((SELECT min(effective_from) FROM staff_salary WHERE employee_id = $1),
+                          farm_today(current_farm_id()))))::date AS a,
+               date_trunc('month', farm_today(current_farm_id())::timestamp)::date AS b
+      )
+      SELECT to_char(gs, 'YYYY-MM')                                       AS month,
+             extract(day FROM (gs + interval '1 month' - interval '1 day'))::int AS days_in_month,
+             COALESCE(s.present, 0)   AS present,
+             COALESCE(s.half_days, 0) AS half_days,
+             COALESCE(s.holiday, 0)   AS holiday,
+             COALESCE(s.absent, 0)    AS absent,
+             COALESCE(s.leave, 0)     AS leave,
+             sal.monthly_amount,
+             (COALESCE(s.present, 0) + 0.5 * COALESCE(s.half_days, 0)
+              + COALESCE(s.holiday, 0))::numeric(6,1)                     AS paid_days,
+             CASE WHEN sal.monthly_amount IS NULL THEN NULL
+                  ELSE round(sal.monthly_amount
+                       * (COALESCE(s.present, 0) + 0.5 * COALESCE(s.half_days, 0)
+                          + COALESCE(s.holiday, 0))
+                       / extract(day FROM (gs + interval '1 month' - interval '1 day')), 2)
+             END                                                          AS amount
+      FROM span, generate_series(span.a, span.b, interval '1 month') gs
+      LEFT JOIN v_attendance_summary s
+             ON s.employee_id = $1 AND s.month = to_char(gs, 'YYYY-MM')
+      LEFT JOIN LATERAL (
+        SELECT monthly_amount FROM staff_salary
+        WHERE employee_id = $1
+          AND effective_from <= (gs + interval '1 month' - interval '1 day')::date
+        ORDER BY effective_from DESC, created_at DESC LIMIT 1
+      ) sal ON true
+      ORDER BY month DESC`, [id]);
+
+    return { person: person[0], current: history[0] ?? null, history, months };
+  });
+  return c.json(data);
+});
+
+/** GET /staff/:id/payslip?month=YYYY-MM — the month's slip, as a PDF. */
+staffRoutes.get('/staff/:id/payslip', requireCan('payroll:manage'), async (c) => {
+  const id = c.req.param('id');
+  const month = c.req.query('month');
+  if (month && !/^\d{4}-\d{2}$/.test(month)) {
+    throw new HttpError(400, 'month should look like 2026-08', { field: 'month' });
+  }
+
+  const db = c.get('db');
+  const { farm, person, pay } = await db(async (client) => {
+    const { rows: farm } = await client.query(
+      'SELECT name FROM farm WHERE id = current_farm_id()');
+    const { rows: person } = await client.query(
+      'SELECT full_name, phone, role FROM employee WHERE id = $1', [id]);
+    if (!person.length) throw new HttpError(404, 'No such person on this farm');
+    return { farm: farm[0], person: person[0], pay: await monthPay(client, id, month) };
+  });
+
+  if (pay.monthly_amount == null) {
+    throw new HttpError(409,
+      'No salary is set for this person yet. Set one on the Team page first.');
+  }
+
+  const slug = person.full_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  c.header('content-type', 'application/pdf');
+  c.header('content-disposition', `attachment; filename="payslip-${slug}-${pay.month}.pdf"`);
+  return c.body(payslipPdf({ farmName: farm.name, person, pay }));
 });
 
 /* ------------------------------------------------------------- attendance -- */

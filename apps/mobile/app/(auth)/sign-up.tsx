@@ -28,7 +28,7 @@ export default function SignUp() {
     setErrors({});
     try {
       await signUp({ ...f, email: f.email.trim().toLowerCase() });
-      router.replace('/(app)/daily');
+      router.replace('/(app)/home');
     } catch (err) {
       if (err instanceof ApiError && err.detail && typeof err.detail === 'object') {
         setErrors(err.detail as Record<string, string>);

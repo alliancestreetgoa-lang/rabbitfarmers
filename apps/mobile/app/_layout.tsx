@@ -19,7 +19,13 @@ export default function RootLayout() {
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)/sign-in" options={{ title: 'Sign in' }} />
         <Stack.Screen name="(auth)/sign-up" options={{ title: 'Create your farm' }} />
+        <Stack.Screen name="(app)/home" options={{ title: 'Home' }} />
         <Stack.Screen name="(app)/daily" options={{ title: 'Today' }} />
+        <Stack.Screen name="(app)/health" options={{ title: 'Report a sick rabbit' }} />
+        <Stack.Screen name="(app)/sick" options={{ title: 'Sick rabbit' }} />
+        <Stack.Screen name="(app)/rabbit-health" options={{ title: 'Health record' }} />
+        <Stack.Screen name="(app)/attendance" options={{ title: 'Attendance' }} />
+        <Stack.Screen name="(app)/litters" options={{ title: 'Litters & kits' }} />
         <Stack.Screen name="(app)/herd" options={{ title: 'Herd' }} />
         <Stack.Screen name="(app)/breeding" options={{ title: 'Breeding' }} />
         <Stack.Screen name="(app)/more" options={{ title: 'More' }} />

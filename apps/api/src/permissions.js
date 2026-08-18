@@ -23,6 +23,7 @@ export const ACTIONS = [
   'staff:write',       // add, edit, deactivate, give somebody a login
   'attendance:self',   // check yourself in and out
   'attendance:mark',   // mark somebody else present or on leave
+  'payroll:manage',    // set salaries, see what anybody is paid, print payslips
   'settings:write',    // farm settings, timezone, breeding defaults
   'billing:read',      // what the farm pays
   'finance:write',     // reserved for sales and expenses; nothing uses it yet

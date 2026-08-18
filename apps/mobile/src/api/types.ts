@@ -244,6 +244,20 @@ export interface MatingSchedule {
 /** The five roles from docs/04. Enforced by the API, mirrored here for the UI. */
 export type StaffRole = 'owner' | 'manager' | 'caretaker' | 'vet' | 'accountant';
 
+/** One month of pay, computed from attendance by the server. */
+export interface PayMonth {
+  month: string;             // '2026-08'
+  days_in_month: number;
+  present: number;
+  half_days: number;
+  holiday: number;
+  absent: number;
+  leave: number;
+  monthly_amount: string | null;  // the rate in force that month
+  paid_days: string;              // present + half at half + holidays
+  amount: string | null;          // what to pay; null until a salary is set
+}
+
 export interface Staff {
   id: string;
   full_name: string;
@@ -258,6 +272,8 @@ export interface Staff {
   is_active: boolean;
   /** They have a password. Plenty of staff never need one. */
   can_sign_in: boolean;
+  /** Only present for whoever manages payroll; null for everyone else. */
+  monthly_salary?: string | null;
   /** Sheds they look after — what auto-assigns their work. */
   sheds: string[];
   shed_ids: string[];

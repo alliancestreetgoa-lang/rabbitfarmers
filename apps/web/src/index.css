@@ -9,17 +9,21 @@
  * palette reads as chosen."
  */
 @theme {
-  --color-farm-ground: #f6f8f4;
+  /* Lifted straight from the rabbitfarmers logo: the wordmark's leaf green
+     (#025312-#045814), its chocolate brown (#693303) and the carrot orange
+     (#f45b01) for warnings. Sampled from the artwork, not invented. */
+  --color-farm-ground: #f4f9f1;
   --color-farm-surface: #ffffff;
-  --color-farm-surface-alt: #edf1ea;
+  --color-farm-surface-alt: #eaf4e4;
   --color-farm-ink: #1b211d;
-  --color-farm-ink-soft: #4a554d;
-  --color-farm-muted: #6e7a72;
-  --color-farm-rule: #d3dbd2;
-  --color-farm-accent: #2c5f53;
-  --color-farm-accent-deep: #1e3f37;
-  --color-farm-accent-soft: #dce9e3;
-  --color-farm-warn: #8a6510;
+  --color-farm-ink-soft: #465544;
+  --color-farm-muted: #64775f;
+  --color-farm-rule: #cfe0c8;
+  --color-farm-accent: #075e17;
+  --color-farm-accent-deep: #033d0e;
+  --color-farm-accent-soft: #ddf0d5;
+  --color-farm-brown: #693303;
+  --color-farm-warn: #a85400;
   --color-farm-crit: #8c332b;
   --color-farm-crit-soft: #f5dfdc;
 

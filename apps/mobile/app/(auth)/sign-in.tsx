@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Image, ScrollView, Text, View } from 'react-native';
 import { Link, router } from 'expo-router';
 import { useApp } from '../../src/state';
 import { Button, Field, H1, Muted, Screen } from '../../src/ui/components';
@@ -34,7 +34,7 @@ export default function SignIn() {
     setError(null);
     try {
       await signIn(email.trim(), password);
-      router.replace('/(app)/daily');
+      router.replace('/(app)/home');
     } catch (err) {
       setError(
         err instanceof OfflineError
@@ -48,7 +48,12 @@ export default function SignIn() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ padding: space.lg, paddingTop: space.xxl }}>
-        <H1>rabbitfarmers</H1>
+        <Image
+          source={require('../../assets/logo.png')}
+          style={{ width: 280, height: 186, alignSelf: 'center' }}
+          resizeMode="contain"
+          accessibilityLabel="rabbitfarmers"
+        />
         <Muted>Breeding, medicine rounds and staff, from the shed.</Muted>
 
         <View style={{ height: space.xl }} />

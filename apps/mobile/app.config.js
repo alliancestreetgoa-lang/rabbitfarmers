@@ -11,7 +11,7 @@ module.exports = {
   expo: {
     name: 'rabbitfarmers',
     slug: 'rabbitfarmers',
-    version: '0.1.0',
+    version: '0.1.1',
     orientation: 'portrait',
     scheme: 'rabbitfarmers',
     userInterfaceStyle: 'automatic',
@@ -30,7 +30,7 @@ module.exports = {
     // because an icon is the one asset nobody can read a diff of.
     splash: {
       image: './assets/splash.png',
-      backgroundColor: '#2C5F53',
+      backgroundColor: '#FFFFFF',
       resizeMode: 'contain',
     },
     android: {
@@ -45,10 +45,10 @@ module.exports = {
       // Bump on every build uploaded anywhere. Play refuses a repeat, and two
       // different APKs sharing a versionCode is how a phone ends up refusing an
       // update with no useful message.
-      versionCode: 1,
+      versionCode: 2,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#2C5F53',
+        backgroundColor: '#045814',
       },
       // Only this one. Everything the app does is an HTTPS call — no camera, no
       // location, no contacts — and an app that asks for nothing else is an

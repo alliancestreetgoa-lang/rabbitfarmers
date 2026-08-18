@@ -152,10 +152,7 @@ export function SignUpPage() {
       <div className="flex flex-1 items-center justify-center bg-white py-10">
         <div className="w-full max-w-md p-8">
           <div className="mb-8">
-            <p className="mb-6 font-display text-2xl">
-              <span className="text-farm-accent">rabbit</span>
-              <span className="text-[#5a3a22]">farmers</span>
-            </p>
+            <img src="/logo.png" alt="rabbitfarmers" className="mb-6 h-36 w-auto" />
             <h1 className="mb-2 text-3xl font-bold text-gray-900">Create your farm</h1>
             <p className="text-gray-600">
               Free, and it stays free. No card, nothing to expire.
@@ -253,7 +250,7 @@ export function SignUpPage() {
             <button
               type="submit"
               disabled={busy}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-3 font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-farm-accent px-4 py-3 font-medium text-white transition-colors hover:bg-farm-accent-deep disabled:opacity-60"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
               {busy ? 'Creating your farm…' : 'Create my farm'}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
 import {
@@ -21,6 +21,126 @@ const ROLES: { value: StaffRole; label: string; blurb: string }[] = [
     blurb: 'Everything, including settings and billing.' },
 ];
 
+const rupees = (n: string | number | null | undefined) =>
+  n == null ? '—' : `₹${Number(n).toLocaleString('en-IN')}`;
+
+const monthName = (m: string) =>
+  new Date(`${m}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+/**
+ * What they are paid, month by month from attendance, and every change ever
+ * made. Owner only — the server refuses everybody else, this screen simply
+ * does not appear for them.
+ */
+function SalarySection({ personId }: { personId: string }) {
+  const { client } = useApp();
+  const pay = useQuery(`salary-${personId}`, () => client.staffSalary(personId), [personId]);
+  const [amount, setAmount] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try {
+      await client.setStaffSalary(personId, { monthly_salary: Number(amount) });
+      setAmount('');
+      await pay.reload();
+    } catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const payslip = async (month: string) => {
+    // Only the browser build can hand over a file; the phone app shows the
+    // numbers and the web dashboard prints the slips.
+    setBusy(true); setErr(null);
+    try {
+      const blob = await client.payslipBlob(personId, month);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `payslip-${month}.pdf`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const d = pay.data;
+  return (
+    <>
+      <H2>Salary</H2>
+      {!d && pay.loading && <Loading />}
+      {d && (
+        <>
+          <Muted>
+            {d.current
+              ? `${rupees(d.current.monthly_amount)} a month, since ${new Date(d.current.effective_from).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}.`
+              : 'No salary set yet.'}
+          </Muted>
+          <View style={{ height: space.sm }} />
+          <Field label={d.current ? 'Change to (₹ / month)' : 'Set salary (₹ / month)'}
+                 testID="salary-amount" value={amount} onChangeText={setAmount}
+                 keyboardType="numeric" placeholder="8000" />
+          <Button title={d.current ? 'Change salary' : 'Set salary'} variant="ghost"
+                  onPress={save} loading={busy} disabled={!amount.trim()}
+                  testID="salary-save" />
+
+          <H2>Pay, month by month</H2>
+          <Muted>
+            Present and half days count, farm holidays are paid, absence and
+            leave are not. Salary × days paid ÷ days in the month.
+          </Muted>
+          <View style={{ height: space.sm }} />
+          {d.months.map((m) => (
+            <View key={m.month} style={sal.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={sal.month}>{monthName(m.month)}</Text>
+                <Text style={sal.detail}>
+                  {m.paid_days} of {m.days_in_month} days paid
+                  {Number(m.absent) ? ` · ${m.absent} absent` : ''}
+                  {Number(m.leave) ? ` · ${m.leave} leave` : ''}
+                </Text>
+              </View>
+              <Text style={sal.amount}>{rupees(m.amount)}</Text>
+              {Platform.OS === 'web' && m.amount != null && (
+                <Pressable onPress={() => payslip(m.month)} disabled={busy}
+                           testID={`payslip-${m.month}`}>
+                  <Text style={sal.pdf}>PDF</Text>
+                </Pressable>
+              )}
+            </View>
+          ))}
+
+          {d.history.length > 1 && (
+            <>
+              <H2>Salary changes</H2>
+              {d.history.map((h) => (
+                <Muted key={h.id}>
+                  {rupees(h.monthly_amount)} from{' '}
+                  {new Date(h.effective_from).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {h.set_by_name ? ` · set by ${h.set_by_name}` : ''}
+                </Muted>
+              ))}
+            </>
+          )}
+        </>
+      )}
+      {!!err && <Text style={{ color: colors.crit, marginTop: space.sm }}>{err}</Text>}
+    </>
+  );
+}
+
+const sal = StyleSheet.create({
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: space.md,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.rule,
+    borderRadius: radius.md, padding: space.md, marginBottom: space.sm,
+  },
+  month: { ...t.title, color: colors.ink },
+  detail: { ...t.small, color: colors.muted, marginTop: 2 },
+  amount: { ...t.title, color: colors.ink, fontWeight: '700' },
+  pdf: { ...t.body, color: colors.accent, fontWeight: '700', padding: space.sm },
+});
+
 export default function StaffRecord() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { client, readOnly, session } = useApp();
@@ -29,8 +149,10 @@ export default function StaffRecord() {
   const sheds = useQuery('sheds', () => client.sheds(), []);
   const existing = staff.data?.staff.find((p) => p.id === id);
 
+  const isOwner = session?.user?.role === 'owner';
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [salary, setSalary] = useState('');
   const [role, setRole] = useState<StaffRole>('caretaker');
   const [shedIds, setShedIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -56,6 +178,7 @@ export default function StaffRecord() {
       } else {
         await client.addStaff({
           full_name: name.trim(), phone: phone.trim(), role, shed_ids: shedIds,
+          ...(isOwner && salary.trim() !== '' ? { monthly_salary: Number(salary) } : {}),
         } as never);
       }
       await staff.reload();
@@ -142,6 +265,16 @@ export default function StaffRecord() {
         />
         <Muted>This is what they sign in with. No email needed.</Muted>
 
+        {!existing && isOwner && (
+          <>
+            <Field label="Monthly salary (₹)" testID="staff-salary" value={salary}
+                   onChangeText={setSalary} keyboardType="numeric" placeholder="8000" />
+            <Muted>
+              Their payslip each month is worked out from this and their attendance.
+            </Muted>
+          </>
+        )}
+
         <H2>What they can do</H2>
         {ROLES.map((r) => (
           <Pressable
@@ -192,6 +325,8 @@ export default function StaffRecord() {
         <View style={{ height: space.lg }} />
         <Button title={existing ? 'Save' : 'Add them'} onPress={save}
                 loading={busy} disabled={!name.trim() || !phone.trim()} testID="staff-save" />
+
+        {existing && isOwner && <SalarySection personId={existing.id} />}
 
         {existing && (
           <>

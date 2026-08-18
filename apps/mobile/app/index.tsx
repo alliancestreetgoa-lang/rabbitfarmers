@@ -16,5 +16,5 @@ export default function Index() {
   }
   // Daily is the landing screen, not a dashboard. Open the app and the work is
   // already in front of you.
-  return <Redirect href={session ? '/(app)/daily' : '/(auth)/sign-in'} />;
+  return <Redirect href={session ? '/(app)/home' : '/(auth)/sign-in'} />;
 }

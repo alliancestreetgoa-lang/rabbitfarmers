@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
-  ChevronDown, ExternalLink, Loader2, LogOut, ShieldOff, Smartphone,
+  ChevronDown, Loader2, LogOut, ShieldOff,
 } from 'lucide-react';
 import {
-  apiGet, apiPost, clearSession, getSession, FULL_APP_URL, type Session,
+  apiGet, apiPost, clearSession, getSession, type Session,
 } from '@/lib/api';
+import { seesTeam } from '@/components/ui/shell';
 
 /**
  * The owner's cockpit — deliberately NOT the phone app.
@@ -32,7 +33,7 @@ interface Summary {
   };
   ready: { ready: number; overdue: number };
   kits: { unweaned: number; litters_open: number; weaned_total: number };
-  health: { open_conditions: number; doses_due: number };
+  health: { open_conditions: number; sick_rabbits: number; doses_due: number };
   today: { open: number; urgent: number };
   team: { staff: number };
 }
@@ -68,34 +69,36 @@ function greeting(): string {
   return 'Good evening';
 }
 
-function Kpi({ label, value, sub, tone }: {
-  label: string; value: number; sub: string; tone?: 'warn';
+function Kpi({ label, value, sub, tone, to }: {
+  label: string; value: number; sub: string; tone?: 'warn' | 'crit'; to: string;
 }) {
+  const hot = tone && value > 0;
   return (
-    <div
-      className={`rounded-xl border bg-farm-surface p-5 ${
-        tone === 'warn' && value > 0 ? 'border-farm-warn/40' : 'border-farm-rule'
+    <Link
+      to={to}
+      className={`block rounded-xl border bg-farm-surface p-5 transition-colors hover:border-farm-accent ${
+        hot ? (tone === 'crit' ? 'border-farm-crit/40' : 'border-farm-warn/40') : 'border-farm-rule'
       }`}
     >
       <p className="text-[11px] font-bold tracking-[0.12em] text-farm-muted uppercase">{label}</p>
       <p
         className={`mt-2 font-display text-5xl leading-none ${
-          tone === 'warn' && value > 0 ? 'text-farm-warn' : 'text-farm-ink'
+          hot ? (tone === 'crit' ? 'text-farm-crit' : 'text-farm-warn') : 'text-farm-ink'
         }`}
       >
         {value}
       </p>
       <p className="mt-2 text-sm leading-snug text-farm-ink-soft">{sub}</p>
-    </div>
+    </Link>
   );
 }
 
-function Card({ title, desc, badge, href }: {
-  title: string; desc: string; badge?: string; href: string;
+function Card({ title, desc, badge, to }: {
+  title: string; desc: string; badge?: string; to: string;
 }) {
   return (
-    <a
-      href={href}
+    <Link
+      to={to}
       className="group flex flex-col rounded-xl border border-farm-rule bg-farm-surface p-5 transition-colors hover:border-farm-accent"
     >
       <p className="font-display text-xl text-farm-ink">
@@ -107,10 +110,53 @@ function Card({ title, desc, badge, href }: {
         )}
       </p>
       <p className="mt-1.5 flex-1 text-sm leading-relaxed text-farm-muted">{desc}</p>
-      <p className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-farm-accent">
-        Open in the app <ExternalLink className="h-3.5 w-3.5" />
+      <p className="mt-3 text-sm font-semibold text-farm-accent">Open →</p>
+    </Link>
+  );
+}
+
+/**
+ * A farm hand's login sees their own day, not the team's — this card is their
+ * check-in, standing where the Team and Attendance cards stand for the owner.
+ */
+function CheckInCard() {
+  const [mine, setMine] = useState<{ checked_in_at: string | null; checked_out_at: string | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const clock = (s: string | null) =>
+    s ? new Date(s).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
+
+  const load = () =>
+    apiGet<{ attendance: { checked_in_at: string | null; checked_out_at: string | null } | null }>('/me/attendance')
+      .then((d) => setMine(d.attendance)).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  const punch = async (which: 'check-in' | 'check-out') => {
+    setBusy(true);
+    try { await apiPost(`/attendance/${which}`); await load(); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="flex flex-col rounded-xl border border-farm-rule bg-farm-surface p-5">
+      <p className="font-display text-xl text-farm-ink">Your day</p>
+      <p className="mt-1.5 flex-1 text-sm leading-relaxed text-farm-muted">
+        {mine?.checked_in_at
+          ? `Worked ${clock(mine.checked_in_at)}${mine.checked_out_at ? ` to ${clock(mine.checked_out_at)}` : ' — still in'}`
+          : 'Not checked in yet.'}
       </p>
-    </a>
+      {!mine?.checked_in_at && (
+        <button onClick={() => punch('check-in')} disabled={busy}
+          className="mt-3 self-start rounded-lg bg-farm-accent px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          Check in
+        </button>
+      )}
+      {mine?.checked_in_at && !mine?.checked_out_at && (
+        <button onClick={() => punch('check-out')} disabled={busy}
+          className="mt-3 self-start rounded-lg border border-farm-rule bg-farm-surface px-3.5 py-2 text-sm font-semibold disabled:opacity-50">
+          Check out
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -169,10 +215,13 @@ export function DashboardPage() {
       {/* ---- top bar ---- */}
       <header className="border-b border-farm-rule bg-farm-surface">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-3.5">
-          <p className="font-display text-lg">
-            <span className="text-farm-accent">rabbit</span>
-            <span className="text-[#5a3a22]">farmers</span>
-          </p>
+          <div className="flex items-center gap-2.5">
+            <img src="/mark.png" alt="" className="h-10 w-10 rounded-full" />
+            <p className="font-display text-lg font-bold">
+              <span className="text-farm-accent">rabbit</span>
+              <span className="text-farm-brown">farmers</span>
+            </p>
+          </div>
           <span className="hidden border-l border-farm-rule pl-4 text-sm text-farm-muted sm:inline">
             {farmName}
           </span>
@@ -193,11 +242,6 @@ export function DashboardPage() {
                     {userRole} · {farmName}
                   </p>
                 </div>
-                <a href={FULL_APP_URL}
-                   className="flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-farm-ground">
-                  <Smartphone className="h-4 w-4 opacity-70" /> Open the full app
-                </a>
-                <div className="border-t border-farm-rule" />
                 <button
                   onClick={() => signOut(false)}
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm font-bold text-farm-crit hover:bg-farm-crit-soft"
@@ -248,38 +292,44 @@ export function DashboardPage() {
               Add your first rabbits and the dashboard fills itself in — pregnancies,
               kits, and the day's work will all appear here.
             </p>
-            <a
-              href={FULL_APP_URL}
+            <Link
+              to="/dashboard/herd"
               className="mt-5 inline-block rounded-xl bg-farm-accent px-5 py-3 text-sm font-semibold text-white"
             >
               Add your first rabbit →
-            </a>
+            </Link>
           </div>
         )}
 
         {/* ---- the four numerals ---- */}
         {summary && !empty && (
           <>
-            <div className="mt-7 grid grid-cols-2 gap-4 lg:grid-cols-4">
-              <Kpi label="In the herd" value={summary.herd.total}
+            <div className="mt-7 grid grid-cols-2 gap-4 lg:grid-cols-5">
+              <Kpi to="/dashboard/herd" label="In the herd" value={summary.herd.total}
                    sub={`${summary.herd.bucks} bucks · ${summary.herd.does} does`} />
-              <Kpi label="Pregnant" value={summary.pregnant.total_pregnant}
+              <Kpi to="/dashboard/breeding" label="Pregnant" value={summary.pregnant.total_pregnant}
                    sub={`${summary.pregnant.confirmed_pregnant} confirmed · ${summary.pregnant.presumed_pregnant} presumed${
                      summary.pregnant.due_within_7_days
                        ? ` · ${summary.pregnant.due_within_7_days} due this week` : ''}`} />
-              <Kpi label="Ready to mate" value={summary.ready.ready} tone="warn"
+              <Kpi to="/dashboard/breeding" label="Ready to mate" value={summary.ready.ready} tone="warn"
                    sub={summary.ready.overdue
                      ? `${summary.ready.overdue} overdue` : 'none overdue'} />
-              <Kpi label="Kits" value={summary.kits.unweaned}
+              <Kpi to="/dashboard/litters" label="Kits" value={summary.kits.unweaned}
                    sub={`unweaned · ${summary.kits.litters_open} open litter${
                      summary.kits.litters_open === 1 ? '' : 's'} · ${summary.kits.weaned_total} weaned`} />
+              <Kpi to="/dashboard/sick" label="Sick" value={summary.health.sick_rabbits} tone="crit"
+                   sub={summary.health.sick_rabbits
+                     ? `${summary.health.open_conditions} open case${
+                         summary.health.open_conditions === 1 ? '' : 's'}${
+                         summary.health.doses_due ? ` · ${summary.health.doses_due} doses due` : ''}`
+                     : 'everyone healthy'} />
             </div>
 
             {/* ---- what needs a look ---- */}
             {urgent.length > 0 && (
               <div className="mt-4 grid gap-3 md:grid-cols-3">
                 {urgent.map((i) => (
-                  <a key={i.ref_id} href={FULL_APP_URL}
+                  <Link key={i.ref_id} to="/dashboard/today"
                      className="flex items-center gap-3 rounded-xl border border-farm-rule bg-farm-surface px-4 py-3 hover:border-farm-accent">
                     <span className={`h-2.5 w-2.5 flex-none rounded-full ${
                       URGENCY_DOT[i.urgency] ?? 'bg-farm-accent'}`} />
@@ -287,7 +337,7 @@ export function DashboardPage() {
                       <span className="block truncate text-sm font-semibold">{i.title}</span>
                       {i.tag && <span className="text-xs text-farm-muted">{i.tag}</span>}
                     </span>
-                  </a>
+                  </Link>
                 ))}
               </div>
             )}
@@ -297,23 +347,31 @@ export function DashboardPage() {
               Everything else <span className="h-px flex-1 bg-farm-rule" />
             </p>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Card title="Today" href={FULL_APP_URL}
+              <Card title="Today" to="/dashboard/today"
                     badge={summary.today.open ? String(summary.today.open) : undefined}
                     desc="The day's work — medicine rounds, checks, nest boxes." />
-              <Card title="Breeding" href={FULL_APP_URL}
+              <Card title="Breeding" to="/dashboard/breeding"
                     desc="Record a mating, palpation check, kindling." />
-              <Card title="Herd" href={FULL_APP_URL}
+              <Card title="Herd" to="/dashboard/herd"
                     desc={`All ${summary.herd.total} rabbits, their state and history.`} />
-              <Card title="Health" href={FULL_APP_URL}
+              <Card title="Sick rabbit" to="/dashboard/sick"
+                    desc="Every rabbit's health record — sickness, medicine, history." />
+              <Card title="Report a sick rabbit" to="/dashboard/health"
                     badge={summary.health.open_conditions ? String(summary.health.open_conditions) : undefined}
                     desc={summary.health.doses_due
                       ? `${summary.health.doses_due} medicine doses due.`
                       : 'Log a condition, medicine protocols.'} />
-              <Card title="Team" href={FULL_APP_URL}
-                    desc={`${summary.team.staff} on the farm. Hire, logins, roles.`} />
-              <Card title="Attendance" href={FULL_APP_URL}
-                    desc="Who worked which day. Month totals, CSV." />
-              <Card title="Litters & kits" href={FULL_APP_URL}
+              {seesTeam(userRole) ? (
+                <>
+                  <Card title="Team" to="/dashboard/team"
+                        desc={`${summary.team.staff} on the farm. Hire, logins, roles, salaries.`} />
+                  <Card title="Attendance" to="/dashboard/attendance"
+                        desc="Who worked which day. Month totals, CSV." />
+                </>
+              ) : (
+                <CheckInCard />
+              )}
+              <Card title="Litters & kits" to="/dashboard/litters"
                     desc={`${summary.kits.unweaned} kits to record individually or wean.`} />
               <div className="flex flex-col rounded-xl border border-farm-accent-soft bg-gradient-to-b from-farm-accent-soft/40 to-farm-surface p-5">
                 <p className="font-display text-xl text-farm-ink">Android app</p>

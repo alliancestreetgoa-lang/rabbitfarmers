@@ -5,6 +5,7 @@ import { useApp } from '../state';
 import { TAP_MIN, colors, space, type as t } from './theme';
 
 const TABS = [
+  { href: '/(app)/home', label: 'Home', match: 'home' },
   { href: '/(app)/daily', label: 'Today', match: 'daily' },
   { href: '/(app)/breeding', label: 'Breeding', match: 'breeding' },
   { href: '/(app)/herd', label: 'Herd', match: 'herd' },
@@ -12,9 +13,9 @@ const TABS = [
 ] as const;
 
 /**
- * A plain bottom bar rather than a tab navigator: four destinations, always
- * visible, no gestures to learn. Today is first because that is where the app
- * opens and where the work is.
+ * A plain bottom bar rather than a tab navigator: five destinations, always
+ * visible, no gestures to learn. Home is first because that is where the app
+ * opens — the farm at a glance, with every section a card.
  */
 export function TabBar() {
   const path = usePathname();

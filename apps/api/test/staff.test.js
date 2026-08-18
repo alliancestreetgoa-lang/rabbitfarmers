@@ -530,3 +530,109 @@ describe('attendance', () => {
       .body.staff.some((s) => s.full_name === 'Not yours'));
   });
 });
+
+describe('salaries and payslips', () => {
+  test('owner sets a salary at hire, and the month computes from attendance', async () => {
+    const f = await signupFarm();
+    const added = await api('POST', '/staff', {
+      token: f.token,
+      body: { full_name: 'Wage Hand', phone: uniquePhone(), monthly_salary: 9300,
+              joined_on: '2026-07-01' },
+    });
+    assert.equal(added.status, 201, added.text);
+    const id = added.body.staff.id;
+
+    // The owner's team list carries the salary column.
+    const list = await api('GET', '/staff', { token: f.token });
+    const row = list.body.staff.find((s) => s.id === id);
+    assert.equal(Number(row.monthly_salary), 9300);
+
+    // A fixed past month, so the arithmetic is deterministic: July has 31
+    // days; 2 present + 1 half day = 2.5 paid days = 9300 * 2.5 / 31 = 750.
+    for (const [d, status] of [
+      ['2026-07-01', 'present'], ['2026-07-02', 'present'], ['2026-07-03', 'half_day'],
+      ['2026-07-04', 'absent'],
+    ]) {
+      const res = await api('POST', '/attendance', {
+        token: f.token, body: { employee_id: id, work_date: d, status } });
+      assert.equal(res.status, 201, res.text);
+    }
+
+    const sal = await api('GET', `/staff/${id}/salary`, { token: f.token });
+    assert.equal(sal.status, 200, sal.text);
+    assert.equal(Number(sal.body.current.monthly_amount), 9300);
+    const july = sal.body.months.find((m) => m.month === '2026-07');
+    assert.ok(july, `no 2026-07 in ${JSON.stringify(sal.body.months.map((m) => m.month))}`);
+    assert.equal(Number(july.paid_days), 2.5);
+    assert.equal(Number(july.amount), 750);
+
+    // The payslip is a real PDF that names the person.
+    const slip = await api('GET', `/staff/${id}/payslip?month=2026-07`, { token: f.token });
+    assert.equal(slip.status, 200, slip.text.slice(0, 200));
+    assert.equal(slip.headers.get('content-type'), 'application/pdf');
+    assert.ok(slip.text.startsWith('%PDF-'), 'should be a PDF');
+    assert.ok(slip.text.includes('Wage Hand'), 'the slip names who it pays');
+  });
+
+  test('a raise takes effect from its date without rewriting old months', async () => {
+    const f = await signupFarm();
+    const added = await api('POST', '/staff', {
+      token: f.token,
+      body: { full_name: 'Long Timer', phone: uniquePhone(), monthly_salary: 6200,
+              joined_on: '2026-07-01' },
+    });
+    const id = added.body.staff.id;
+    await api('POST', '/attendance', {
+      token: f.token, body: { employee_id: id, work_date: '2026-07-10', status: 'present' } });
+
+    const raise = await api('POST', `/staff/${id}/salary`, {
+      token: f.token, body: { monthly_salary: 9000, effective_from: '2026-08-01' } });
+    assert.equal(raise.status, 201, raise.text);
+
+    const sal = await api('GET', `/staff/${id}/salary`, { token: f.token });
+    assert.equal(Number(sal.body.current.monthly_amount), 9000);
+    assert.equal(sal.body.history.length, 2, 'both rates stay on record');
+    const july = sal.body.months.find((m) => m.month === '2026-07');
+    assert.equal(Number(july.monthly_amount), 6200, 'July is paid at the July rate');
+    assert.equal(Number(july.amount), 200, '6200 * 1 / 31');
+  });
+
+  test('salary is the owner’s business — nobody else reads or writes it', async () => {
+    const f = await signupFarm();
+    const manager = await hire(f, { name: 'Meena', phone: uniquePhone(), role: 'manager' });
+    const hand = await hire(f, { name: 'Ravi', phone: uniquePhone() });
+    await api('POST', `/staff/${hand.id}/salary`, {
+      token: f.token, body: { monthly_salary: 8000 } });
+
+    // A manager reads the team, but the salary column stays empty for them.
+    const list = await api('GET', '/staff', { token: manager.token });
+    assert.equal(list.status, 200, list.text);
+    for (const s of list.body.staff) {
+      assert.ok(s.monthly_salary == null, 'a manager must not see what anybody is paid');
+    }
+
+    for (const [who, token] of [['manager', manager.token], ['farm hand', hand.token]]) {
+      assert.equal((await api('GET', `/staff/${hand.id}/salary`, { token })).status, 403,
+        `${who} reading a salary`);
+      assert.equal((await api('POST', `/staff/${hand.id}/salary`, {
+        token, body: { monthly_salary: 99999 } })).status, 403, `${who} setting a salary`);
+      assert.equal((await api('GET', `/staff/${hand.id}/payslip`, { token })).status, 403,
+        `${who} printing a payslip`);
+    }
+
+    // Nor can a manager sneak one in while hiring.
+    const sneak = await api('POST', '/staff', {
+      token: manager.token,
+      body: { full_name: 'Sneaked', phone: uniquePhone(), monthly_salary: 100 } });
+    assert.equal(sneak.status, 403, sneak.text);
+  });
+
+  test('a payslip needs a salary to exist first', async () => {
+    const f = await signupFarm();
+    const added = await api('POST', '/staff', {
+      token: f.token, body: { full_name: 'No Salary Yet', phone: uniquePhone() } });
+    const slip = await api('GET', `/staff/${added.body.staff.id}/payslip`, { token: f.token });
+    assert.equal(slip.status, 409, slip.text);
+    assert.match(slip.body.error, /No salary is set/);
+  });
+});

@@ -585,6 +585,9 @@ farmRoutes.get('/summary', canRead, async (c) => {
         FROM litter`),
       client.query(`
         SELECT (SELECT count(*)::int FROM v_open_conditions)  AS open_conditions,
+               -- Rabbits, not cases: one animal with two conditions is one
+               -- sick rabbit on the dashboard, not two.
+               (SELECT count(DISTINCT rabbit_id)::int FROM v_open_conditions) AS sick_rabbits,
                (SELECT count(*)::int FROM v_medication_due)   AS doses_due`),
       client.query(`
         SELECT count(*)::int                                          AS open,
@@ -812,6 +815,27 @@ farmRoutes.post('/litters', write, canWriteAnimals, async (c) => {
     return { ...rows[0], schedule: sched[0] };
   });
   return c.json({ litter: row }, 201);
+});
+
+/**
+ * GET /litters — every litter, newest first, with the doe's name and the kit
+ * arithmetic from v_litter_kits. The web dashboard's litters screen reads this;
+ * until it existed, "how many litters do I have" had no collection answer.
+ */
+farmRoutes.get('/litters', canRead, async (c) => {
+  const rows = await c.get('db')(async (client) => {
+    const { rows } = await client.query(`
+      SELECT l.id, l.doe_id, d.name AS doe_name, d.tag AS doe_tag,
+             l.kindled_on, l.born_alive, l.born_dead,
+             l.weaned_on, l.weaned_count,
+             k.recorded, k.not_yet_recorded
+      FROM litter l
+      JOIN rabbit d ON d.id = l.doe_id
+      LEFT JOIN v_litter_kits k ON k.litter_id = l.id
+      ORDER BY l.kindled_on DESC`);
+    return rows;
+  });
+  return c.json({ litters: rows });
 });
 
 /** GET /litters/:id — one kindling record, for reading it back or editing it. */
