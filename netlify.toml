@@ -1,20 +1,15 @@
 [build]
   # Three builds and one copy.
   #
-  # The API's runtime dependencies are copied to the repo root because the
-  # function imports the API from source: esbuild resolves imports by walking
-  # up from netlify/functions, the root had no node_modules, and the first
-  # real deploy failed with "Cannot find package 'hono'". The copy also gives
-  # the pg external below somewhere to be packaged from. Copy, not symlink —
-  # the bundler's file walker is not guaranteed to follow links.
+  # The root package.json is what feeds the function bundler — see its own
+  # comment. Netlify installs it before this command runs, so the function's
+  # imports of the API's dependencies resolve from the repo root.
   #
   # The web app (apps/web) is the front door and takes the root. The Expo
   # export — the same code the APK runs — moves under /app, which is why its
   # config sets experiments.baseUrl to '/app'. It is copied into the web
   # app's dist because Netlify publishes exactly one directory.
   command = """
-    npm --prefix apps/api ci --omit=dev &&
-    cp -R apps/api/node_modules node_modules &&
     npm --prefix apps/mobile ci &&
     npm --prefix apps/mobile run build:web &&
     npm --prefix apps/web ci &&

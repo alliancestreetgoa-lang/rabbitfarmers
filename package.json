@@ -1,0 +1,21 @@
+{
+  "name": "rabbitfarmers",
+  "private": true,
+  "//": [
+    "This exists for one consumer: Netlify's function bundler. The functions in",
+    "netlify/functions import the API from apps/api/src, and the bundler",
+    "resolves those imports by walking up from the function file to the repo",
+    "root — apps/api/node_modules is never on that path, which is how the",
+    "first deploy died with \"Cannot find package 'hono'\". A package.json at",
+    "the root makes Netlify install these before the build, so both esbuild's",
+    "resolution and the packaging of the pg external find what they need.",
+    "",
+    "Keep these three IN LOCK STEP with apps/api/package.json dependencies.",
+    "They are the API's entire runtime dependency list, on purpose."
+  ],
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14",
+    "pg": "^8.13.1"
+  }
+}
