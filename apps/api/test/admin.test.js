@@ -257,6 +257,33 @@ describe('admin CRM', () => {
     assert.match(good.headers.get('set-cookie') ?? '', /rb_admin=/);
   });
 
+  test('signs in from behind a proxy chain, and the audit IP is the client', async () => {
+    /*
+     * Behind Netlify, x-forwarded-for is "client, proxy1, proxy2". The session
+     * and audit ip columns are `inet`, and inserting the whole chain answered
+     * every production admin sign-in with "That is not a valid inet" (22P02) —
+     * while local dev, where the header is absent, never saw it. clientIp()
+     * takes the first hop and prefers null over garbage.
+     */
+    const admin = await makeAdmin('superadmin');
+    const res = await api('POST', '/admin/login', {
+      headers: { 'x-forwarded-for': '203.0.113.7, 64.252.72.1, 10.0.0.2' },
+      body: { email: admin.email, password: 'admin password 123' },
+    });
+    assert.equal(res.status, 200, res.text);
+
+    const { rows } = await adminQuery(
+      `SELECT host(ip) AS ip FROM admin_session ORDER BY issued_at DESC LIMIT 1`);
+    assert.equal(rows[0].ip, '203.0.113.7', 'first hop, not the chain');
+
+    // And garbage in the header must degrade to null, not to a 500.
+    const junk = await api('POST', '/admin/login', {
+      headers: { 'x-forwarded-for': 'not-an-ip at all' },
+      body: { email: admin.email, password: 'admin password 123' },
+    });
+    assert.equal(junk.status, 200, junk.text);
+  });
+
   describe('deleting a farm', () => {
     test('needs superadmin, a reason, and the farm typed back', async () => {
       const f = await signupFarm();

@@ -15,6 +15,7 @@ import { Hono } from 'hono';
 import { adminQuery } from '../db.js';
 import { HttpError } from '../auth.js';
 import { requireAdminRole, audit, readBody, wantsJson } from '../admin-auth.js';
+import { clientIp } from '../middleware.js';
 import { renderBilling, renderWebhook } from '../admin-ui.js';
 import { applyWebhookEvent } from './billing.js';
 import { createRefund, razorpayConfigured } from '../razorpay.js';
@@ -195,7 +196,7 @@ adminBillingRoutes.post('/payments/:id/refund', canBill, async (c) => {
         [refund.id, String(err.message ?? err).slice(0, 300)]);
       await audit(admin, 'refund_failed', payment.farm_id,
         { payment: paymentId, amount_paise: refund.amount_paise }, null,
-        reason, c.req.header('x-forwarded-for') ?? null, 'refund');
+        reason, clientIp(c), 'refund');
       throw new HttpError(502,
         'The payment provider refused the refund. It is on the billing attention list.',
         { gateway: err.gateway ?? null });
@@ -226,7 +227,7 @@ adminBillingRoutes.post('/payments/:id/refund', canBill, async (c) => {
       credit_note: settled?.credit_note ?? null,
       days_removed: settled?.days_removed ?? null,
       settled: Boolean(settled?.settled) },
-    reason, c.req.header('x-forwarded-for') ?? null, 'refund');
+    reason, clientIp(c), 'refund');
 
   if (wantsJson(c)) {
     return c.json({
@@ -264,7 +265,7 @@ adminBillingRoutes.post('/refunds/:id/settle', canBill, async (c) => {
     { was: before[0].status }, {
       settled: settled.settled, credit_note: settled.credit_note,
       days_removed: settled.days_removed, period_end: settled.period_end,
-    }, reason, c.req.header('x-forwarded-for') ?? null, 'refund');
+    }, reason, clientIp(c), 'refund');
 
   if (wantsJson(c)) return c.json({ ok: true, ...settled });
   return c.redirect('/admin/billing');
@@ -335,7 +336,7 @@ adminBillingRoutes.post('/webhooks/:id/replay', canBill, async (c) => {
 
   await audit(admin, 'replay_webhook', outcome.farmId,
     { event: before.event, was: before.result }, { result: outcome.result },
-    reason, c.req.header('x-forwarded-for') ?? null, 'webhook_event');
+    reason, clientIp(c), 'webhook_event');
 
   if (wantsJson(c)) return c.json({ ok: true, ...outcome });
   return c.redirect('/admin/billing');

@@ -6,6 +6,7 @@ import {
   ADMIN_COOKIE, ADMIN_SESSION_HOURS, readAdminToken, issueAdminSession,
   requireAdmin, requireAdminRole, audit, readBody, wantsJson,
 } from '../admin-auth.js';
+import { clientIp } from '../middleware.js';
 import { adminBillingRoutes } from './admin-billing.js';
 
 export const adminRoutes = new Hono();
@@ -36,7 +37,7 @@ adminRoutes.post('/login', async (c) => {
 
   await adminQuery('UPDATE platform_admin SET last_login_at = now() WHERE id = $1', [admin.id]);
   const token = await issueAdminSession(
-    admin.id, c.req.header('x-forwarded-for'), c.req.header('user-agent'));
+    admin.id, clientIp(c), c.req.header('user-agent'));
   c.header('Set-Cookie',
     `${ADMIN_COOKIE}=${token}; Path=/admin; HttpOnly; SameSite=Lax; Max-Age=${ADMIN_SESSION_HOURS * 3600}`);
 
@@ -228,7 +229,7 @@ adminRoutes.post('/farms/:id/reset_password',
 
     await audit(admin, 'reset_password', farmId,
       { owner: owner[0].email }, null, reason,
-      c.req.header('x-forwarded-for') ?? null, 'employee');
+      clientIp(c), 'employee');
 
     return c.json({
       owner: { name: owner[0].full_name, email: owner[0].email },
@@ -279,7 +280,7 @@ adminRoutes.post('/farms/:id/delete', requireAdminRole('superadmin'), async (c) 
   // Logged first. target_farm_id is ON DELETE SET NULL, so the entry survives
   // with the farm's name preserved in the payload.
   await audit(admin, 'delete_farm', farmId,
-    { name: rows[0].name }, null, reason, c.req.header('x-forwarded-for') ?? null, 'farm');
+    { name: rows[0].name }, null, reason, clientIp(c), 'farm');
 
   await adminQuery('DELETE FROM farm WHERE id = $1', [farmId]);
 
@@ -379,7 +380,7 @@ adminRoutes.post('/farms/:id/record_payment',
       { amount_paise: applied.amount_paise, billing_period: period,
         reference: String(body.reference ?? '').trim() || null,
         invoice_number: applied.invoice_number, period_end: applied.period_end },
-      reason, c.req.header('x-forwarded-for') ?? null, 'payment');
+      reason, clientIp(c), 'payment');
 
     if (wantsJson(c)) return c.json({ ok: true, payment: applied }, 201);
     return c.redirect(`/admin/farms/${farmId}`);
@@ -416,7 +417,7 @@ adminRoutes.post('/farms/:id/:action', async (c) => {
   await audit(admin, actionName, farmId, before,
     { status: after.status, trial_ends_on: after.trial_ends_on,
       current_period_end: after.current_period_end },
-    reason, c.req.header('x-forwarded-for') ?? null);
+    reason, clientIp(c));
 
   if (ct.includes('application/json')) {
     return c.json({ ok: true, action: actionName, subscription: after });
@@ -476,7 +477,7 @@ async function startImpersonation(c, farmId, reason) {
     VALUES ($1, $2, $3, $4, $5, $6)`,
     [owner[0].id, hash, imp.expires_at,
      `rabbitfarmers support · ${admin.full_name}`, imp.id,
-     c.req.header('x-forwarded-for') || null]);
+     clientIp(c)]);
 
   /*
    * Tell the farm. Not by email — there is no sender — but into the same list
@@ -497,7 +498,7 @@ async function startImpersonation(c, farmId, reason) {
 
   await audit(admin, 'impersonate', farmId, null,
     { reason, expires_at: imp.expires_at }, reason,
-    c.req.header('x-forwarded-for') ?? null, 'admin_impersonation');
+    clientIp(c), 'admin_impersonation');
 
   return { impersonation: imp, token, farm_name: owner[0].farm_name, admin };
 }

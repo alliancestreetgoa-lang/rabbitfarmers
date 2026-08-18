@@ -185,3 +185,20 @@ export async function errorHandler(err, c) {
   console.error('[api]', err);
   return c.json({ error: 'Something went wrong on our side' }, 500);
 }
+
+/**
+ * The client's IP, in a form Postgres will take.
+ *
+ * Behind Netlify, x-forwarded-for is a comma-separated chain — client first,
+ * then every proxy the request crossed. The ip columns are `inet`, and feeding
+ * the whole chain in produced "That is not a valid inet" (22P02) on every
+ * admin sign-in in production, while local dev — where the header is absent —
+ * never saw it. First hop only, and null over garbage: an audit row with no IP
+ * beats a sign-in that cannot happen.
+ */
+export function clientIp(c) {
+  const raw = c.req.header('x-forwarded-for');
+  if (!raw) return null;
+  const first = raw.split(',')[0].trim();
+  return /^[0-9a-fA-F:.]+$/.test(first) ? first : null;
+}
