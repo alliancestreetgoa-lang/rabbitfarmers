@@ -18,7 +18,7 @@ import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 // Two single-page apps, mirroring netlify.toml exactly: the web dashboard at
@@ -136,7 +136,10 @@ const server = createServer(async (req, res) => {
 
 // Only when run as a command. Importing this to check the routing table must
 // not start a server on a port somebody else is using.
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL, not string-glueing: a path with a space ("Rabbit Farmer")
+// percent-encodes in import.meta.url and the naive comparison never matches,
+// so the server silently refuses to start from any folder with a space in it.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`site      http://localhost:${PORT}`);
     console.log(`admin     http://localhost:${PORT}/admin/login`);
