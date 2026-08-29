@@ -3,7 +3,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
 import {
-  Banner, Button, Card, H1, Loading, Muted, Pill, Screen, SupportReadOnly,
+  Banner, Button, Card, DatePicker, H1, Loading, Muted, Pill, Screen,
+  SupportReadOnly, isoDay,
 } from '../../src/ui/components';
 import { colors, radius, space, type as t } from '../../src/ui/theme';
 import type { BuckSuggestion } from '../../src/api/types';
@@ -14,6 +15,7 @@ export default function RecordMating() {
 
   const [doeId, setDoeId] = useState<string | undefined>(doeParam);
   const [buckId, setBuckId] = useState<string | undefined>();
+  const [matedOn, setMatedOn] = useState(() => isoDay(new Date()));
   const [bucks, setBucks] = useState<BuckSuggestion[]>([]);
   const [saved, setSaved] = useState<{ sent: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,7 +40,11 @@ export default function RecordMating() {
       const r = await outbox.enqueue('mating', {
         doe_id: doeId,
         buck_id: buckId,
-        mated_at: new Date().toISOString(),
+        // Midday on the chosen day, not midnight. mated_at is a timestamptz and
+        // every date the app quotes afterwards — palpate, nest box, kindling —
+        // is counted off it, so a midnight value read in another zone shifts
+        // the whole schedule by a day.
+        mated_at: `${matedOn}T12:00:00`,
       });
       await refreshOutbox();
       setSaved({ sent: r.sent });
@@ -119,6 +125,19 @@ export default function RecordMating() {
                 </Pressable>
               );
             })}
+          </>
+        )}
+
+        {!!doeId && (
+          <>
+            <Text style={s.label}>WHEN</Text>
+            <DatePicker
+              label="Date of mating"
+              value={matedOn}
+              onSelect={setMatedOn}
+              maxDate={isoDay(new Date())}
+              testID="mated-on"
+            />
           </>
         )}
 

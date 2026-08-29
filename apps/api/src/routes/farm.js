@@ -198,6 +198,7 @@ farmRoutes.patch('/animals/:id', write, canWriteAnimals, async (c) => {
       'Sold, culled and died go through their own screen so the reason is kept',
       { field: 'status' });
   }
+  if ('date_of_birth' in b) b.date_of_birth = cleanDateOfBirth(b.date_of_birth);
 
   const result = await c.get('db')(async (client) => {
     const { rows: before } = await client.query(`
@@ -502,6 +503,38 @@ async function resolveCage(client, { id, code }) {
   return rows[0].id;
 }
 
+/**
+ * A birth date the farm could actually have lived through.
+ *
+ * Nothing validated this, and a slipped keystroke — 20205 for 2025 — was
+ * accepted and stored. The damage is silent and total: `old_enough` compares
+ * the date to today, an unborn rabbit is never old enough, and she is pinned
+ * to GROWING, which appears in neither the mating queue nor the pregnancy
+ * list. She simply is not in the app any more, with nothing on screen saying
+ * why. A four-digit year and "not in the future" catches it at the door.
+ */
+function cleanDateOfBirth(value, field = 'date_of_birth') {
+  if (value === undefined || value === null || value === '') return null;
+  const text = String(value).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    throw new HttpError(400, 'Give the birth date as YYYY-MM-DD', { field });
+  }
+  const d = new Date(`${text}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== text) {
+    throw new HttpError(400, 'That is not a real date', { field });
+  }
+  // Compared in UTC against a UTC-midnight date, so a farm ahead of UTC can
+  // still enter today without it reading as tomorrow.
+  const today = new Date();
+  const todayUtc = new Date(Date.UTC(
+    today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  if (d.getTime() > todayUtc.getTime()) {
+    throw new HttpError(400, 'A rabbit cannot be born in the future — check the year',
+      { field });
+  }
+  return text;
+}
+
 /** POST /animals — you add and name every rabbit yourself. */
 farmRoutes.post('/animals', write, canWriteAnimals, async (c) => {
   const b = await c.req.json();
@@ -514,6 +547,7 @@ farmRoutes.post('/animals', write, canWriteAnimals, async (c) => {
   if (!['doe', 'buck', 'unknown'].includes(sex)) {
     throw new HttpError(400, 'Is it a doe or a buck?', { field: 'sex' });
   }
+  const dateOfBirth = cleanDateOfBirth(b.date_of_birth);
 
   const db = c.get('db');
   const session = c.get('session');
@@ -529,7 +563,7 @@ farmRoutes.post('/animals', write, canWriteAnimals, async (c) => {
               $5, $6, $7, $8, $9, COALESCE($10,'born_here')::origin_t, $11)
       RETURNING id, tag, name, sex, role`,
       [(b.tag ?? name).trim(), name, sex, b.role ?? null, breedId,
-       b.date_of_birth ?? null, b.dam_id ?? null, b.sire_id ?? null,
+       dateOfBirth, b.dam_id ?? null, b.sire_id ?? null,
        cageId, b.origin ?? null, session.employeeId, b.id ?? null]);
 
     // Hand back the resolved names, not just ids — the app has just created a
@@ -566,7 +600,7 @@ farmRoutes.post('/animals', write, canWriteAnimals, async (c) => {
 farmRoutes.get('/summary', canRead, async (c) => {
   const db = c.get('db');
   const data = await db(async (client) => {
-    const [herd, preg, ready, kits, health, today, team] = await Promise.all([
+    const [herd, preg, ready, kits, health, today, team, mated] = await Promise.all([
       client.query(`
         SELECT count(*)::int                                   AS total,
                count(*) FILTER (WHERE sex = 'buck')::int       AS bucks,
@@ -601,11 +635,20 @@ farmRoutes.get('/summary', canRead, async (c) => {
                count(*) FILTER (WHERE urgency = 'critical')::int      AS urgent
         FROM v_daily_list`),
       client.query(`SELECT count(*)::int AS staff FROM employee WHERE is_active`),
+      // Served but not yet palpated. Counted apart from the pregnancy numeral
+      // on purpose: claiming her as pregnant would be a guess the app has no
+      // business making, but leaving her uncounted is how she went missing.
+      client.query(`
+        SELECT count(*)::int AS awaiting_palpation
+        FROM v_pregnant_does WHERE last_check_result IS NULL`),
     ]);
     return {
       herd: herd.rows[0],
-      pregnant: preg.rows[0] ?? {
-        total_pregnant: 0, confirmed_pregnant: 0, presumed_pregnant: 0, due_within_7_days: 0,
+      pregnant: {
+        ...(preg.rows[0] ?? {
+          total_pregnant: 0, confirmed_pregnant: 0, presumed_pregnant: 0, due_within_7_days: 0,
+        }),
+        awaiting_palpation: mated.rows[0].awaiting_palpation,
       },
       ready: ready.rows[0],
       kits: kits.rows[0],
@@ -621,15 +664,28 @@ farmRoutes.get('/pregnant', canRead, async (c) => {
   const db = c.get('db');
   const data = await db(async (client) => {
     const summary = await client.query('SELECT * FROM v_pregnancy_summary');
+    // One list. A doe served today and a doe on day 25 are both carried here —
+    // the confidence column is what separates "palpated positive" from "we are
+    // going on the service alone", and the palpation window rides along so the
+    // screen can say what the next job on her is.
     const does = await client.query(`
       SELECT s.rabbit_id, s.tag, r.name, s.state, s.confidence, s.gestation_day,
-             s.expected_kindling_on, s.window_start_on, s.window_end_on
+             s.last_service_on, s.expected_kindling_on,
+             s.window_start_on, s.window_end_on,
+             s.last_service_on + fs.first_check_window_start AS palpate_from_on,
+             s.last_service_on + fs.first_check_window_end   AS palpate_until_on,
+             s.last_check_result IS NULL                     AS needs_palpation,
+             r.date_of_birth IS NULL                         AS age_unknown
       FROM v_pregnant_does s
-      JOIN rabbit r ON r.id = s.rabbit_id
+      JOIN rabbit r         ON r.id = s.rabbit_id
+      JOIN farm_settings fs ON fs.farm_id = s.farm_id
       ORDER BY s.expected_kindling_on`);
     return {
-      summary: summary.rows[0] ?? {
-        total_pregnant: 0, confirmed_pregnant: 0, presumed_pregnant: 0, due_within_7_days: 0,
+      summary: {
+        ...(summary.rows[0] ?? {
+          total_pregnant: 0, confirmed_pregnant: 0, presumed_pregnant: 0, due_within_7_days: 0,
+        }),
+        awaiting_palpation: does.rows.filter((d) => d.needs_palpation).length,
       },
       does: does.rows,
     };
@@ -645,7 +701,10 @@ farmRoutes.get('/ready-to-mate', canRead, async (c) => {
       SELECT q.rabbit_id, q.tag, r.name, q.state, q.days_since_last_kindling,
              q.days_since_weaning, q.days_overdue,
              q.last_observed_receptivity, q.receptivity_checked_on,
-             p.total_weaned, p.litters
+             p.total_weaned, p.litters,
+             -- Her age is a guess when no birth date was ever entered. She is
+             -- offered for mating anyway, but the screen says so out loud.
+             r.date_of_birth IS NULL AS age_unknown
       FROM v_ready_to_mate q
       JOIN rabbit r ON r.id = q.rabbit_id
       LEFT JOIN v_doe_performance p ON p.rabbit_id = q.rabbit_id

@@ -180,3 +180,51 @@ describe('tenant isolation', () => {
     }
   });
 });
+
+/**
+ * Privileges, checked as privileges rather than as behaviour.
+ *
+ * These tests connect as the database superuser, which bypasses every
+ * privilege check — so a missing GRANT is invisible to all of them. That is
+ * how `apply_condition_catalog` shipped un-executable: migration 0037 revoked
+ * it from PUBLIC and granted it back to nobody, the admin console's
+ * "Add & apply to every farm" died with "permission denied for function", and
+ * the whole suite stayed green. Assert the grants directly instead.
+ */
+describe('the roles the API actually connects as', () => {
+  // Looked up by name rather than by signature: the point is the grant, and a
+  // hard-coded argument list would make this test fail for the wrong reason the
+  // first time somebody adds a parameter.
+  const calledDirectly = [
+    ['rabbitry_admin', 'apply_condition_catalog'],
+    ['rabbitry_app', 'auth_signup'],
+    ['rabbitry_app', 'auth_resolve_session'],
+    ['rabbitry_app', 'auth_create_session'],
+    ['rabbitry_app', 'auth_lookup_by_email'],
+    ['rabbitry_app', 'auth_lookup_by_phone'],
+    ['rabbitry_app', 'auth_set_password'],
+    ['rabbitry_app', 'auth_revoke_session'],
+  ];
+
+  test('can execute every SECURITY DEFINER function called straight from Node', async () => {
+    for (const [role, fn] of calledDirectly) {
+      const { rows } = await adminQuery(
+        `SELECT p.oid::regprocedure::text AS sig,
+                has_function_privilege($1, p.oid, 'EXECUTE') AS may_execute
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public' AND p.proname = $2`, [role, fn]);
+      assert.ok(rows.length > 0, `${fn} does not exist — the API calls it by name`);
+      for (const r of rows) {
+        assert.equal(r.may_execute, true,
+          `${role} cannot EXECUTE ${r.sig} — the API calls it directly and will 500`);
+      }
+    }
+  });
+
+  // A second test that actually pressed the catalogue onto a fresh farm was
+  // removed: condition_catalog is global rather than farm-scoped, so it raced
+  // with admin.test.js's catalogue assertions when the files run in parallel.
+  // The grant is what regressed and the assertion above checks it directly,
+  // without touching shared state.
+
+});

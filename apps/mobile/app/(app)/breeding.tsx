@@ -57,11 +57,19 @@ export default function Breeding() {
             onPress={() => router.push(`/(app)/animal?id=${d.rabbit_id}`)}
           >
             <View style={{ flex: 1 }}>
-              <Text style={s.rowTitle}>{d.name ?? d.tag}</Text>
+              <Text style={s.rowTitle}>
+                {d.name ?? d.tag}
+                {d.age_unknown ? ' · age unknown' : ''}
+              </Text>
               <Text style={s.rowMeta}>
                 Day {d.gestation_day} · due {relativeDay(d.expected_kindling_on)}
                 {' '}({d.window_start_on.slice(5)} to {d.window_end_on.slice(5)})
               </Text>
+              {d.needs_palpation && (
+                <Text style={s.rowMeta} testID={`palpate-${d.rabbit_id}`}>
+                  Palpate {d.palpate_from_on.slice(5)} to {d.palpate_until_on.slice(5)}
+                </Text>
+              )}
             </View>
             <Pill
               text={d.confidence === 'confirmed' ? 'confirmed' : 'presumed'}
@@ -82,7 +90,10 @@ export default function Breeding() {
             onPress={() => router.push(`/record/mating?doe=${d.rabbit_id}`)}
           >
             <View style={{ flex: 1 }}>
-              <Text style={s.rowTitle}>{d.name ?? d.tag}</Text>
+              <Text style={s.rowTitle}>
+                {d.name ?? d.tag}
+                {d.age_unknown ? ' · age unknown' : ''}
+              </Text>
               {/* The reason she is on the list. An unexplained ranked list is a
                   black box, and staff ignore black boxes. */}
               <Text style={s.rowMeta} testID={`ready-reason-${d.rabbit_id}`}>

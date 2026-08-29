@@ -11,7 +11,7 @@ module.exports = {
   expo: {
     name: 'rabbitfarmers',
     slug: 'rabbitfarmers',
-    version: '0.1.2',
+    version: '0.1.3',
     orientation: 'portrait',
     scheme: 'rabbitfarmers',
     userInterfaceStyle: 'automatic',
@@ -45,7 +45,7 @@ module.exports = {
       // Bump on every build uploaded anywhere. Play refuses a repeat, and two
       // different APKs sharing a versionCode is how a phone ends up refusing an
       // update with no useful message.
-      versionCode: 3,
+      versionCode: 4,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#045814',

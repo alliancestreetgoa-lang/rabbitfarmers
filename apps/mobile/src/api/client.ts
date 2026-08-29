@@ -255,7 +255,8 @@ export class ApiClient {
     return this.request<{
       herd: { total: number; bucks: number; does: number; growers: number };
       pregnant: { total_pregnant: number; confirmed_pregnant: number;
-        presumed_pregnant: number; due_within_7_days: number };
+        presumed_pregnant: number; due_within_7_days: number;
+        awaiting_palpation: number };
       ready: { ready: number; overdue: number };
       kits: { unweaned: number; litters_open: number; weaned_total: number };
       health: { open_conditions: number; sick_rabbits: number; doses_due: number };
@@ -279,7 +280,9 @@ export class ApiClient {
   }
 
   pregnant() {
-    return this.request<{ summary: PregnancySummary; does: PregnantDoe[] }>('GET', '/pregnant');
+    return this.request<{
+      summary: PregnancySummary; does: PregnantDoe[];
+    }>('GET', '/pregnant');
   }
 
   readyToMate() {

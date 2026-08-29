@@ -134,6 +134,8 @@ export interface PregnancySummary {
   confirmed_pregnant: number;
   presumed_pregnant: number;
   due_within_7_days: number;
+  /** Served, not yet palpated. Counted apart from the pregnancies on purpose. */
+  awaiting_palpation: number;
 }
 
 export interface PregnantDoe {
@@ -146,6 +148,13 @@ export interface PregnantDoe {
   expected_kindling_on: string;
   window_start_on: string;
   window_end_on: string;
+  last_service_on: string;
+  /** When she is due to be palpated — the next job on a doe nobody has checked. */
+  palpate_from_on: string;
+  palpate_until_on: string;
+  needs_palpation: boolean;
+  /** No birth date on file, so her age is an assumption the screen owns up to. */
+  age_unknown?: boolean;
 }
 
 export interface ReadyDoe {
@@ -159,6 +168,7 @@ export interface ReadyDoe {
   last_observed_receptivity: string | null;
   total_weaned: number | null;
   litters: number | null;
+  age_unknown?: boolean;
 }
 
 export interface BuckSuggestion {

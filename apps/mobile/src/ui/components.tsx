@@ -136,6 +136,133 @@ export function Dropdown({ label, value, placeholder, options, onSelect, testID 
   );
 }
 
+/** yyyy-mm-dd in the phone's own timezone. toISOString() is UTC and would
+ *  hand back yesterday for any farm east of Greenwich after 05:30 local. */
+export const isoDay = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+const DOW = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+/**
+ * A month grid behind a tap, for dates that are usually — but not always —
+ * today. A mating written up in the evening, or on Monday for the Saturday it
+ * actually happened, has to be recordable as the day it happened: every
+ * gestation date the app then quotes is counted off it, so a date that is
+ * silently "now" is a wrong palpation date and a wrong nest-box date.
+ *
+ * Hand-rolled rather than pulled from a package on purpose. A native date
+ * module would mean a new APK for a field that is one month grid, and this one
+ * behaves identically on the phone and on the web build.
+ */
+export function DatePicker({ label, value, onSelect, maxDate, minDate, testID }: {
+  label: string;
+  value: string;                       // yyyy-mm-dd
+  onSelect: (iso: string) => void;
+  maxDate?: string;
+  minDate?: string;
+  testID?: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const parse = (iso: string) => {
+    const [y = 1970, m = 1, d = 1] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const monthName = (i: number) => MONTHS[i] ?? '';
+  const selected = parse(value);
+  const [cursor, setCursor] = React.useState(() => new Date(selected.getFullYear(), selected.getMonth(), 1));
+
+  // Monday-first, which is how a week is read here.
+  const firstDow = (new Date(cursor.getFullYear(), cursor.getMonth(), 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+  const cells: (number | null)[] = [
+    ...Array<null>(firstDow).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+
+  const blocked = (day: number) => {
+    const iso = isoDay(new Date(cursor.getFullYear(), cursor.getMonth(), day));
+    return (!!maxDate && iso > maxDate) || (!!minDate && iso < minDate);
+  };
+
+  const human = (iso: string) => {
+    const d = parse(iso);
+    const today = isoDay(new Date());
+    if (iso === today) return `Today · ${d.getDate()} ${monthName(d.getMonth()).slice(0, 3)}`;
+    return `${d.getDate()} ${monthName(d.getMonth()).slice(0, 3)} ${d.getFullYear()}`;
+  };
+
+  const step = (months: number) =>
+    setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + months, 1));
+
+  return (
+    <View style={{ marginBottom: space.lg }}>
+      <Text style={s.fieldLabel}>{label}</Text>
+      <Pressable testID={testID} accessibilityRole="button"
+                 onPress={() => setOpen(true)} style={s.ddTrigger}>
+        <Text style={s.ddValue} numberOfLines={1}>{human(value)}</Text>
+        <Text style={s.ddChevron}>▾</Text>
+      </Pressable>
+
+      <Modal visible={open} transparent animationType="fade"
+             onRequestClose={() => setOpen(false)}>
+        <Pressable style={s.ddBackdrop} onPress={() => setOpen(false)}>
+          <Pressable style={s.ddSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={s.calHead}>
+              <Pressable onPress={() => step(-1)} style={s.calNav}
+                         testID={testID ? `${testID}-prev` : undefined}
+                         accessibilityLabel="Previous month">
+                <Text style={s.calNavText}>‹</Text>
+              </Pressable>
+              <Text style={s.calTitle}>
+                {monthName(cursor.getMonth())} {cursor.getFullYear()}
+              </Text>
+              <Pressable onPress={() => step(1)} style={s.calNav}
+                         testID={testID ? `${testID}-next` : undefined}
+                         accessibilityLabel="Next month">
+                <Text style={s.calNavText}>›</Text>
+              </Pressable>
+            </View>
+
+            <View style={s.calRow}>
+              {DOW.map((d, i) => (
+                <Text key={i} style={s.calDow}>{d}</Text>
+              ))}
+            </View>
+
+            <View style={s.calGrid}>
+              {cells.map((day, i) => {
+                if (day === null) return <View key={`x${i}`} style={s.calCell} />;
+                const iso = isoDay(new Date(cursor.getFullYear(), cursor.getMonth(), day));
+                const on = iso === value;
+                const off = blocked(day);
+                return (
+                  <Pressable
+                    key={iso}
+                    testID={testID ? `${testID}-${iso}` : undefined}
+                    disabled={off}
+                    onPress={() => { onSelect(iso); setOpen(false); }}
+                    style={[s.calCell, on && s.calCellOn, off && s.calCellOff]}
+                  >
+                    <Text style={[s.calDay, on && s.calDayOn, off && s.calDayOff]}>{day}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Pressable onPress={() => { onSelect(isoDay(new Date())); setOpen(false); }}
+                       style={s.calToday}
+                       testID={testID ? `${testID}-today` : undefined}>
+              <Text style={s.calTodayText}>Today</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
 /**
  * A coloured dot is never shown on its own — the words always come with it.
  * Colour-blindness is common and a phone screen in sunlight washes colour out
@@ -255,6 +382,43 @@ const s = StyleSheet.create({
     ...t.label, color: colors.muted,
     paddingHorizontal: space.lg, paddingVertical: space.sm,
   },
+
+  // --- calendar ---
+  calHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: space.sm, paddingTop: space.sm, paddingBottom: space.md,
+  },
+  calNav: {
+    width: TAP_MIN, height: TAP_MIN, alignItems: 'center', justifyContent: 'center',
+    borderRadius: radius.md,
+  },
+  calNavText: { fontSize: 28, lineHeight: 32, color: colors.accent, fontWeight: '600' },
+  calTitle: { ...t.title, color: colors.ink },
+  calRow: { flexDirection: 'row', paddingHorizontal: space.sm },
+  calDow: {
+    ...t.label, color: colors.muted, width: `${100 / 7}%`,
+    textAlign: 'center', paddingBottom: space.xs,
+  },
+  calGrid: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    paddingHorizontal: space.sm, paddingBottom: space.sm,
+  },
+  // Square-ish and full-width-divided-by-seven, so the tap target stays near
+  // TAP_MIN on the narrowest phone this runs on.
+  calCell: {
+    width: `${100 / 7}%`, height: TAP_MIN,
+    alignItems: 'center', justifyContent: 'center', borderRadius: radius.md,
+  },
+  calCellOn: { backgroundColor: colors.accent },
+  calCellOff: { opacity: 0.3 },
+  calDay: { ...t.body, color: colors.ink },
+  calDayOn: { color: colors.white, fontWeight: '700' },
+  calDayOff: { color: colors.muted },
+  calToday: {
+    minHeight: TAP_MIN, alignItems: 'center', justifyContent: 'center',
+    borderTopWidth: 1, borderTopColor: colors.rule,
+  },
+  calTodayText: { ...t.title, color: colors.accent },
   ddOption: {
     minHeight: TAP_MIN, justifyContent: 'center',
     paddingHorizontal: space.lg, paddingVertical: space.sm,

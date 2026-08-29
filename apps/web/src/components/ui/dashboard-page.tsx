@@ -30,6 +30,7 @@ interface Summary {
   pregnant: {
     total_pregnant: number; confirmed_pregnant: number;
     presumed_pregnant: number; due_within_7_days: number;
+    awaiting_palpation: number;
   };
   ready: { ready: number; overdue: number };
   kits: { unweaned: number; litters_open: number; weaned_total: number };

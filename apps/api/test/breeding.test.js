@@ -1104,3 +1104,202 @@ describe('a kit that dies is still a recorded kit', () => {
     assert.equal(after.body.litter.died, 1);
   });
 });
+
+/**
+ * Regression: a doe added without a date of birth.
+ *
+ * Every other test in this file passes date_of_birth, which is why this went
+ * unnoticed. In the field the date is optional, so most quickly-added does
+ * arrive with none — and they were pinned to GROWING forever, which is a state
+ * that appears in neither the ready-to-mate queue nor the pregnancy list. The
+ * mating was written to the table and then filtered out of every view that
+ * would have shown it, so to the farmer it simply vanished.
+ */
+describe('a doe whose age nobody recorded', () => {
+  async function farmWithUndatedStock() {
+    const farm = await signupFarm();
+    const mk = async (name, sex) => {
+      const r = await api('POST', '/animals', {
+        token: farm.token,
+        body: { name, sex, role: 'breeder' },   // deliberately no date_of_birth
+      });
+      assert.equal(r.status, 201, r.text);
+      return r.body.animal.id;
+    };
+    return { ...farm, doe: await mk('Bella', 'doe'), buck: await mk('Bhim', 'buck') };
+  }
+
+  test('she is offered for mating instead of being hidden', async () => {
+    const f = await farmWithUndatedStock();
+
+    const ready = await api('GET', '/ready-to-mate', { token: f.token });
+    assert.equal(ready.status, 200, ready.text);
+    const row = ready.body.ready.find((r) => r.rabbit_id === f.doe);
+    assert.ok(row, 'a breeding doe with no birth date must still reach the queue');
+    assert.equal(row.age_unknown, true,
+      'but the screen has to be able to say her age is a guess');
+  });
+
+  test('the summary counts her rather than reporting an empty farm', async () => {
+    const f = await farmWithUndatedStock();
+    const s = await api('GET', '/summary', { token: f.token });
+    assert.equal(s.status, 200, s.text);
+    assert.ok(s.body.ready.ready >= 1,
+      `ready-to-mate should count her, got ${s.body.ready.ready}`);
+  });
+
+  /**
+   * A recorded mating counts as a pregnancy immediately (migration 0039, at the
+   * farm's request). She is carried as 'presumed' rather than 'confirmed' —
+   * that split is where the uncertainty lives now, and the app still never
+   * merges the two — and palpation is still what confirms or clears her.
+   */
+  test('recording her mating puts her straight into the pregnancy count', async () => {
+    const f = await farmWithUndatedStock();
+
+    const m = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: f.doe, buck_id: f.buck },
+    });
+    assert.equal(m.status, 201, m.text);
+
+    const preg = await api('GET', '/pregnant', { token: f.token });
+    assert.equal(preg.status, 200, preg.text);
+
+    const row = preg.body.does.find((d) => d.rabbit_id === f.doe);
+    assert.ok(row, 'the mating was just recorded, so she has to be on the list');
+    assert.equal(row.state, 'MATED');
+    assert.equal(row.confidence, 'presumed', 'presumed until somebody palpates her');
+    assert.ok(row.expected_kindling_on, 'with the dates the mating already computed');
+    assert.ok(row.palpate_from_on, 'and when to palpate her, which is the next job');
+    assert.equal(row.needs_palpation, true);
+
+    assert.equal(preg.body.summary.total_pregnant, 1,
+      'the numeral moves the moment the work is done');
+    assert.equal(preg.body.summary.presumed_pregnant, 1);
+    assert.equal(preg.body.summary.confirmed_pregnant, 0);
+    assert.equal(preg.body.summary.awaiting_palpation, 1);
+
+    const s = await api('GET', '/summary', { token: f.token });
+    assert.equal(s.body.pregnant.total_pregnant, 1,
+      'and the dashboard card must not still read zero');
+  });
+
+  test('a negative palpation still takes her back out of the count', async () => {
+    const f = await farmWithUndatedStock();
+    const m = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: f.doe, buck_id: f.buck },
+    });
+    assert.equal(m.status, 201, m.text);
+
+    const before = await api('GET', '/pregnant', { token: f.token });
+    assert.equal(before.body.summary.total_pregnant, 1);
+
+    const check = await api('POST', '/pregnancy-checks', {
+      token: f.token, body: { mating_id: m.body.mating.id, result: 'negative' },
+    });
+    assert.equal(check.status, 201, check.text);
+
+    const after = await api('GET', '/pregnant', { token: f.token });
+    assert.equal(after.body.summary.total_pregnant, 0,
+      'counting a mating early must not mean counting a failed one forever');
+
+    // She does not reappear in the queue the same day. A negative palpation
+    // sets the mating's outcome to 'negative', and farm_settings holds her for
+    // after_failed_service_days (14 by default) before offering her again.
+    // That rest is deliberate, so the queue is asserted as held, not as empty.
+    const ready = await api('GET', '/ready-to-mate', { token: f.token });
+    assert.ok(!ready.body.ready.some((r) => r.rabbit_id === f.doe),
+      'a doe who just failed is rested, not offered again the same afternoon');
+
+    const { rows } = await adminQuery(
+      `SELECT after_failed_service_days AS d FROM farm_settings WHERE farm_id = $1`,
+      [f.farm.id]);
+    assert.equal(rows[0].d, 14, 'and that rest is the farm setting, not a hard-coded guess');
+  });
+
+  /**
+   * The date picker exists because a mating is often written up after the fact
+   * — that evening, or on Monday for the Saturday it happened. Both forms used
+   * to hardcode "now", and every date the app then quotes is counted off
+   * mated_at, so a mating entered two days late put the palpation and the nest
+   * box two days late with it.
+   */
+  test('a mating can be recorded on the day it actually happened', async () => {
+    const f = await farmWithUndatedStock();
+    const when = dateAgo(3);
+
+    const m = await api('POST', '/matings', {
+      token: f.token,
+      body: { doe_id: f.doe, buck_id: f.buck, mated_at: `${when}T12:00:00` },
+    });
+    assert.equal(m.status, 201, m.text);
+    assert.equal(m.body.mating.mated_at.slice(0, 10), when,
+      'the mating is dated when it happened, not when it was typed in');
+
+    const plus = (n) => {
+      const d = new Date(`${when}T12:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+    assert.equal(m.body.mating.schedule.expected_kindling_on, plus(31),
+      'and the whole schedule is counted off that day');
+
+    const preg = await api('GET', '/pregnant', { token: f.token });
+    const row = preg.body.does.find((d) => d.rabbit_id === f.doe);
+    assert.ok(row, 'a back-dated mating still shows up');
+    assert.equal(row.gestation_day, 3, 'already three days along, not zero');
+  });
+
+  /**
+   * The failure this guards against was found in the field: a doe entered with
+   * the year 20205 instead of 2025. Nothing rejected it, and she vanished —
+   * unborn rabbits are never old enough, so she sat in GROWING, absent from
+   * both the mating queue and the pregnancy list, with no error anywhere.
+   */
+  test('a birth date in the future is refused instead of hiding the rabbit', async () => {
+    const farm = await signupFarm();
+
+    const typo = await api('POST', '/animals', {
+      token: farm.token,
+      body: { name: 'Typo', sex: 'doe', role: 'breeder', date_of_birth: '20205-01-29' },
+    });
+    assert.equal(typo.status, 400, typo.text);
+    assert.equal(typo.body.detail.field, 'date_of_birth');
+
+    const future = await api('POST', '/animals', {
+      token: farm.token,
+      body: { name: 'Ahead', sex: 'doe', role: 'breeder', date_of_birth: dateAgo(-30) },
+    });
+    assert.equal(future.status, 400, 'a date next month is not a birth date');
+
+    const nonsense = await api('POST', '/animals', {
+      token: farm.token,
+      body: { name: 'Nope', sex: 'doe', role: 'breeder', date_of_birth: '2025-02-31' },
+    });
+    assert.equal(nonsense.status, 400, '31 February is not a day');
+
+    // And the correction path has to be guarded too, or the fix re-creates it.
+    const ok = await api('POST', '/animals', {
+      token: farm.token,
+      body: { name: 'Fine', sex: 'doe', role: 'breeder', date_of_birth: dateAgo(400) },
+    });
+    assert.equal(ok.status, 201, ok.text);
+    const edited = await api('PATCH', `/animals/${ok.body.animal.id}`, {
+      token: farm.token, body: { date_of_birth: '20205-01-29' },
+    });
+    assert.equal(edited.status, 400, 'the edit screen must refuse it too');
+  });
+
+  test('a doe with a birth date that really is too young stays out', async () => {
+    const farm = await signupFarm();
+    const young = await api('POST', '/animals', {
+      token: farm.token,
+      body: { name: 'Chhoti', sex: 'doe', role: 'breeder', date_of_birth: dateAgo(30) },
+    });
+    assert.equal(young.status, 201, young.text);
+
+    const ready = await api('GET', '/ready-to-mate', { token: farm.token });
+    assert.ok(!ready.body.ready.some((r) => r.rabbit_id === young.body.animal.id),
+      'a known-young doe is still protected — this fix must not breed kits');
+  });
+});
