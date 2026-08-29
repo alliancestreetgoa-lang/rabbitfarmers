@@ -235,3 +235,57 @@ describe('pressing the catalogue onto a farm', () => {
     assert.equal(rows[0].is_contagious, true);
   });
 });
+
+/**
+ * The five sicknesses every farm is born with used to live only in
+ * seed_new_farm(), which meant the console — the one place they are supposed
+ * to be curated from — could not see them. The farm's report screen offered
+ * six sicknesses while "The catalogue" listed one, and nobody could set what
+ * to give for loose motion, the fastest killer on the list.
+ */
+describe('the built-in sicknesses', () => {
+  const BUILT_IN = ['injury', 'loose_motion', 'mastitis', 'off_feed', 'sore_hocks'];
+
+  test('are in the catalogue, so the console can edit them', async () => {
+    const admin = await makeAdmin('superadmin');
+    const res = await api('GET', '/admin/sicknesses?format=json', { token: admin.token });
+    assert.equal(res.status, 200, res.text);
+
+    const byCode = new Map(res.body.sicknesses.map((s) => [s.code, s]));
+    for (const code of BUILT_IN) {
+      assert.ok(byCode.has(code), `${code} must be curatable, not hidden in a seed function`);
+    }
+
+    // Seeded with the farms' own values, so listing them changes nothing.
+    assert.equal(Number(byCode.get('loose_motion').reminder_interval_hours), 2,
+      'loose motion is a two-hourly check and must stay one');
+    assert.equal(byCode.get('loose_motion').is_contagious, true);
+    assert.equal(byCode.get('sore_hocks').blocks_breeding, false,
+      'sore hocks has never been a bar to breeding');
+    assert.equal(byCode.get('sore_hocks').reminder_interval_hours, null);
+  });
+
+  test('a farm still gets exactly what it always did', async () => {
+    const f = await signupFarm();
+    const list = await api('GET', '/condition-types', { token: f.token });
+    const byCode = new Map(list.body.types.map((t) => [t.code, t]));
+
+    for (const code of BUILT_IN) {
+      assert.ok(byCode.has(code), `${code} missing from the farm's report screen`);
+    }
+    assert.equal(Number(byCode.get('loose_motion').reminder_interval_hours), 2);
+    assert.equal(byCode.get('sore_hocks').blocks_breeding, false);
+
+    // None of the built-ins carries a medicine, and that must stay true —
+    // giving one a course here would start it on every farm in the world.
+    // Asked of the built-in codes specifically: a plain count would also see
+    // the catalogue rows the other tests in this file add.
+    const { rows } = await adminQuery(
+      `SELECT count(*)::int AS n
+         FROM medication_protocol mp
+         JOIN condition_type ct ON ct.id = mp.condition_type_id
+        WHERE mp.farm_id = $1 AND ct.code = ANY($2)`, [f.farm.id, BUILT_IN]);
+    assert.equal(rows[0].n, 0,
+      'giving a built-in a medicine here would silently change every farm');
+  });
+});
