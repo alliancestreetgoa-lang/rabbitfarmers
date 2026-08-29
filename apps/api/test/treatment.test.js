@@ -158,3 +158,80 @@ describe('the sickness catalogue', () => {
       'a retired sickness leaves the picker');
   });
 });
+
+/**
+ * The catalogue is the master copy and the superadmin is its only curator —
+ * so pressing it onto a farm is meant to overwrite. What it must not do is
+ * overwrite with values nobody chose.
+ *
+ * Two fields do exactly that. `reminder_interval_hours` is optional on the
+ * form, and a blank one used to be written straight through, turning a
+ * sickness that was checked every two hours into one with no reminder at all.
+ * `blocks_breeding` is worse: the form never shows it, the column defaults to
+ * true, so every catalogue row silently carries "this stops her breeding" —
+ * and pressing one onto a farm whose sore hocks deliberately did not block
+ * breeding takes those does out of the mating queue with nothing said.
+ *
+ * Tested with a code of this run's own rather than a real built-in: the
+ * catalogue is platform-wide, and a test that put `loose_motion` in it would
+ * be changing every other farm in the database mid-run.
+ */
+describe('pressing the catalogue onto a farm', () => {
+  test('a blank field leaves the farm\'s own value alone', async () => {
+    const f = await signupFarm();
+    const sick = uniqueSickness('Snuffles');
+
+    // A sickness this farm already has, with values somebody chose: checked
+    // every two hours, and explicitly not a bar to breeding.
+    await adminQuery(
+      `INSERT INTO condition_type
+         (farm_id, code, name, colour, reminder_interval_hours,
+          blocks_breeding, is_contagious, escalate_after_hours, respect_quiet_hours)
+       VALUES ($1, $2, $3, '#EA580C', 2, false, false, 24, true)`,
+      [f.farm.id, sick.code, sick.name]);
+
+    // The superadmin adds the same sickness, filling in only name and medicine.
+    const created = await api('POST', '/admin/sicknesses', {
+      token: (await makeAdmin('superadmin')).token,
+      body: { code: sick.code, name: sick.name, medicine: 'Neblon', days: 2 },
+    });
+    assert.equal(created.status, 201, created.text);
+
+    const { rows } = await adminQuery(
+      `SELECT reminder_interval_hours, blocks_breeding, escalate_after_hours
+         FROM condition_type WHERE farm_id = $1 AND code = $2`, [f.farm.id, sick.code]);
+
+    assert.equal(Number(rows[0].reminder_interval_hours), 2,
+      'a blank reminder box must not silence a two-hourly check');
+    assert.equal(rows[0].blocks_breeding, false,
+      'a field the form never shows must not decide whether she can breed');
+    assert.equal(Number(rows[0].escalate_after_hours), 24,
+      'and escalation is not the catalogue\'s to touch');
+  });
+
+  test('a value the superadmin does fill in is still applied', async () => {
+    const f = await signupFarm();
+    const sick = uniqueSickness('Ear mites');
+
+    await adminQuery(
+      `INSERT INTO condition_type
+         (farm_id, code, name, colour, reminder_interval_hours,
+          blocks_breeding, is_contagious, respect_quiet_hours)
+       VALUES ($1, $2, $3, '#EA580C', 2, false, false, true)`,
+      [f.farm.id, sick.code, sick.name]);
+
+    const created = await api('POST', '/admin/sicknesses', {
+      token: (await makeAdmin('superadmin')).token,
+      body: { code: sick.code, name: sick.name, reminder_interval_hours: 8,
+              is_contagious: true },
+    });
+    assert.equal(created.status, 201, created.text);
+
+    const { rows } = await adminQuery(
+      `SELECT reminder_interval_hours, is_contagious
+         FROM condition_type WHERE farm_id = $1 AND code = $2`, [f.farm.id, sick.code]);
+    assert.equal(Number(rows[0].reminder_interval_hours), 8,
+      'the curator asked for eight hours, so it is eight hours');
+    assert.equal(rows[0].is_contagious, true);
+  });
+});
