@@ -104,7 +104,7 @@ export default function Health() {
         {loading && !conditions.data && <Loading />}
 
         <View style={{ height: space.lg }} />
-        <Label>THIS MONTH'S ROUTINE{routine.data ? ` · ${routine.data.done} OF ${routine.data.total} DONE` : ''}</Label>
+        <Label>{`THIS MONTH'S ROUTINE${routine.data ? ` · ${routine.data.done} OF ${routine.data.total} DONE` : ''}`}</Label>
         <Muted>
           Whole farm, first week of every month. Each day lands on Today and on
           every phone.
