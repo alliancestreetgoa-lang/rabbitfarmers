@@ -873,12 +873,15 @@ describe('Ostovet', () => {
     const f = await signupFarm();
     const { rows } = await adminQuery(
       `SELECT name, anchor::text, start_offset_days, doses, withdrawal_days
-       FROM medication_protocol WHERE farm_id = $1 ORDER BY name`, [f.farm.id]);
+       FROM medication_protocol
+       -- The breeding courses only; the chart's treatments hang off a sickness.
+       WHERE farm_id = $1 AND condition_type_id IS NULL ORDER BY name`, [f.farm.id]);
     assert.equal(rows.length, 2,
       'the whole feature was dead on arrival for every farm without this');
-    assert.deepEqual(rows[0], { name: 'Ostovet (post-delivery)', anchor: 'kindling',
+    // Calcium Ostovet + Vimeral, mixed together, since the medicine chart (0043).
+    assert.deepEqual(rows[0], { name: 'Calcium Ostovet + Vimeral (post-delivery)', anchor: 'kindling',
       start_offset_days: 1, doses: 5, withdrawal_days: null });
-    assert.deepEqual(rows[1], { name: 'Ostovet (pre-delivery)', anchor: 'expected_kindling',
+    assert.deepEqual(rows[1], { name: 'Calcium Ostovet + Vimeral (pre-delivery)', anchor: 'expected_kindling',
       start_offset_days: -5, doses: 5, withdrawal_days: null });
   });
 

@@ -135,11 +135,14 @@ the anchor event.
 
 | Field | Purpose |
 |---|---|
-| `name` | e.g. "Ostovet (pre-delivery)". Farm-defined; no medicine is hard-coded |
-| `anchor` | `mating` / `expected_kindling` / `kindling` / `weaning` |
+| `name` | e.g. "Calcium Ostovet + Vimeral (pre-delivery)", or "O2 M (Loose motion)" for a treatment step |
+| `anchor` | `mating` / `expected_kindling` / `kindling` / `weaning` / `condition` |
 | `start_offset_days` | Negative counts backwards — `-5` from expected kindling |
 | `doses`, `interval_days` | 5 doses, 1 day apart |
 | `withdrawal_days` | If it is an antibiotic, blocks meat sale for this long |
+| `condition_type_id`, `step` | A treatment step for a sickness: fever is step 1 Gentamicin + Dexamethasone, step 2 Belamyl |
+| `route`, `dose` | "injection", "0.3 ml" — what the medicine round shows |
+| `adults_only`, `min_age_days`, `not_when_pregnant` | Who must NOT get it. The schedule turns these into a `hold_reason` per rabbit |
 
 Doses are **not** stored as rows. They are expanded on read from
 (anchor date + offset + n × interval), so changing a protocol immediately
@@ -147,13 +150,39 @@ corrects every future dose without a migration. A dose leaves the due list when
 a matching `health_event` exists — the same derive-don't-store rule as
 reproductive status.
 
+A dose the chart forbids for *this* rabbit — Hitech for a pregnant doe, or for
+a kit under three months — is still on the schedule, with `hold_reason` set
+("she is pregnant", "under 3 months old"). The screens show it as a hold in
+place of the *Given* button, the scheduler does not push it, and
+`POST /medication` refuses to record it. Pregnancy is read from
+`v_doe_reproductive_state` (a mating counts), age from `date_of_birth`
+(unknown means grown).
+
+### The medicine chart: `condition_catalog`, `condition_catalog_treatment`, `routine_catalog`
+Platform-level, superadmin-curated (migrations 0037, 0043). `condition_catalog`
+is the list of sicknesses a farmer can report, with the advice shown on the
+report screen; `condition_catalog_treatment` is each sickness's medicines **in
+order**, with dose, route, rhythm and who must not get it.
+`apply_condition_catalog(farm_id)` presses both onto a farm as `condition_type`
+and `medication_protocol` rows, and retires anything on the farm that the
+catalogue no longer lists. New farms get it at signup.
+
+`routine_catalog` is the whole-farm monthly round (Hitech × 3 days, Liv 52 × 3,
+Gutwell × 3, Tetracycline in the water). `generate_routine_tasks()` raises one
+`task` per routine day in the first week of each month — no rabbit, the farm's
+`notes` say who is left out — and `generate_routine_notifications()` pushes
+each day to everyone at the farm. `POST /tasks/:id/done` closes one;
+`GET /routine` is the month's plan with what has been done.
+
 ### `condition_type` and `health_condition`
 An ongoing state that persists until someone says it stopped — loose motion being
 the first.
 
 `condition_type` is the configuration: name, **colour mark**, reminder interval
 (2 hours for loose motion), whether it blocks breeding, whether it is contagious,
-and when it escalates.
+when it escalates, and the `advice` shown when it is reported ("stop green
+fodder immediately"). It is pressed onto the farm from the platform's medicine
+chart (see above); farmers report, they do not curate.
 
 `health_condition` is one animal's open case: `started_at`, `last_checked_at`,
 `resolved_at`. Nothing about the reminder schedule is stored — the next reminder

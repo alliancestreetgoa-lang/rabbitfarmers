@@ -193,6 +193,12 @@ export interface DailyItem {
   title: string;
   urgency: Urgency;
   colour: string | null;
+  /** Task kind for a task row ('medicate' is the monthly round); null otherwise. */
+  kind: string | null;
+  /** Who is left out, how to give it — the line under the title. */
+  notes: string | null;
+  /** A dose the chart forbids THIS rabbit: "she is pregnant", "under 3 months old". */
+  hold_reason: string | null;
 }
 
 export interface MedicationDose {
@@ -207,6 +213,12 @@ export interface MedicationDose {
   /** Negative when the dose is late. */
   days_until_due: number;
   dose_note: string | null;
+  /** Position in a multi-medicine treatment: Belamyl is step 2 of a fever. */
+  step: number;
+  route: string | null;
+  dose: string | null;
+  /** Set when the chart forbids this dose for this rabbit. Do not give. */
+  hold_reason: string | null;
 }
 
 export interface OpenCondition {
@@ -260,11 +272,45 @@ export interface ConditionType {
   reminder_interval_hours: string | number | null;
   blocks_breeding: boolean;
   is_contagious: boolean;
-  /** What to give when this is reported; null until the owner sets one. */
+  /** The rule alongside the medicine: "stop green fodder", "nebulize if severe". */
+  advice: string | null;
+  /** Every medicine, in the order it is given. Empty means reminders only. */
+  steps: TreatmentStep[];
+  /** The first step in the older shape. Prefer `steps`. */
   treatment: {
     protocol_id: string; medicine: string; days: number;
     interval_days: number; dose_note: string | null; withdrawal_days: number | null;
   } | null;
+}
+
+export interface TreatmentStep {
+  protocol_id: string;
+  step: number;
+  medicine: string;
+  route: string | null;
+  dose: string | null;
+  doses: number;
+  interval_days: number;
+  note: string | null;
+  adults_only: boolean;
+  min_age_days: number | null;
+  not_when_pregnant: boolean;
+  withdrawal_days: number | null;
+  /** Only on a report response: the hold for the rabbit just reported. */
+  hold_reason?: string | null;
+}
+
+/** This month's whole-farm preventive round, step by step. */
+export interface RoutinePlan {
+  month: string;
+  today: string;
+  done: number;
+  total: number;
+  standing: string[];
+  steps: {
+    step: number; day: number; medicine: string; dose: string; title: string; detail: string;
+    due_on: string; task_id: string | null; task_status: string | null; completed_at: string | null;
+  }[];
 }
 
 export type StaffRole = 'owner' | 'manager' | 'caretaker' | 'vet' | 'accountant';

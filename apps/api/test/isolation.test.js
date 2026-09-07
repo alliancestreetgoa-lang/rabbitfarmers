@@ -67,9 +67,13 @@ describe('tenant isolation', () => {
         -- condition_catalog is the superadmin's master list of sicknesses and
         -- treatments (0037): platform-wide by design, granted to the admin role
         -- only, pressed onto farms through SECURITY DEFINER functions.
+        -- condition_catalog_treatment is its steps table, and routine_catalog
+        -- the monthly round (0043): the same chart, the same wall — the farm
+        -- role reads them and can write neither.
         AND c.relname NOT IN ('schema_migration','plan','platform_admin',
                               'admin_audit_log','admin_impersonation',
                               'admin_session','scheduler_run','condition_catalog',
+                              'condition_catalog_treatment','routine_catalog',
         -- invoice_series is one row per financial year, shared by every farm:
         -- a GST invoice number series has no tenant to scope it to. Revoked
         -- from the farmer-facing role entirely (migration 0026), which is the

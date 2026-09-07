@@ -3,7 +3,7 @@ import { MemoryStorage } from './storage.ts';
 import type {
   Animal, Breed, BuckSuggestion, Cage, ConditionType, DailyItem, HistoryEvent, Litter, MatingSchedule,
   MedicationDose, OpenCondition, PregnancySummary, PregnantDoe, RabbitLifetime,
-  ReadyDoe,
+  ReadyDoe, RoutinePlan, TreatmentStep,
   Attendance, AttendanceSummary, BillingRow, PayMonth, Session, Shed, Staff, StaffRole, Subscription,
   SupportAccess,
 } from './types.ts';
@@ -544,7 +544,12 @@ export class ApiClient {
     /** When it was seen, if that is not now. Starts the reminder clock. */
     observed_at?: string;
   }) {
-    return this.request<{ condition: { id: string } }>('POST', '/conditions', input);
+    return this.request<{
+      condition: { id: string };
+      advice: string | null;
+      /** Every step, with the hold (if any) for the rabbit just reported. */
+      steps: TreatmentStep[];
+    }>('POST', '/conditions', input);
   }
 
   checkCondition(conditionId: string, status: 'ongoing' | 'improving' | 'worse' | 'stopped',
@@ -606,6 +611,17 @@ export class ApiClient {
 
   medicationDue() {
     return this.request<{ due: MedicationDose[] }>('GET', '/medication');
+  }
+
+  /** This month's whole-farm round, with what has been done. */
+  routine() {
+    return this.request<RoutinePlan>('GET', '/routine');
+  }
+
+  /** A whole-farm task (a routine day) is finished. */
+  taskDone(taskId: string) {
+    return this.request<{ task: { id: string }; message: string }>(
+      'POST', `/tasks/${taskId}/done`, {});
   }
 
   markNotificationsRead(id?: string) {

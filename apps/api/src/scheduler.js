@@ -50,6 +50,10 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
     await client.query('SELECT id FROM farm ORDER BY id FOR KEY SHARE');
 
     const tasks = await client.query('SELECT generate_due_tasks() AS n');
+    // The monthly round: one whole-farm task per routine day, raised in the
+    // first week of the month. Its own function so the ten-job generator
+    // above is never restated just to add an eleventh (see 0043).
+    const routine = await client.query('SELECT generate_routine_tasks() AS n');
     // The engine knows which doe needs a nest box; it does not know who walks
     // that row. This hands each new task to whoever looks after the shed the
     // animal is in — and leaves it unassigned where a shed has nobody, or more
@@ -57,6 +61,7 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
     // worse than work on everybody's list.
     const assigned = await client.query('SELECT assign_tasks_by_section() AS n');
     const notes = await client.query('SELECT generate_notifications() AS n');
+    const routineNotes = await client.query('SELECT generate_routine_notifications() AS n');
     /*
      * Subscription bookkeeping, and nothing a farm can feel.
      *
@@ -123,8 +128,9 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
     const result = {
       ok: true,
       tasksCreated: tasks.rows[0].n,
+      routineTasksCreated: routine.rows[0].n,
       tasksAssigned: assigned.rows[0].n,
-      notificationsCreated: notes.rows[0].n,
+      notificationsCreated: notes.rows[0].n + routineNotes.rows[0].n,
       // Kept in the shape so anything reading the run result still finds the
       // keys, and reads zero rather than undefined. The product is free; there
       // are no billing notices and no dunning mail to queue.

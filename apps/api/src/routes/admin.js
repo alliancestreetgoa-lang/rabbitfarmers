@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { adminQuery } from '../db.js';
+import { adminQuery, adminPool } from '../db.js';
 import { hashPassword, verifyPassword, newSessionToken, hashToken, HttpError } from '../auth.js';
 import {
   renderLogin, renderFarms, renderFarm, renderFarmAnimals, renderFarmAnimal,
@@ -104,21 +104,129 @@ adminRoutes.get('/farms', async (c) => {
 const slugify = (name) =>
   name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
 
-/** Press the catalogue onto every farm. Called after each catalogue change. */
-async function applyCatalogEverywhere() {
-  await adminQuery('SELECT apply_condition_catalog(id) FROM farm');
+/**
+ * Press the catalogue onto every farm. Called after each catalogue change.
+ *
+ * Inside a transaction that first holds every farm row FOR KEY SHARE — the
+ * same guard the scheduler uses. Without it a farm deleted mid-press either
+ * fails the whole press on its foreign key or deadlocks against the delete's
+ * cascade through medication_protocol; either way one superadmin save could
+ * fail because one farmer closed their account at the same moment.
+ */
+async function applyCatalogEverywhere(client) {
+  if (client) {
+    await client.query('SELECT apply_condition_catalog(id) FROM farm');
+    return;
+  }
+  const own = await adminPool.connect();
+  try {
+    await own.query('BEGIN');
+    await own.query('SELECT id FROM farm ORDER BY id FOR KEY SHARE');
+    await own.query('SELECT apply_condition_catalog(id) FROM farm');
+    await own.query('COMMIT');
+  } catch (err) {
+    await own.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    own.release();
+  }
+}
+
+/** Every catalogue row with its treatment steps in order. */
+async function loadCatalogue(code) {
+  const { rows } = await adminQuery(`
+    SELECT c.*,
+           COALESCE(json_agg(json_build_object(
+             'step', t.step, 'medicine', t.medicine, 'route', t.route, 'dose', t.dose,
+             'doses', t.doses, 'interval_days', t.interval_days, 'note', t.note,
+             'adults_only', t.adults_only, 'min_age_days', t.min_age_days,
+             'not_when_pregnant', t.not_when_pregnant, 'withdrawal_days', t.withdrawal_days
+           ) ORDER BY t.step) FILTER (WHERE t.id IS NOT NULL), '[]') AS steps
+    FROM condition_catalog c
+    LEFT JOIN condition_catalog_treatment t ON t.catalog_id = c.id
+    ${code ? 'WHERE c.code = $1' : ''}
+    GROUP BY c.id
+    ORDER BY c.is_active DESC, c.name`, code ? [code] : []);
+  return rows;
+}
+
+const truthy = (v) => v === true || v === 'on' || v === 'true' || v === 'yes';
+const intOrNull = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
+
+/**
+ * The treatment steps out of a request. JSON sends `steps: [...]`; the HTML
+ * form sends numbered fields (s1_medicine, s1_dose ...) because a checkbox
+ * inside an array field does not survive form encoding. The old single
+ * medicine/days/dose_note trio is still read, as one step.
+ */
+function stepsFrom(b) {
+  let raw = [];
+  if (Array.isArray(b.steps)) {
+    raw = b.steps;
+  } else {
+    for (let i = 1; i <= 5; i++) {
+      if (b[`s${i}_medicine`] === undefined) continue;
+      raw.push({
+        medicine: b[`s${i}_medicine`], route: b[`s${i}_route`], dose: b[`s${i}_dose`],
+        doses: b[`s${i}_doses`], interval_days: b[`s${i}_interval_days`],
+        note: b[`s${i}_note`], adults_only: b[`s${i}_adults_only`],
+        min_age_days: b[`s${i}_min_age_days`],
+        not_when_pregnant: b[`s${i}_not_when_pregnant`],
+        withdrawal_days: b[`s${i}_withdrawal_days`],
+      });
+    }
+    if (!raw.length && String(b.medicine ?? '').trim()) {
+      raw.push({ medicine: b.medicine, doses: b.days, interval_days: b.interval_days,
+                 note: b.dose_note, withdrawal_days: b.withdrawal_days });
+    }
+  }
+  const steps = [];
+  for (const r of raw) {
+    const medicine = String(r.medicine ?? '').trim();
+    if (!medicine) continue;
+    const doses = r.doses === undefined || r.doses === '' ? 1 : Number(r.doses);
+    if (!Number.isInteger(doses) || doses < 1 || doses > 60) {
+      throw new HttpError(400, `${medicine}: how many doses? 1 to 60.`, { field: 'doses' });
+    }
+    const interval = r.interval_days === undefined || r.interval_days === ''
+      ? 1 : Number(r.interval_days);
+    if (!Number.isInteger(interval) || interval < 1 || interval > 30) {
+      throw new HttpError(400, `${medicine}: days between doses? 1 to 30.`,
+        { field: 'interval_days' });
+    }
+    const minAge = intOrNull(r.min_age_days);
+    if (minAge !== null && (!Number.isInteger(minAge) || minAge < 1)) {
+      throw new HttpError(400, `${medicine}: minimum age must be a number of days.`,
+        { field: 'min_age_days' });
+    }
+    steps.push({
+      step: steps.length + 1, medicine,
+      route: String(r.route ?? '').trim() || null,
+      dose: String(r.dose ?? '').trim() || null,
+      doses, interval_days: interval,
+      note: String(r.note ?? '').trim() || null,
+      adults_only: truthy(r.adults_only),
+      min_age_days: minAge,
+      not_when_pregnant: truthy(r.not_when_pregnant),
+      withdrawal_days: intOrNull(r.withdrawal_days),
+    });
+  }
+  return steps;
 }
 
 /**
  * The sickness catalogue: what every farm's report screen offers, and what
- * each sickness gets. Superadmin only — a farmer reports, they never curate.
+ * each sickness gets, step by step. Superadmin only — a farmer reports, they
+ * never curate. The monthly routine is shown beside it, read-only: it is the
+ * chart's sheet, and changing it is a migration, not a form.
  */
 adminRoutes.get('/sicknesses', requireAdminRole('superadmin'), async (c) => {
-  const { rows } = await adminQuery(
-    'SELECT * FROM condition_catalog ORDER BY is_active DESC, name');
+  const rows = await loadCatalogue();
+  const { rows: routine } = await adminQuery(
+    'SELECT * FROM routine_catalog WHERE is_active ORDER BY day, step');
   const { rows: farms } = await adminQuery('SELECT count(*)::int AS n FROM farm');
-  if (c.req.query('format') === 'json') return c.json({ sicknesses: rows });
-  return c.html(renderSicknesses({ rows, farmCount: farms[0].n, admin: c.get('admin') }));
+  if (c.req.query('format') === 'json') return c.json({ sicknesses: rows, routine });
+  return c.html(renderSicknesses({ rows, routine, farmCount: farms[0].n, admin: c.get('admin') }));
 });
 
 adminRoutes.post('/sicknesses', requireAdminRole('superadmin'), async (c) => {
@@ -131,49 +239,64 @@ adminRoutes.post('/sicknesses', requireAdminRole('superadmin'), async (c) => {
   const code = String(b.code ?? '').trim() || slugify(name);
   if (!code) throw new HttpError(400, 'The sickness needs a name', { field: 'name' });
 
-  const medicine = String(b.medicine ?? '').trim() || null;
-  const days = b.days === undefined || b.days === '' ? null : Number(b.days);
-  if (medicine && (!Number.isInteger(days) || days < 1 || days > 60)) {
-    throw new HttpError(400, 'For how many days? 1 to 60.', { field: 'days' });
-  }
   const reminder = b.reminder_interval_hours == null || b.reminder_interval_hours === ''
     ? null : Number(b.reminder_interval_hours);
   if (reminder !== null && (!Number.isFinite(reminder) || reminder < 0.5 || reminder > 168)) {
     throw new HttpError(400, 'Remind every how many hours? 0.5 to 168, or leave it empty.',
       { field: 'reminder_interval_hours' });
   }
+  // Three-way on purpose (0041): "" / undefined is no opinion and leaves each
+  // farm's own value alone; yes / no is a decision and is applied everywhere.
+  const blocks = b.blocks_breeding === undefined || b.blocks_breeding === '' || b.blocks_breeding === null
+    ? null : truthy(b.blocks_breeding);
+  const steps = stepsFrom(b);
 
-  await adminQuery(`
-    INSERT INTO condition_catalog
-      (code, name, colour, reminder_interval_hours, is_contagious,
-       medicine, treatment_days, interval_days, dose_note, withdrawal_days)
-    VALUES ($1, $2, COALESCE($3, '#EA580C'), $4, COALESCE($5, false),
-            $6, $7, COALESCE($8, 1), $9, $10)
-    ON CONFLICT (code) DO UPDATE
-      SET name = EXCLUDED.name,
-          colour = EXCLUDED.colour,
-          reminder_interval_hours = EXCLUDED.reminder_interval_hours,
-          is_contagious = EXCLUDED.is_contagious,
-          medicine = EXCLUDED.medicine,
-          treatment_days = EXCLUDED.treatment_days,
-          interval_days = EXCLUDED.interval_days,
-          dose_note = EXCLUDED.dose_note,
-          withdrawal_days = EXCLUDED.withdrawal_days,
-          is_active = true,
-          updated_at = now()`,
-    [code, name, b.colour || null, reminder,
-     b.is_contagious === 'on' || b.is_contagious === true,
-     medicine, medicine ? days : null,
-     b.interval_days ? Number(b.interval_days) : null,
-     String(b.dose_note ?? '').trim() || null,
-     b.withdrawal_days ? Number(b.withdrawal_days) : null]);
-
-  await applyCatalogEverywhere();
+  const client = await adminPool.connect();
+  try {
+    await client.query('BEGIN');
+    // Hold the farms still for the press below; see applyCatalogEverywhere.
+    await client.query('SELECT id FROM farm ORDER BY id FOR KEY SHARE');
+    const { rows } = await client.query(`
+      INSERT INTO condition_catalog
+        (code, name, colour, reminder_interval_hours, blocks_breeding, is_contagious, advice)
+      VALUES ($1, $2, COALESCE($3, '#EA580C'), $4, $5, COALESCE($6, false), $7)
+      ON CONFLICT (code) DO UPDATE
+        SET name = EXCLUDED.name,
+            colour = EXCLUDED.colour,
+            reminder_interval_hours = EXCLUDED.reminder_interval_hours,
+            blocks_breeding = EXCLUDED.blocks_breeding,
+            is_contagious = EXCLUDED.is_contagious,
+            advice = EXCLUDED.advice,
+            is_active = true,
+            updated_at = now()
+      RETURNING id`,
+      [code, name, b.colour || null, reminder, blocks, truthy(b.is_contagious),
+       String(b.advice ?? '').trim() || null]);
+    const catalogId = rows[0].id;
+    // The steps are replaced wholesale: the form shows all of them, so what
+    // it sends is the whole treatment, not an edit to part of it.
+    await client.query('DELETE FROM condition_catalog_treatment WHERE catalog_id = $1', [catalogId]);
+    for (const st of steps) {
+      await client.query(`
+        INSERT INTO condition_catalog_treatment
+          (catalog_id, step, medicine, route, dose, doses, interval_days, note,
+           adults_only, min_age_days, not_when_pregnant, withdrawal_days)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [catalogId, st.step, st.medicine, st.route, st.dose, st.doses, st.interval_days,
+         st.note, st.adults_only, st.min_age_days, st.not_when_pregnant, st.withdrawal_days]);
+    }
+    await applyCatalogEverywhere(client);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 
   if (ct.includes('json')) {
-    const { rows } = await adminQuery(
-      'SELECT * FROM condition_catalog WHERE code = $1', [code]);
-    return c.json({ sickness: rows[0] }, 201);
+    const [sickness] = await loadCatalogue(code);
+    return c.json({ sickness }, 201);
   }
   return c.redirect('/admin/sicknesses', 303);
 });

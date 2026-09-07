@@ -865,6 +865,89 @@ BEGIN
     RAISE NOTICE 'ok  yearly ₹999 normalises to ₹%/month of MRR', round(mrr/100.0, 2);
 END $$;
 
+
+-- --- The medicine chart: who must not get a dose -------------------------------
+--
+-- A step may say "never when pregnant" or "not under N days". The schedule
+-- carries a hold_reason for the rabbit in front of the farmer, and the
+-- notification arm skips a held dose. D-C is pregnant (she has the
+-- pre-delivery course above); D-H is 90 days old today.
+INSERT INTO medication_protocol
+    (id, farm_id, name, anchor, start_offset_days, doses, interval_days,
+     condition_type_id, not_when_pregnant, min_age_days, adults_only)
+VALUES
+ ('c0000000-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111111',
+  'Hitech (injection) (Loose motion)', 'condition', 0, 2, 2,
+  'd0000000-0000-0000-0000-000000000001', true, 120, true);
+INSERT INTO health_condition
+    (id, farm_id, condition_type_id, rabbit_id, started_at, last_checked_at, severity)
+VALUES
+ ('e0000000-0000-0000-0000-000000000005', '11111111-1111-1111-1111-111111111111',
+  'd0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000c',
+  now() - interval '1 hour', now() - interval '1 hour', 'severe'),
+ ('e0000000-0000-0000-0000-000000000006', '11111111-1111-1111-1111-111111111111',
+  'd0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000011',
+  now() - interval '1 hour', now() - interval '1 hour', 'severe');
+
+DO $$
+DECLARE r text;
+BEGIN
+    SELECT hold_reason INTO r FROM v_medication_schedule
+     WHERE protocol_id = 'c0000000-0000-0000-0000-000000000003'
+       AND rabbit_id = 'a0000000-0000-0000-0000-00000000000c' AND dose_number = 1;
+    IF r IS DISTINCT FROM 'she is pregnant' THEN
+        RAISE EXCEPTION 'HOLD FAIL: pregnant D-C should be held, got %', COALESCE(r, 'NULL');
+    END IF;
+    RAISE NOTICE 'ok  D-C (pregnant) is held from a never-when-pregnant medicine';
+
+    SELECT hold_reason INTO r FROM v_medication_schedule
+     WHERE protocol_id = 'c0000000-0000-0000-0000-000000000003'
+       AND rabbit_id = 'a0000000-0000-0000-0000-000000000011' AND dose_number = 1;
+    IF r IS DISTINCT FROM 'under 4 months old' THEN
+        RAISE EXCEPTION 'HOLD FAIL: 90-day-old D-H should be held, got %', COALESCE(r, 'NULL');
+    END IF;
+    RAISE NOTICE 'ok  D-H (90 days) is held from a not-under-120-days medicine';
+
+    -- And the loose-motion protocol with no rules holds nobody: D-A's course
+    -- (none exists here) would carry NULL. Prove the column is NULL when the
+    -- rules do not bite: the pre-delivery Ostovet on D-C.
+    SELECT hold_reason INTO r FROM v_medication_schedule
+     WHERE protocol_id = 'c0000000-0000-0000-0000-000000000001'
+       AND rabbit_id = 'a0000000-0000-0000-0000-00000000000c' AND dose_number = 1;
+    IF r IS NOT NULL THEN
+        RAISE EXCEPTION 'HOLD FAIL: a medicine with no rules held D-C: %', r;
+    END IF;
+    RAISE NOTICE 'ok  a medicine with no rules holds nobody';
+END $$;
+
+-- --- The monthly routine: first week, whole farm, idempotent ------------------
+DO $$
+DECLARE n int;
+BEGIN
+    PERFORM generate_routine_tasks('2031-03-01');
+    SELECT count(*) INTO n FROM task
+     WHERE farm_id = '11111111-1111-1111-1111-111111111111'
+       AND generated_key LIKE 'routine:%';
+    IF n <> 10 THEN
+        RAISE EXCEPTION 'ROUTINE FAIL: expected 10 routine tasks on the 1st, got %', n;
+    END IF;
+    PERFORM generate_routine_tasks('2031-03-03');
+    SELECT count(*) INTO n FROM task
+     WHERE farm_id = '11111111-1111-1111-1111-111111111111'
+       AND generated_key LIKE 'routine:%';
+    IF n <> 10 THEN
+        RAISE EXCEPTION 'ROUTINE FAIL: a second pass changed the count to %', n;
+    END IF;
+    SELECT count(*) INTO n FROM task
+     WHERE farm_id = '11111111-1111-1111-1111-111111111111'
+       AND generated_key LIKE 'routine:%' AND due_on = '2031-03-07'
+       AND title LIKE '%Tetracycline%';
+    IF n <> 1 THEN
+        RAISE EXCEPTION 'ROUTINE FAIL: Tetracycline should close the week on the 7th';
+    END IF;
+    RAISE NOTICE 'ok  monthly routine: 10 whole-farm tasks over the first week, once';
+END $$;
+
 DO $$ BEGIN RAISE NOTICE 'ALL CHECKS PASSED'; END $$;
 
 ROLLBACK;

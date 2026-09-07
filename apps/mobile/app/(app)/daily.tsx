@@ -66,6 +66,19 @@ export default function Daily() {
     } finally { setBusyId(null); }
   };
 
+  /** A routine day for the whole farm is done when somebody says so. */
+  const finishTask = async (item: DailyItem) => {
+    setBusyId(item.ref_id);
+    try {
+      await outbox.enqueue('task_done', {}, item.ref_id);
+      setDone((d) => ({
+        ...d, [item.ref_id]: { at: new Date().toISOString(), title: item.title },
+      }));
+      await refreshOutbox();
+      reload();
+    } finally { setBusyId(null); }
+  };
+
   const answerCondition = async (item: DailyItem, status: 'ongoing' | 'stopped') => {
     setBusyId(item.ref_id);
     try {
@@ -138,14 +151,20 @@ export default function Daily() {
         {!!overdue.length && (
           <>
             <SectionTitle text="Overdue" count={overdue.length} />
-            {overdue.map((i) => <TaskRow key={i.ref_id} item={i} />)}
+            {overdue.map((i) => (
+              <TaskRow key={i.ref_id} item={i} busy={busyId === i.ref_id}
+                       readOnly={readOnly} onDone={() => finishTask(i)} />
+            ))}
           </>
         )}
 
         {!!rest.length && (
           <>
             <SectionTitle text="Today" count={rest.length} />
-            {rest.map((i) => <TaskRow key={i.ref_id} item={i} />)}
+            {rest.map((i) => (
+              <TaskRow key={i.ref_id} item={i} busy={busyId === i.ref_id}
+                       readOnly={readOnly} onDone={() => finishTask(i)} />
+            ))}
           </>
         )}
 
@@ -179,18 +198,41 @@ function SectionTitle({ text, count }: { text: string; count: number }) {
   );
 }
 
-function TaskRow({ item }: { item: DailyItem }) {
+/**
+ * Breeding tasks point at the animal: recording the event is what clears them.
+ * A whole-farm task (the monthly round) has no animal and no event — it is
+ * done when somebody says it is, so it carries its own tick.
+ */
+function TaskRow({ item, busy, readOnly, onDone }: {
+  item: DailyItem; busy?: boolean; readOnly?: boolean; onDone?: () => void;
+}) {
   const c = urgencyColor(item.urgency);
+  const wholeFarm = !item.rabbit_id && item.kind === 'medicate';
   return (
     <Pressable
       testID={`task-${item.ref_id}`}
-      style={s.row}
+      style={[s.row, wholeFarm && { alignItems: 'flex-start' }]}
       onPress={() => item.rabbit_id && router.push(`/(app)/animal?id=${item.rabbit_id}`)}
     >
       <View style={[s.stripe, { backgroundColor: c.fg }]} />
       <View style={{ flex: 1 }}>
         <Text style={s.rowTitle}>{item.title}</Text>
         {!!item.tag && <Text style={s.rowMeta}>{item.tag}</Text>}
+        {wholeFarm && !!item.notes && <Text style={s.rowMeta}>{item.notes}</Text>}
+        {wholeFarm && !readOnly && (
+          <View style={s.actions}>
+            <Pressable
+              testID={`done-${item.ref_id}`}
+              style={[s.smallBtn, { backgroundColor: colors.accent, borderColor: colors.accent }]}
+              onPress={onDone}
+              disabled={busy}
+            >
+              <Text style={[s.smallBtnText, { color: colors.white }]}>
+                {busy ? 'Saving…' : 'Done — whole farm'}
+              </Text>
+            </Pressable>
+          </View>
+        )}
       </View>
       {item.urgency === 'critical' && <Pill text="now" urgency="critical" />}
     </Pressable>
@@ -210,10 +252,18 @@ function DoseRow({ item, busy, readOnly, onGiven }: {
       <View style={{ flex: 1 }}>
         <Text style={s.rowTitle}>{item.title}</Text>
         {!!item.tag && <Text style={s.rowMeta}>{item.tag}</Text>}
+        {!!item.notes && <Text style={s.rowMeta}>{item.notes}</Text>}
+        {!!item.hold_reason && (
+          <Text style={[s.rowMeta, { color: colors.crit, fontWeight: '700' }]}
+                testID={`hold-${item.ref_id}`}>
+            Do not give — {item.hold_reason}. Ask the vet.
+          </Text>
+        )}
       </View>
       {/* No button at all for a support session, rather than a button that
-          fails. The work is the farm's to record. */}
-      {!readOnly && (
+          fails. The work is the farm's to record. And none for a dose the
+          chart holds back: the screen says why instead. */}
+      {!readOnly && !item.hold_reason && (
         <Pressable
           testID={`given-${item.ref_id}`}
           style={[s.smallBtn, { backgroundColor: colors.accent, borderColor: colors.accent }]}

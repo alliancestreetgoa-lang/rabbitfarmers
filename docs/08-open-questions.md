@@ -72,9 +72,16 @@ real animals off them.
     be given anyway, or dropped?** *Assumed: dropped, since the course is
     "before delivery" and delivery has happened.*
 
-26. **Are there other regular medicines** — dewormer, vaccine, coccidiostat,
-    vitamin — that should be set up as protocols now? Each is the same form,
-    no code change.
+26. ~~**Are there other regular medicines** — dewormer, vaccine, coccidiostat,
+    vitamin — that should be set up as protocols now?~~ **Answered** by the
+    farm's medicine chart (migration 0043): Hitech (oral) monthly for
+    de-worming and fungus, Liv 52 after it, Gutwell monthly, Tetracycline in
+    the water monthly, Agrimin Forte daily for adult breeders, and Calcium
+    Ostovet + Vimeral around delivery. The monthly ones are the whole-farm
+    routine raised in the first week of each month; the sick-rabbit medicines
+    (O2 M, Meriquin, Gamma Scab, Hitech injection, Gentamicin + Dexamethasone
+    then Belamyl, Xone, Taxim, Lexin) are the sickness catalogue. Doses as the
+    trainer gave them; the app says to confirm with a vet.
 
 ## Staff
 

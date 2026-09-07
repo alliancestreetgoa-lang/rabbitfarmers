@@ -14,21 +14,58 @@ interface Condition {
 interface Dose {
   protocol_id: string; protocol_name: string; rabbit_id: string;
   dose_number: number; total_doses: number; due_on: string; days_until_due: number;
-  dose_note: string | null;
+  dose_note: string | null; step: number; route: string | null; dose: string | null;
+  /** The chart forbids this dose for this rabbit. Do not give. */
+  hold_reason: string | null;
 }
 interface Animal { id: string; name: string | null; tag: string }
-interface Treatment {
-  medicine: string; days: number; interval_days: number; dose_note: string | null;
+interface Step {
+  protocol_id: string; step: number; medicine: string; route: string | null; dose: string | null;
+  doses: number; interval_days: number; note: string | null;
+  adults_only: boolean; min_age_days: number | null; not_when_pregnant: boolean;
+  hold_reason?: string | null;
 }
 interface CondType {
   id: string; code: string; name: string; colour: string;
   reminder_interval_hours: string | number | null;
-  treatment: Treatment | null;
+  advice: string | null;
+  steps: Step[];
+}
+interface Routine {
+  month: string; done: number; total: number; standing: string[];
+  steps: { step: number; day: number; medicine: string; dose: string; detail: string;
+           due_on: string; task_id: string | null; task_status: string | null }[];
 }
 
-const treatmentLine = (t: Treatment) =>
-  `${t.medicine} — ${t.days === 1 ? 'one dose' : `${t.days} days`}` +
-  `${t.dose_note ? ` · ${t.dose_note}` : ''}`;
+const stepLine = (st: Step) =>
+  `${st.medicine}${st.dose ? ` ${st.dose}` : ''}${st.route ? ` (${st.route})` : ''} — ` +
+  `${st.doses === 1 ? 'one dose' : `${st.doses} doses, ${st.interval_days === 1 ? 'daily' : `every ${st.interval_days} days`}`}` +
+  `${st.note ? `. ${st.note}` : ''}`;
+
+const notFor = (st: Step) => [
+  st.not_when_pregnant ? 'a pregnant doe' : null,
+  st.min_age_days ? `kits under ${Math.round(st.min_age_days / 30)} months` : null,
+  st.adults_only && !st.min_age_days ? 'anything but an adult' : null,
+].filter(Boolean).join(', or ');
+
+/** Every step of a treatment, with its rules, as a list. */
+function Steps({ steps, advice }: { steps: Step[]; advice: string | null }) {
+  return (
+    <div className="space-y-1 text-sm">
+      {advice && <p className="font-semibold">{advice}</p>}
+      {steps.length === 0 && <p className="text-farm-muted">No medicine is set for this one — reminders only.</p>}
+      {steps.map((st) => (
+        <div key={st.protocol_id}>
+          <p>{steps.length > 1 ? `${st.step}. ` : ''}<b>{stepLine(st)}</b></p>
+          {st.hold_reason
+            ? <p className="font-bold text-farm-crit">Do not give — {st.hold_reason}. Ask the vet.</p>
+            : notFor(st) && <p className="text-xs font-semibold text-farm-crit">Not for {notFor(st)}.</p>}
+        </div>
+      ))}
+      <p className="text-xs italic text-farm-muted">Doses as given at the farm training. Confirm with a vet before use.</p>
+    </div>
+  );
+}
 
 export function HealthPage() {
   const id = useIdentity();
@@ -36,8 +73,9 @@ export function HealthPage() {
   const [due, setDue] = useState<Dose[] | null>(null);
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [types, setTypes] = useState<CondType[]>([]);
+  const [routine, setRoutine] = useState<Routine | null>(null);
   const [report, setReport] = useState({ rabbit_id: '', code: '', note: '' });
-  const [reported, setReported] = useState<{ rabbit: string; sickness: string; treatment: Treatment | null } | null>(null);
+  const [reported, setReported] = useState<{ rabbit: string; sickness: string; steps: Step[]; advice: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -46,6 +84,7 @@ export function HealthPage() {
     apiGet<{ due: Dose[] }>('/medication').then((d) => setDue(d.due)),
     apiGet<{ animals: Animal[] }>('/animals').then((d) => setAnimals(d.animals)),
     apiGet<{ types: CondType[] }>('/condition-types').then((d) => setTypes(d.types)),
+    apiGet<Routine>('/routine').then(setRoutine),
   ]).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
 
@@ -58,14 +97,14 @@ export function HealthPage() {
   const reportProblem = (e: React.FormEvent) => {
     e.preventDefault();
     return act('report', async () => {
-      const res = await apiPost<{ treatment: Treatment | null }>('/conditions', {
+      const res = await apiPost<{ steps: Step[]; advice: string | null }>('/conditions', {
         rabbit_id: report.rabbit_id, code: report.code,
         note: report.note || undefined,
       });
       setReported({
         rabbit: name(report.rabbit_id),
         sickness: types.find((t) => t.code === report.code)?.name ?? report.code,
-        treatment: res.treatment,
+        steps: res.steps, advice: res.advice,
       });
       setReport({ rabbit_id: '', code: '', note: '' });
     });
@@ -84,15 +123,10 @@ export function HealthPage() {
       {reported && (
         <div className="mb-5 rounded-xl border border-farm-accent-soft bg-farm-accent-soft/50 p-4">
           <p className="text-sm font-bold">{reported.sickness} reported for {reported.rabbit}.</p>
-          <p className="mt-1 text-sm">
-            {reported.treatment
-              ? <>Treatment: <b>give {reported.treatment.medicine} within 24 hours</b>
-                  {reported.treatment.dose_note ? ` — ${reported.treatment.dose_note}` : ''}.
-                  {reported.treatment.days > 1
-                    ? ` If it is still going on, keep giving it daily — ${reported.treatment.days} days in all.`
-                    : ''} The doses are on the list below and on Today.</>
-              : 'No medicine is set for this sickness yet.'}
-          </p>
+          <div className="mt-2"><Steps steps={reported.steps} advice={reported.advice} /></div>
+          {reported.steps.length > 0 && (
+            <p className="mt-1 text-xs text-farm-muted">The doses are on the list below and on Today. Mark the sickness stopped and any dose still to come is cancelled.</p>
+          )}
           <div className="mt-2"><Btn tone="quiet" onClick={() => setReported(null)}>Okay</Btn></div>
         </div>
       )}
@@ -127,10 +161,10 @@ export function HealthPage() {
         </form>
         {report.code && (() => {
           const t = types.find((x) => x.code === report.code);
-          return t?.treatment
-            ? <p className="mt-2 text-sm text-farm-muted">
-                Treatment on file: <b>{treatmentLine(t.treatment)}</b> — starts as soon as you report it.
-              </p>
+          return t
+            ? <div className="mt-3 rounded-xl border border-farm-rule bg-farm-surface p-4">
+                <Steps steps={t.steps} advice={t.advice} />
+              </div>
             : null;
         })()}
       </Section>
@@ -186,20 +220,52 @@ export function HealthPage() {
                       </p>
                       <p className="text-xs text-farm-muted">
                         due {d.due_on}{d.days_until_due < 0 ? ` · ${-d.days_until_due} days overdue` : ''}
+                        {d.dose ? ` · ${d.dose}` : ''}{d.route ? ` (${d.route})` : ''}
                         {d.dose_note ? ` · ${d.dose_note}` : ''}
                       </p>
+                      {d.hold_reason && (
+                        <p className="text-sm font-bold text-farm-crit">Do not give — {d.hold_reason}. Ask the vet.</p>
+                      )}
                     </div>
-                    <Btn disabled={busy === key}
-                      onClick={() => act(key, () => apiPost('/medication', {
-                        protocol_id: d.protocol_id, rabbit_id: d.rabbit_id, dose_number: d.dose_number,
-                      }))}>
-                      {busy === key ? 'Saving…' : 'Given'}
-                    </Btn>
+                    {!d.hold_reason && (
+                      <Btn disabled={busy === key}
+                        onClick={() => act(key, () => apiPost('/medication', {
+                          protocol_id: d.protocol_id, rabbit_id: d.rabbit_id, dose_number: d.dose_number,
+                        }))}>
+                        {busy === key ? 'Saving…' : 'Given'}
+                      </Btn>
+                    )}
                   </div>
                 );
               })}
             </div>
           )}
+      </Section>
+
+      <Section title={`This month's routine${routine ? ` · ${routine.done} of ${routine.total} done` : ''}`}>
+        <p className="mb-3 text-sm text-farm-muted">
+          Whole farm, first week of every month. Each day lands on Today and on every phone.
+        </p>
+        <div className="space-y-2">
+          {(routine?.steps ?? []).map((st) => (
+            <div key={st.step}
+              className={`flex flex-wrap items-center gap-3 rounded-xl border border-farm-rule bg-farm-surface px-4 py-3${st.task_status === 'done' ? ' opacity-60' : ''}`}>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold">Day {st.day} — {st.medicine}{st.task_status === 'done' ? ' ✓' : ''}</p>
+                <p className="text-xs text-farm-muted">{st.dose} · {st.detail}</p>
+              </div>
+              {st.task_status === 'open' && st.task_id && (
+                <Btn disabled={busy === st.task_id}
+                  onClick={() => act(st.task_id!, () => apiPost(`/tasks/${st.task_id}/done`, {}))}>
+                  {busy === st.task_id ? 'Saving…' : 'Done — whole farm'}
+                </Btn>
+              )}
+            </div>
+          ))}
+        </div>
+        {routine?.standing.map((line) => (
+          <p key={line} className="mt-2 text-xs text-farm-muted">{line}</p>
+        ))}
       </Section>
 
     </Shell>

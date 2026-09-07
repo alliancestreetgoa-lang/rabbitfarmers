@@ -2,6 +2,29 @@ import { test, after, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { api, signupFarm, cleanup, closePools, adminQuery } from './helpers.js';
 import { runScheduler, schedulerHealth } from '../src/scheduler.js';
+import { adminPool } from '../src/db.js';
+
+/**
+ * Run one generator the way the scheduler does: with every farm row held FOR
+ * KEY SHARE for the length of the statement. Test files run concurrently and
+ * delete their farms as they finish; an INSERT ... SELECT across every farm
+ * that is not so held fails on the foreign key of whichever farm went.
+ */
+async function inPass(sql, params = []) {
+  const client = await adminPool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM farm ORDER BY id FOR KEY SHARE');
+    const res = await client.query(sql, params);
+    await client.query('COMMIT');
+    return res;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
 
 after(async () => { await cleanup(); await closePools(); });
 
@@ -486,5 +509,124 @@ describe('scheduler plumbing', () => {
     } finally {
       if (prev !== undefined) process.env.SCHEDULER_SECRET = prev;
     }
+  });
+});
+
+/**
+ * The monthly routine: the chart's whole-farm preventive round, raised as one
+ * task per routine day in the first week of the month and pushed to every
+ * phone. p_today is injected so the test does not have to wait for the 5th.
+ */
+describe('the monthly routine', () => {
+  async function farmWithRabbits() {
+    const f = await farmWithDoe();
+    await adminQuery(
+      `UPDATE farm_settings SET quiet_hours_enabled = false WHERE farm_id = $1`, [f.farm.id]);
+    return f;
+  }
+  const routineTasks = async (farmId) => (await adminQuery(
+    `SELECT title, notes, due_on::text AS due_on, status, generated_key FROM task
+      WHERE farm_id = $1 AND generated_key LIKE 'routine:%' ORDER BY due_on, generated_key`,
+    [farmId])).rows;
+
+  test('on the 1st, the whole week is laid out — ten steps over seven days', async () => {
+    const f = await farmWithRabbits();
+    await inPass(`SELECT generate_routine_tasks('2031-03-01')`);
+    const tasks = await routineTasks(f.farm.id);
+    assert.equal(tasks.length, 10, JSON.stringify(tasks.map((t) => t.title)));
+    assert.equal(tasks[0].due_on, '2031-03-01');
+    assert.match(tasks[0].title, /Hitech \(oral\) 1 ml, day 1 of 3/);
+    assert.match(tasks[0].notes, /SKIP pregnant does and kits under 3 months/);
+    assert.match(tasks[0].notes, /Agrimin Forte/, 'the standing daily advice rides along');
+    assert.equal(tasks[9].due_on, '2031-03-07');
+    assert.match(tasks[9].title, /Tetracycline/);
+
+    // A second pass, or the 15-minute scheduler, adds nothing.
+    await inPass(`SELECT generate_routine_tasks('2031-03-01')`);
+    await inPass(`SELECT generate_routine_tasks('2031-03-03')`);
+    assert.equal((await routineTasks(f.farm.id)).length, 10, 'idempotent');
+  });
+
+  test('a farm that joins on the 5th gets days 5 to 7, not a week of overdue work', async () => {
+    const f = await farmWithRabbits();
+    await inPass(`SELECT generate_routine_tasks('2031-03-05')`);
+    const tasks = await routineTasks(f.farm.id);
+    assert.deepEqual(tasks.map((t) => t.due_on),
+      ['2031-03-05', '2031-03-05', '2031-03-06', '2031-03-06', '2031-03-07']);
+  });
+
+  test('outside the first week nothing is raised; next month it starts again', async () => {
+    const f = await farmWithRabbits();
+    await inPass(`SELECT generate_routine_tasks('2031-03-20')`);
+    assert.equal((await routineTasks(f.farm.id)).length, 0);
+    await inPass(`SELECT generate_routine_tasks('2031-04-01')`);
+    assert.equal((await routineTasks(f.farm.id)).length, 10);
+  });
+
+  test('a farm with no rabbits is left alone', async () => {
+    const f = await signupFarm();
+    await inPass(`SELECT generate_routine_tasks('2031-03-01')`);
+    assert.equal((await routineTasks(f.farm.id)).length, 0);
+  });
+
+  test('each routine day is pushed to everyone at the farm, once', async () => {
+    const f = await farmWithRabbits();
+    await inPass(`SELECT generate_routine_tasks('2031-03-01')`);
+    await inPass(`SELECT generate_routine_notifications('2031-03-01')`);
+    let notes = (await notificationsFor(f.farm.id)).filter((n) => n.kind === 'task_due');
+    assert.equal(notes.length, 1, 'day 1: the first Hitech round');
+    assert.match(notes[0].title, /Hitech/);
+
+    await inPass(`SELECT generate_routine_notifications('2031-03-01')`);
+    assert.equal((await notificationsFor(f.farm.id)).filter((n) => n.kind === 'task_due').length, 1,
+      'the scheduler runs every 15 minutes; once a day is enough');
+
+    await inPass(`SELECT generate_routine_notifications('2031-03-04')`);
+    notes = (await notificationsFor(f.farm.id)).filter((n) => n.kind === 'task_due');
+    // Day 4's pass: days 1-3 Hitech (still open, so overdue and said again —
+    // the same once-a-day rule breeding tasks follow), day 4 Liv 52 and day 4
+    // Gutwell. Plus day 1's own notification from the first pass.
+    assert.equal(notes.length, 6);
+    assert.ok(notes.some((n) => /Liv 52/.test(n.title)) && notes.some((n) => /Gutwell/.test(n.title)));
+
+    const { rows } = await adminQuery(
+      `SELECT employee_id FROM notification WHERE farm_id = $1 AND kind = 'task_due'`, [f.farm.id]);
+    assert.ok(rows.every((r) => r.employee_id === null),
+      'the round is nobody\'s shed in particular — everyone is told');
+  });
+
+  test('done is done: the task closes and the month\'s plan counts it', async () => {
+    const f = await farmWithRabbits();
+    await inPass(`SELECT generate_routine_tasks('2031-03-01')`);
+    const [first] = await routineTasks(f.farm.id);
+    const id = (await adminQuery(
+      `SELECT id FROM task WHERE generated_key = $1`, [first.generated_key])).rows[0].id;
+
+    const done = await api('POST', `/tasks/${id}/done`, { token: f.token, body: {} });
+    assert.equal(done.status, 200, done.text);
+    assert.equal((await routineTasks(f.farm.id))[0].status, 'done');
+
+    const again = await api('POST', `/tasks/${id}/done`, { token: f.token, body: {} });
+    assert.equal(again.status, 404, 'closing it twice is not a thing');
+
+    // The plan screen: this month's steps, with whatever is done. The tasks
+    // above are 2031's, so nothing is done in the real current month — but
+    // the plan itself is always there to read.
+    const plan = await api('GET', '/routine', { token: f.token });
+    assert.equal(plan.status, 200, plan.text);
+    assert.equal(plan.body.total, 10);
+    assert.equal(plan.body.steps[0].day, 1);
+    assert.match(plan.body.steps[0].medicine, /Hitech/);
+    assert.ok(plan.body.standing.some((s) => /Agrimin/.test(s)));
+  });
+
+  test('the scheduler itself runs the round without complaint', async () => {
+    const f = await farmWithRabbits();
+    await runScheduler({ triggeredBy: 'test' });
+    // Whether today is in the first week or not is the calendar's business;
+    // what matters is that a pass completes and a routine task, if any, is a
+    // whole-farm task with no rabbit on it.
+    const tasks = await routineTasks(f.farm.id);
+    for (const t of tasks) assert.match(t.title, /Monthly round/);
   });
 });

@@ -793,17 +793,62 @@ export function renderFarm({ farm, audit, subscription, payments = [], staff = [
 
 /**
  * The sickness catalogue: every farm's report screen offers exactly this list,
- * and each row's medicine is what the farmer is told to give. Superadmin only.
+ * and each row's steps are what the farmer is told to give, in order. Below
+ * it, the monthly routine — read-only, because it is the chart's sheet.
+ * Superadmin only.
  */
-export function renderSicknesses({ rows, farmCount, admin }) {
-  const rx = (r) => r.medicine
-    ? `${esc(r.medicine)} — ${r.treatment_days === 1 ? 'one dose' : `${r.treatment_days} days`}`
-      + (r.dose_note ? ` · ${esc(r.dose_note)}` : '')
+export function renderSicknesses({ rows, routine = [], farmCount, admin }) {
+  const who = (st) => [
+    st.adults_only ? 'adults only' : null,
+    st.min_age_days ? `not under ${Math.round(st.min_age_days / 30)} months` : null,
+    st.not_when_pregnant ? 'never when pregnant' : null,
+  ].filter(Boolean).join(', ');
+
+  const rx = (r) => r.steps.length
+    ? `<ol style="margin:0;padding-left:18px">${r.steps.map((st) => `
+        <li><b>${esc(st.medicine)}</b>${st.dose ? ` ${esc(st.dose)}` : ''}${st.route ? ` <span class="muted">(${esc(st.route)})</span>` : ''}
+          — ${st.doses === 1 ? 'one dose' : `${st.doses} doses, ${st.interval_days === 1 ? 'daily' : `every ${st.interval_days} days`}`}
+          ${who(st) ? `<div style="color:#8c332b;font-size:12px">${esc(who(st))}</div>` : ''}
+          ${st.note ? `<div class="muted">${esc(st.note)}</div>` : ''}
+        </li>`).join('')}</ol>`
     : '<span class="muted">reminders only</span>';
+
+  const stepFields = (i, st = {}) => `
+    <fieldset style="border:1px solid #ddd;padding:8px;display:grid;gap:4px">
+      <legend>Medicine ${i}${i === 1 ? '' : ' (optional)'}</legend>
+      <label>Medicine <input name="s${i}_medicine" value="${esc(st.medicine ?? '')}"
+             placeholder="${i === 1 ? 'O2 M' : 'e.g. Belamyl, an hour later'}"></label>
+      <label>Dose <input name="s${i}_dose" value="${esc(st.dose ?? '')}" placeholder="1 ml"></label>
+      <label>Route <input name="s${i}_route" value="${esc(st.route ?? '')}" placeholder="oral / injection / topical"></label>
+      <label>Doses <input name="s${i}_doses" type="number" min="1" max="60" value="${st.doses ?? 1}"></label>
+      <label>Days between doses <input name="s${i}_interval_days" type="number" min="1" max="30" value="${st.interval_days ?? 1}"></label>
+      <label>How to give it <input name="s${i}_note" value="${esc(st.note ?? '')}"></label>
+      <label>Not for kits under (days) <input name="s${i}_min_age_days" type="number" min="1" value="${st.min_age_days ?? ''}" placeholder="90 = three months"></label>
+      <label><input type="checkbox" name="s${i}_adults_only"${st.adults_only ? ' checked' : ''}> Adults only</label>
+      <label><input type="checkbox" name="s${i}_not_when_pregnant"${st.not_when_pregnant ? ' checked' : ''}> Never when pregnant</label>
+    </fieldset>`;
+
+  const sicknessFields = (r = {}) => `
+    <label>Name <input name="name" value="${esc(r.name ?? '')}" required></label>
+    <label>Advice shown on the report screen <input name="advice" value="${esc(r.advice ?? '')}"
+           placeholder="Stop green fodder immediately."></label>
+    <label>Remind every (hours) <input name="reminder_interval_hours" type="number"
+           step="0.5" min="0.5" max="168" value="${r.reminder_interval_hours ?? ''}"
+           placeholder="empty = no repeating reminder"></label>
+    <label>Colour <input name="colour" value="${esc(r.colour ?? '#EA580C')}"></label>
+    <label><input type="checkbox" name="is_contagious"${r.is_contagious ? ' checked' : ''}> Contagious</label>
+    <label>Stops her breeding while open
+      <select name="blocks_breeding">
+        <option value=""${r.blocks_breeding == null ? ' selected' : ''}>leave each farm's setting</option>
+        <option value="yes"${r.blocks_breeding === true ? ' selected' : ''}>yes</option>
+        <option value="no"${r.blocks_breeding === false ? ' selected' : ''}>no</option>
+      </select></label>
+    ${[1, 2, 3].map((i) => stepFields(i, r.steps?.[i - 1])).join('')}`;
 
   const rowHtml = rows.map((r) => `
     <tr${r.is_active ? '' : ' style="opacity:.45"'}>
-      <td><b>${esc(r.name)}</b><div class="muted">${esc(r.code)}</div></td>
+      <td><b>${esc(r.name)}</b><div class="muted">${esc(r.code)}</div>
+          ${r.advice ? `<div class="muted" style="margin-top:4px">${esc(r.advice)}</div>` : ''}</td>
       <td>${rx(r)}</td>
       <td>${r.reminder_interval_hours ? `every ${Number(r.reminder_interval_hours)}h` : '—'}</td>
       <td>${r.is_contagious ? 'contagious' : '—'}</td>
@@ -811,27 +856,21 @@ export function renderSicknesses({ rows, farmCount, admin }) {
         ${r.is_active ? `
         <details>
           <summary>Edit</summary>
-          <form method="post" action="/admin/sicknesses" style="display:grid;gap:6px;max-width:340px;margin:8px 0">
+          <form method="post" action="/admin/sicknesses" style="display:grid;gap:6px;max-width:380px;margin:8px 0">
             <input type="hidden" name="code" value="${esc(r.code)}">
-            <label>Name <input name="name" value="${esc(r.name)}" required></label>
-            <label>Medicine <input name="medicine" value="${esc(r.medicine ?? '')}"
-                   placeholder="empty = reminders only"></label>
-            <label>Days <input name="days" type="number" min="1" max="60"
-                   value="${r.treatment_days ?? ''}"></label>
-            <label>How to give it <input name="dose_note" value="${esc(r.dose_note ?? '')}"></label>
-            <label>Remind every (hours) <input name="reminder_interval_hours" type="number"
-                   step="0.5" min="0.5" max="168" value="${r.reminder_interval_hours ?? ''}"></label>
-            <label><input type="checkbox" name="is_contagious"${r.is_contagious ? ' checked' : ''}>
-                   Contagious</label>
+            ${sicknessFields(r)}
             <button>Save & apply to every farm</button>
           </form>
           <form method="post" action="/admin/sicknesses/${esc(r.code)}/deactivate"
-                onsubmit="return confirm('Remove ${esc(r.name)} from every farm\u2019s report screen?')">
+                onsubmit="return confirm('Remove ${esc(r.name)} from every farm’s report screen?')">
             <button class="ghost" style="margin-top:6px;color:#8c332b;border-color:#8c332b">Retire it</button>
           </form>
         </details>` : '<span class="muted">retired</span>'}
       </td>
     </tr>`).join('');
+
+  const routineHtml = routine.map((r) => `
+    <tr><td>Day ${r.day}</td><td><b>${esc(r.medicine)}</b></td><td>${esc(r.dose)}</td><td>${esc(r.detail)}</td></tr>`).join('');
 
   return page('Sicknesses — rabbitfarmers admin', `
     <header>
@@ -844,33 +883,36 @@ export function renderSicknesses({ rows, farmCount, admin }) {
     </header>
 
     <p class="muted">What every farm's "Report a problem" screen offers, and what the
-    farmer is told to give. Saving applies to all ${farmCount} farm${farmCount === 1 ? '' : 's'}
-    immediately, and to every farm that signs up later. Farmers cannot edit this.</p>
-
-    <h2>Add a sickness</h2>
-    <form method="post" action="/admin/sicknesses" style="display:grid;gap:8px;max-width:420px">
-      <label>Name <input name="name" placeholder="Head tilt" required></label>
-      <label>Medicine <input name="medicine" placeholder="O2M (leave empty for reminders only)"></label>
-      <label>For how many days <input name="days" type="number" min="1" max="60" placeholder="3"></label>
-      <label>How to give it <input name="dose_note" placeholder="1 bottle in drinking water"></label>
-      <label>Remind every (hours) <input name="reminder_interval_hours" type="number"
-             step="0.5" min="0.5" max="168" placeholder="empty = no repeating reminder"></label>
-      <label><input type="checkbox" name="is_contagious"> Contagious</label>
-      <button>Add & apply to every farm</button>
-    </form>
+    farmer is told to give — every medicine in order, with who must not get it.
+    Saving applies to all ${farmCount} farm${farmCount === 1 ? '' : 's'}
+    immediately, and to every farm that signs up later. Farmers cannot edit this.
+    Doses are as the trainer gave them; a vet should confirm them.</p>
 
     <h2>The catalogue</h2>
     <table>
-      <thead><tr><th>Sickness</th><th>Treatment</th><th>Check-in</th><th></th><th></th></tr></thead>
-      <tbody>${rowHtml || '<tr><td colspan="5" class="muted">Nothing yet — the farms only have the five built-in sicknesses.</td></tr>'}</tbody>
+      <thead><tr><th>Sickness</th><th>Treatment, step by step</th><th>Check-in</th><th></th><th></th></tr></thead>
+      <tbody>${rowHtml || '<tr><td colspan="5" class="muted">Nothing in the catalogue.</td></tr>'}</tbody>
+    </table>
+
+    <h2>Add a sickness</h2>
+    <form method="post" action="/admin/sicknesses" style="display:grid;gap:8px;max-width:420px">
+      ${sicknessFields()}
+      <button>Add & apply to every farm</button>
+    </form>
+
+    <h2>Monthly routine — whole farm, first week of the month</h2>
+    <p class="muted">Raised on every farm's Today as one task per day, and pushed to every
+    phone. From the chart's Monthly Routine sheet; changing it is a migration, not a form.
+    Standing every day: Agrimin Forte 1 g per adult breeder in the morning feed; Calcium
+    Ostovet + Vimeral may go into the daily feed for the whole herd.</p>
+    <table>
+      <thead><tr><th>Day</th><th>Medicine</th><th>Dose</th><th>Notes</th></tr></thead>
+      <tbody>${routineHtml}</tbody>
     </table>
   `);
 }
 
 
-const SEX_LABEL = { doe: 'Female', buck: 'Male', unknown: '—' };
-
-/** A farm's herd, read-only, for whoever is on the phone with the farmer. */
 export function renderFarmAnimals({ farm, animals, admin }) {
   const rows = animals.map((a) => `
     <tr${a.status === 'active' ? '' : ' style="opacity:.55"'}>

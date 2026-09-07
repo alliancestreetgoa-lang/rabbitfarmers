@@ -66,18 +66,42 @@ export default function ReportCondition() {
                 placeholder="Choose the sickness…"
                 options={types.map((ty) => ({
                   id: ty.code, label: ty.name,
-                  sub: ty.treatment ? `${ty.treatment.medicine} · ${ty.treatment.days} day${ty.treatment.days === 1 ? '' : 's'}` : undefined,
+                  sub: ty.steps?.length
+                    ? ty.steps.map((st) => st.medicine).join(', then ')
+                    : undefined,
                 }))}
                 onSelect={setCode}
               />
               {picked && (
-                <Text style={s.rx}>
-                  {picked.treatment
-                    ? `Give ${picked.treatment.medicine} within 24 hours` +
-                      `${picked.treatment.dose_note ? ` — ${picked.treatment.dose_note}` : ''}` +
-                      `${picked.treatment.days > 1 ? `. ${picked.treatment.days} days while it lasts.` : '.'}`
-                    : 'No medicine set for this one — reminders only.'}
-                </Text>
+                <View style={s.rxBox} testID="treatment">
+                  {picked.advice ? <Text style={s.advice}>{picked.advice}</Text> : null}
+                  {picked.steps?.length ? picked.steps.map((st) => (
+                    <View key={st.protocol_id} style={{ marginTop: space.sm }}>
+                      <Text style={s.rxTitle}>
+                        {picked.steps.length > 1 ? `${st.step}. ` : ''}{st.medicine}
+                        {st.dose ? ` — ${st.dose}` : ''}{st.route ? ` (${st.route})` : ''}
+                      </Text>
+                      <Text style={s.rx}>
+                        {st.doses === 1 ? 'One dose' : `${st.doses} doses, ${st.interval_days === 1 ? 'daily' : `every ${st.interval_days} days`}`}
+                        {st.note ? `. ${st.note}` : ''}
+                      </Text>
+                      {(st.adults_only || st.min_age_days || st.not_when_pregnant) ? (
+                        <Text style={s.warn}>
+                          Not for {[
+                            st.not_when_pregnant ? 'a pregnant doe' : null,
+                            st.min_age_days ? `kits under ${Math.round(st.min_age_days / 30)} months` : null,
+                            st.adults_only && !st.min_age_days ? 'anything but an adult' : null,
+                          ].filter(Boolean).join(', or ')}.
+                        </Text>
+                      ) : null}
+                    </View>
+                  )) : (
+                    <Text style={s.rx}>No medicine set for this one — reminders only.</Text>
+                  )}
+                  <Text style={s.disclaimer}>
+                    Doses as given at the farm training. Confirm with a vet before use.
+                  </Text>
+                </View>
               )}
 
               <Dropdown
@@ -112,7 +136,16 @@ export default function ReportCondition() {
 }
 
 const s = StyleSheet.create({
-  rx: { ...t.small, color: colors.muted, marginTop: -space.sm, marginBottom: space.lg },
+  rx: { ...t.small, color: colors.muted },
+  rxBox: {
+    marginTop: -space.sm, marginBottom: space.lg, padding: space.md,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.rule,
+    borderRadius: radius.md,
+  },
+  rxTitle: { ...t.body, color: colors.ink, fontWeight: '700' },
+  advice: { ...t.body, color: colors.ink },
+  warn: { ...t.small, color: colors.crit, fontWeight: '700', marginTop: 2 },
+  disclaimer: { ...t.small, color: colors.muted, marginTop: space.md, fontStyle: 'italic' },
   label: { ...t.label, color: colors.muted, marginTop: space.lg, marginBottom: space.sm },
   pick: {
     minHeight: 56, paddingHorizontal: space.lg, justifyContent: 'center',

@@ -20,7 +20,7 @@ const MAX_ATTEMPTS = 5;
 
 export type OutboxKind =
   | 'animal' | 'mating' | 'pregnancy_check' | 'kindling' | 'weaning'
-  | 'condition' | 'condition_check' | 'dose';
+  | 'condition' | 'condition_check' | 'dose' | 'task_done';
 
 export interface OutboxEntry {
   /** Client-generated. Sent as the record's id, which is what makes replay safe. */
@@ -197,6 +197,7 @@ export class Outbox {
       case 'dose':            return this.client.recordDose(p);
       case 'condition_check':
         return this.client.checkCondition(entry.target!, p.status, p.note);
+      case 'task_done':       return this.client.taskDone(entry.target!);
     }
   }
 

@@ -16,6 +16,7 @@ import { Shell, useIdentity, PageTitle, Section, Empty, Btn } from '@/components
 interface Item {
   source: string; ref_id: string; rabbit_id: string | null; tag: string | null;
   title: string; urgency: string; due_on: string | null;
+  kind: string | null; notes: string | null; hold_reason: string | null;
 }
 
 const GROUPS: [string, string][] = [
@@ -73,13 +74,17 @@ export function TodayPage() {
                     urgency === 'critical' ? 'bg-farm-crit' : urgency === 'high' ? 'bg-farm-warn' : 'bg-farm-accent'}`} />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold">{i.title}</p>
+                    {i.notes && <p className="text-xs text-farm-muted">{i.notes}</p>}
+                    {i.hold_reason && (
+                      <p className="text-sm font-bold text-farm-crit">Do not give — {i.hold_reason}. Ask the vet.</p>
+                    )}
                     {i.tag && (
                       i.rabbit_id
                         ? <Link className="text-xs text-farm-accent" to={`/dashboard/herd/${i.rabbit_id}`}>{i.tag}</Link>
                         : <span className="text-xs text-farm-muted">{i.tag}</span>
                     )}
                   </div>
-                  {i.source === 'medication' && (
+                  {i.source === 'medication' && !i.hold_reason && (
                     <Btn onClick={() => doseGiven(i)} disabled={busy === i.ref_id}>
                       {busy === i.ref_id ? 'Saving…' : 'Given'}
                     </Btn>
@@ -93,6 +98,14 @@ export function TodayPage() {
                   {i.source === 'task' && i.rabbit_id && (
                     <Link to={`/dashboard/herd/${i.rabbit_id}`}
                       className="text-sm font-semibold text-farm-accent">Open rabbit →</Link>
+                  )}
+                  {/* A whole-farm task (the monthly round) has no animal and no
+                      event to record: it is done when somebody says so. */}
+                  {i.source === 'task' && !i.rabbit_id && i.kind === 'medicate' && (
+                    <Btn onClick={() => act(i, () => apiPost(`/tasks/${i.ref_id}/done`, {}))}
+                      disabled={busy === i.ref_id}>
+                      {busy === i.ref_id ? 'Saving…' : 'Done — whole farm'}
+                    </Btn>
                   )}
                 </div>
               ))}

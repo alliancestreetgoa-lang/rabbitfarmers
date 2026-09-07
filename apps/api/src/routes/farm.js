@@ -767,7 +767,8 @@ farmRoutes.get('/daily', canRead, async (c) => {
   const db = c.get('db');
   const rows = await db(async (client) => {
     const { rows } = await client.query(`
-      SELECT source, ref_id, rabbit_id, tag, due_on, due_at, title, urgency, colour
+      SELECT source, ref_id, rabbit_id, tag, due_on, due_at, title, urgency, colour,
+             kind, notes, hold_reason
       FROM v_daily_list
       ORDER BY CASE urgency WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,
                due_at NULLS FIRST`);
@@ -1202,17 +1203,26 @@ farmRoutes.get('/condition-types', canRead, async (c) => {
   const rows = await db(async (client) => {
     const { rows } = await client.query(`
       SELECT ct.id, ct.code, ct.name, ct.colour, ct.reminder_interval_hours,
-             ct.blocks_breeding, ct.is_contagious,
-             p.id   AS protocol_id,
-             regexp_replace(p.name, '\\s*\\([^)]*\\)$', '') AS medicine,
-             p.doses AS treatment_days,
-             p.interval_days,
-             p.dose_note,
-             p.withdrawal_days
+             ct.blocks_breeding, ct.is_contagious, ct.advice,
+             COALESCE(json_agg(json_build_object(
+               'protocol_id', p.id,
+               'step', p.step,
+               'medicine', regexp_replace(p.name, '\\s*\\([^)]*\\)$', ''),
+               'route', p.route,
+               'dose', p.dose,
+               'doses', p.doses,
+               'interval_days', p.interval_days,
+               'note', p.dose_note,
+               'adults_only', p.adults_only,
+               'min_age_days', p.min_age_days,
+               'not_when_pregnant', p.not_when_pregnant,
+               'withdrawal_days', p.withdrawal_days
+             ) ORDER BY p.step) FILTER (WHERE p.id IS NOT NULL), '[]') AS steps
       FROM condition_type ct
       LEFT JOIN medication_protocol p
              ON p.condition_type_id = ct.id AND p.is_active
       WHERE ct.is_active
+      GROUP BY ct.id
       ORDER BY ct.name`);
     return rows;
   });
@@ -1221,10 +1231,16 @@ farmRoutes.get('/condition-types', canRead, async (c) => {
       id: r.id, code: r.code, name: r.name, colour: r.colour,
       reminder_interval_hours: r.reminder_interval_hours,
       blocks_breeding: r.blocks_breeding, is_contagious: r.is_contagious,
-      treatment: r.protocol_id ? {
-        protocol_id: r.protocol_id, medicine: r.medicine,
-        days: r.treatment_days, interval_days: r.interval_days,
-        dose_note: r.dose_note, withdrawal_days: r.withdrawal_days,
+      advice: r.advice,
+      // Every medicine, in the order they are given. Fever is two: the shot,
+      // then Belamyl an hour later. Empty means reminders only.
+      steps: r.steps,
+      // The first step, in the shape the older clients read. Kept so a phone
+      // that has not updated still shows a medicine rather than nothing.
+      treatment: r.steps[0] ? {
+        protocol_id: r.steps[0].protocol_id, medicine: r.steps[0].medicine,
+        days: r.steps[0].doses, interval_days: r.steps[0].interval_days,
+        dose_note: r.steps[0].note, withdrawal_days: r.steps[0].withdrawal_days,
       } : null,
     })),
   });
@@ -1267,17 +1283,38 @@ farmRoutes.post('/conditions', write, canWriteHealth, async (c) => {
        b.severity ?? 'moderate', b.notes ?? null, session.employeeId, b.id ?? null,
        observedAt]);
 
-    // Tell whoever just reported it what to give. The course itself is already
-    // running — v_medication_schedule anchors on the open condition.
+    // Tell whoever just reported it what to give — every step, in order, and
+    // for THIS rabbit: a step the chart forbids her (Hitech for a pregnant
+    // doe) comes back with hold_reason set, so the screen says so at once
+    // rather than three taps later on the medicine round. The course itself
+    // is already running — v_medication_schedule anchors on the open
+    // condition, which is why the hold can be read from it here.
     const { rows: rx } = await client.query(`
-      SELECT regexp_replace(name, '\\s*\\([^)]*\\)$', '') AS medicine,
-             doses AS days, interval_days, dose_note
-      FROM medication_protocol
-      WHERE condition_type_id = $1 AND is_active
-      LIMIT 1`, [types[0].id]);
-    return { ...rows[0], treatment: rx[0] ?? null };
+      SELECT p.id AS protocol_id, p.step,
+             regexp_replace(p.name, '\\s*\\([^)]*\\)$', '') AS medicine,
+             p.route, p.dose, p.doses, p.interval_days, p.dose_note AS note,
+             p.adults_only, p.min_age_days, p.not_when_pregnant,
+             (SELECT s.hold_reason FROM v_medication_schedule s
+               WHERE s.protocol_id = p.id AND s.rabbit_id = $2 AND s.dose_number = 1
+               LIMIT 1) AS hold_reason
+      FROM medication_protocol p
+      WHERE p.condition_type_id = $1 AND p.is_active
+      ORDER BY p.step`, [types[0].id, b.rabbit_id ?? null]);
+    const { rows: adv } = await client.query(
+      'SELECT advice FROM condition_type WHERE id = $1', [types[0].id]);
+    return { ...rows[0], steps: rx, advice: adv[0]?.advice ?? null };
   });
-  return c.json({ condition: row, treatment: row.treatment }, 201);
+  const first = row.steps[0];
+  return c.json({
+    condition: row,
+    advice: row.advice,
+    steps: row.steps,
+    // The first step in the older shape; see GET /condition-types.
+    treatment: first ? {
+      medicine: first.medicine, days: first.doses,
+      interval_days: first.interval_days, dose_note: first.note,
+    } : null,
+  }, 201);
 });
 
 /**
@@ -1341,6 +1378,7 @@ farmRoutes.get('/medication', canRead, async (c) => {
   const rows = await c.get('db')(async (client) => (await client.query(`
     SELECT md.protocol_id, md.protocol_name, md.rabbit_id, md.dose_number,
            md.total_doses, md.due_on, md.days_until_due, md.dose_note, md.lapsed,
+           md.step, md.route, md.dose, md.hold_reason,
            r.name AS rabbit_name, r.tag
     FROM v_medication_due md
     JOIN rabbit r ON r.id = md.rabbit_id
@@ -1350,7 +1388,7 @@ farmRoutes.get('/medication', canRead, async (c) => {
     WHERE md.due_on <= farm_today(md.farm_id) + 2
       AND r.status NOT IN ('sold', 'culled', 'dead')
       AND ($1 OR NOT md.lapsed)
-    ORDER BY md.due_on, r.tag`, [includeLapsed])).rows);
+    ORDER BY md.due_on, r.tag, md.step`, [includeLapsed])).rows);
 
   return c.json({
     due: rows.filter((r) => !r.lapsed),
@@ -1391,6 +1429,21 @@ farmRoutes.post('/medication', write, canWriteHealth, async (c) => {
       throw new HttpError(400, `${p[0].name} is ${p[0].doses} doses`, { field: 'dose_number' });
     }
 
+    // The chart's rules, enforced where the record is made. A dose the
+    // schedule holds for this rabbit — she is pregnant, he is a kit — cannot
+    // be ticked off as given; the screen already shows it as a hold, and a
+    // vet who overrules the chart records that as a health event by hand.
+    const { rows: held } = await client.query(`
+      SELECT hold_reason FROM v_medication_schedule
+       WHERE protocol_id = $1 AND rabbit_id = $2 AND dose_number = $3
+         AND hold_reason IS NOT NULL
+       LIMIT 1`, [b.protocol_id, b.rabbit_id, doseNumber]);
+    if (held.length) {
+      throw new HttpError(409,
+        `Do not give ${p[0].name} — ${held[0].hold_reason}. Ask the vet.`,
+        { field: 'protocol_id', hold_reason: held[0].hold_reason });
+    }
+
     const { rows } = await client.query(`
       INSERT INTO health_event (id, farm_id, rabbit_id, occurred_on, category,
                                 medicine, dose, protocol_id, dose_number,
@@ -1412,6 +1465,71 @@ farmRoutes.post('/medication', write, canWriteHealth, async (c) => {
     dose: row,
     message: `${row.medicine}, dose ${row.dose_number} recorded.`,
   }, 201);
+});
+
+/* ---------------------------------------------------------------- tasks -- */
+
+/**
+ * POST /tasks/:id/done — a whole-farm task is finished.
+ *
+ * Breeding tasks clear themselves when the event they point at is recorded,
+ * which is why there was never a tick-box for them. The monthly round has no
+ * such event — "Hitech to every rabbit this morning" is done when somebody
+ * says it is — so this is that saying.
+ */
+farmRoutes.post('/tasks/:id/done', write, canWriteHealth, async (c) => {
+  const session = c.get('session');
+  const id = c.req.param('id');
+  const row = await c.get('db')(async (client) => {
+    const { rows } = await client.query(`
+      UPDATE task
+         SET status = 'done', completed_at = now(), completed_by = $2
+       WHERE id = $1 AND status = 'open'
+       RETURNING id, title, completed_at`, [id, session.employeeId]);
+    if (!rows.length) throw new HttpError(404, 'No open task with that id');
+    return rows[0];
+  });
+  return c.json({ task: row, message: `Done: ${row.title}` });
+});
+
+/**
+ * GET /routine — this month's preventive round for the whole farm, step by
+ * step, with what has been done. The chart's Monthly Routine sheet, as a
+ * screen: the tasks themselves land on Today in the first week, this is the
+ * plan they come from.
+ */
+farmRoutes.get('/routine', canRead, async (c) => {
+  const data = await c.get('db')(async (client) => {
+    const { rows: steps } = await client.query(`
+      SELECT rc.step, rc.day, rc.medicine, rc.dose, rc.title, rc.detail,
+             m.month_start + (rc.day - 1)                       AS due_on,
+             t.id                                                AS task_id,
+             t.status                                            AS task_status,
+             t.completed_at
+      FROM routine_catalog rc
+      CROSS JOIN (SELECT date_trunc('month', farm_today(current_farm_id()))::date
+                    AS month_start) m
+      LEFT JOIN task t
+             ON t.generated_key = 'routine:' || current_farm_id() || ':'
+                                || to_char(m.month_start, 'YYYY-MM') || ':' || rc.step
+      WHERE rc.is_active
+      ORDER BY rc.day, rc.step`);
+    const { rows: today } = await client.query(
+      'SELECT farm_today(current_farm_id()) AS today');
+    return { steps, today: today[0].today };
+  });
+  const month = String(data.today).slice(0, 7);
+  return c.json({
+    month,
+    today: data.today,
+    done: data.steps.filter((s) => s.task_status === 'done').length,
+    total: data.steps.length,
+    steps: data.steps,
+    standing: [
+      'Every day: Agrimin Forte, 1 g per adult breeder, in the morning feed.',
+      'Calcium Ostovet + Vimeral may be mixed into the daily feed for the whole herd.',
+    ],
+  });
 });
 
 /* ---------------------------------------------------------- notifications -- */
