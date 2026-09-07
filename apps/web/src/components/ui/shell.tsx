@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import * as Popover from '@radix-ui/react-popover';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { ChevronDown, LogOut, ShieldOff } from 'lucide-react';
+import { Check, ChevronDown, LogOut, ShieldOff } from 'lucide-react';
 import { apiPost, clearSession, getSession } from '@/lib/api';
 
 /**
@@ -214,5 +215,56 @@ export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select {...props}
       className={`rounded-lg border border-farm-rule bg-farm-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-farm-accent ${props.className ?? ''}`} />
+  );
+}
+
+
+/**
+ * A dropdown that ticks more than one thing. Looks like Select closed; opens
+ * to a list with tick boxes. `max` greys the rest out once reached.
+ */
+export function MultiSelect({ options, value, onChange, placeholder = 'Choose…', max, className }: {
+  options: { id: string; label: string }[];
+  value: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+  max?: number;
+  className?: string;
+}) {
+  const chosen = options.filter((o) => value.includes(o.id));
+  const toggle = (id: string) =>
+    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <button type="button"
+          className={`flex min-w-[10rem] items-center justify-between gap-2 rounded-lg border border-farm-rule bg-farm-surface px-3 py-2 text-left text-sm outline-none focus:ring-2 focus:ring-farm-accent ${className ?? ''}`}>
+          <span className={chosen.length ? '' : 'text-farm-muted'}>
+            {chosen.length ? chosen.map((o) => o.label).join(', ') : placeholder}
+          </span>
+          <ChevronDown className="h-4 w-4 flex-none text-farm-muted" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="start" sideOffset={4}
+          className="z-50 min-w-[12rem] rounded-lg border border-farm-rule bg-white p-1 shadow-lg">
+          {options.length === 0 && <p className="px-3 py-2 text-sm text-farm-muted">Nothing to choose</p>}
+          {options.map((o) => {
+            const on = value.includes(o.id);
+            const full = !on && max !== undefined && value.length >= max;
+            return (
+              <button key={o.id} type="button" disabled={full}
+                onClick={() => toggle(o.id)}
+                className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-farm-accent-soft ${full ? 'opacity-40' : ''}`}>
+                <span className={`flex h-4 w-4 flex-none items-center justify-center rounded border ${on ? 'border-farm-accent bg-farm-accent text-white' : 'border-farm-rule bg-white'}`}>
+                  {on && <Check className="h-3 w-3" />}
+                </span>
+                {o.label}
+              </button>
+            );
+          })}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

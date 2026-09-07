@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiGet, apiPost } from '@/lib/api';
 import {
-  Shell, useIdentity, PageTitle, Section, Table, Empty, Btn, Input, Select,
+  Shell, useIdentity, PageTitle, Section, Table, Empty, Btn, Input, Select, MultiSelect,
 } from '@/components/ui/shell';
 
 /** Pregnancies and the queue, with recording a mating right on the page. */
@@ -98,26 +98,13 @@ export function BreedingPage() {
             </Select>
           </label>
           <div className="text-sm">
-            <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Bucks — tick up to three</span>
-            <div className="flex flex-wrap gap-2 rounded-lg border border-farm-rule bg-white px-3 py-2">
-              {bucks.length === 0 && <span className="text-farm-muted">No bucks in the herd</span>}
-              {bucks.map((b) => {
-                const on = mating.buck_ids.includes(b.id);
-                const full = !on && mating.buck_ids.length >= 3;
-                return (
-                  <label key={b.id} className={`flex items-center gap-1.5 ${full ? 'opacity-40' : ''}`}>
-                    <input type="checkbox" checked={on} disabled={full}
-                      onChange={(e) => setMating({
-                        ...mating,
-                        buck_ids: e.target.checked
-                          ? [...mating.buck_ids, b.id]
-                          : mating.buck_ids.filter((x) => x !== b.id),
-                      })} />
-                    {b.name ?? b.tag}
-                  </label>
-                );
-              })}
-            </div>
+            <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Bucks — up to three</span>
+            <MultiSelect
+              options={bucks.map((b) => ({ id: b.id, label: b.name ?? b.tag }))}
+              value={mating.buck_ids}
+              onChange={(buck_ids) => setMating({ ...mating, buck_ids })}
+              placeholder="Not recorded"
+              max={3} />
             {mating.buck_ids.length >= 2 && (
               <span className="mt-1 block text-xs font-semibold text-farm-accent">
                 {mating.buck_ids.length} bucks — she will be recorded as pregnant straight away, no palpation.
