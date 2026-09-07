@@ -790,18 +790,54 @@ farmRoutes.post('/matings', write, canWriteAnimals, async (c) => {
   const db = c.get('db');
   const session = c.get('session');
 
+  // One buck, or two or three in turn. `buck_ids` is the list; `buck_id` is
+  // the older single-buck shape and still works.
+  const buckIds = [...new Set(
+    (Array.isArray(b.buck_ids) ? b.buck_ids : [b.buck_id]).filter(Boolean))];
+  if (buckIds.length > 3) {
+    throw new HttpError(400, 'Up to three bucks in one mating', { field: 'buck_ids' });
+  }
+  // Served by more than one buck: the farm takes the pregnancy as read, and
+  // nobody can say which buck sired the litter (0044).
+  const confirmed = buckIds.length >= 2;
+
   const row = await db(async (client) => {
+    if (buckIds.length) {
+      const { rows: found } = await client.query(
+        `SELECT id, sex, status FROM rabbit WHERE id = ANY($1::uuid[])`, [buckIds]);
+      if (found.length !== buckIds.length) {
+        throw new HttpError(400, 'One of those bucks is not on this farm', { field: 'buck_ids' });
+      }
+      const notBuck = found.find((r) => r.sex !== 'buck');
+      if (notBuck) throw new HttpError(400, 'Only bucks serve a doe', { field: 'buck_ids' });
+    }
+
     const { rows } = await client.query(`
-      INSERT INTO mating (id, farm_id, doe_id, buck_id, mated_at, service_count,
-                          service_observed, receptivity, notes, recorded_by)
+      INSERT INTO mating (id, farm_id, doe_id, buck_id, other_buck_ids, paternity_certain,
+                          mated_at, service_count, service_observed, receptivity, notes,
+                          recorded_by)
       VALUES (COALESCE($9::uuid, gen_random_uuid()),
-              current_farm_id(), $1, $2, COALESCE($3::timestamptz, now()),
-              COALESCE($4,1), COALESCE($5,true),
+              current_farm_id(), $1, $2, $10::uuid[], $11,
+              COALESCE($3::timestamptz, now()),
+              COALESCE($4, GREATEST(1, cardinality($10::uuid[]))), COALESCE($5,true),
               COALESCE($6,'unknown')::receptivity_t, $7, $8)
-      RETURNING id, doe_id, buck_id, mated_at`,
-      [b.doe_id, b.buck_id ?? null, b.mated_at ?? null, b.service_count ?? null,
+      RETURNING id, doe_id, buck_id, other_buck_ids, paternity_certain, mated_at`,
+      [b.doe_id, buckIds[0] ?? null, b.mated_at ?? null, b.service_count ?? null,
        b.service_observed ?? null, b.receptivity ?? null, b.notes ?? null,
-       session.employeeId, b.id ?? null]);
+       session.employeeId, b.id ?? null, buckIds.slice(1), !confirmed]);
+
+    if (confirmed) {
+      // The same rows a positive palpation writes, on the day of mating. The
+      // reproductive-state view reads the check and calls her confirmed; the
+      // task generator sees a check and raises no palpation.
+      await client.query(`
+        INSERT INTO pregnancy_check (mating_id, checked_on, method, result, checked_by, notes)
+        VALUES ($1, ($2::timestamptz)::date, 'observation', 'positive', $3,
+                'Served by ' || $4 || ' bucks — taken as pregnant at mating.')`,
+        [rows[0].id, rows[0].mated_at, session.employeeId, buckIds.length]);
+      await client.query(
+        `UPDATE mating SET outcome = 'pregnant' WHERE id = $1`, [rows[0].id]);
+    }
 
     // Give the answer back immediately — the farmer wants the dates, not an id.
     const { rows: sched } = await client.query(`
@@ -811,7 +847,7 @@ farmRoutes.post('/matings', write, canWriteAnimals, async (c) => {
              (m.mated_at)::date + fs.gestation_window_end_day AS watch_until
       FROM mating m CROSS JOIN farm_settings fs WHERE m.id = $1`, [rows[0].id]);
 
-    return { ...rows[0], schedule: sched[0] };
+    return { ...rows[0], bucks: buckIds, confirmed, schedule: sched[0] };
   });
   return c.json({ mating: row }, 201);
 });
@@ -1052,7 +1088,9 @@ farmRoutes.post('/litters/:id/kits', write, canWriteAnimals, async (c) => {
       SELECT l.id, l.doe_id, l.kindled_on, l.mating_id,
              k.expected, k.recorded, k.not_yet_recorded,
              d.name AS doe_name, d.tag AS doe_tag,
-             m.buck_id
+             -- Two or three bucks in the cycle: nobody knows which one, so
+             -- the kits get no sire rather than a guess (0044).
+             CASE WHEN m.paternity_certain THEN m.buck_id END AS buck_id
       FROM litter l
       JOIN v_litter_kits k ON k.litter_id = l.id
       JOIN rabbit d        ON d.id = l.doe_id

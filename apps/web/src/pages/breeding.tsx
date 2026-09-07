@@ -41,14 +41,15 @@ function AgeUnknown() {
 }
 interface Animal { id: string; name: string | null; tag: string; sex: string }
 interface Schedule { palpate_on: string; nest_box_on: string; expected_kindling_on: string }
+interface MatingResult { schedule: Schedule; confirmed: boolean; bucks: string[] }
 
 export function BreedingPage() {
   const id = useIdentity();
   const [pregnant, setPregnant] = useState<PregnantDoe[] | null>(null);
   const [ready, setReady] = useState<ReadyDoe[] | null>(null);
   const [animals, setAnimals] = useState<Animal[]>([]);
-  const [mating, setMating] = useState({ doe_id: '', buck_id: '', mated_at: todayLocal() });
-  const [schedule, setSchedule] = useState<Schedule | null>(null);
+  const [mating, setMating] = useState({ doe_id: '', buck_ids: [] as string[], mated_at: todayLocal() });
+  const [schedule, setSchedule] = useState<MatingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -62,16 +63,16 @@ export function BreedingPage() {
   const recordMating = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setError(null); setSchedule(null);
     try {
-      const res = await apiPost<{ mating: { schedule: Schedule } }>('/matings', {
+      const res = await apiPost<{ mating: MatingResult }>('/matings', {
         doe_id: mating.doe_id,
-        buck_id: mating.buck_id || undefined,
+        buck_ids: mating.buck_ids,
         // Send midday, not midnight. The column is a timestamptz and a bare
         // date is read as 00:00 UTC, which lands on the previous day for any
         // farm east of Greenwich — and every gestation date is counted off it.
         mated_at: mating.mated_at ? `${mating.mated_at}T12:00:00` : undefined,
       });
-      setSchedule(res.mating.schedule);
-      setMating({ doe_id: '', buck_id: '', mated_at: todayLocal() });
+      setSchedule(res.mating);
+      setMating({ doe_id: '', buck_ids: [], mated_at: todayLocal() });
       await load();
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
@@ -96,14 +97,33 @@ export function BreedingPage() {
               {does.map((d) => <option key={d.id} value={d.id}>{d.name ?? d.tag}</option>)}
             </Select>
           </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Buck (optional)</span>
-            <Select value={mating.buck_id}
-              onChange={(e) => setMating({ ...mating, buck_id: e.target.value })}>
-              <option value="">Not recorded</option>
-              {bucks.map((b) => <option key={b.id} value={b.id}>{b.name ?? b.tag}</option>)}
-            </Select>
-          </label>
+          <div className="text-sm">
+            <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Bucks — tick up to three</span>
+            <div className="flex flex-wrap gap-2 rounded-lg border border-farm-rule bg-white px-3 py-2">
+              {bucks.length === 0 && <span className="text-farm-muted">No bucks in the herd</span>}
+              {bucks.map((b) => {
+                const on = mating.buck_ids.includes(b.id);
+                const full = !on && mating.buck_ids.length >= 3;
+                return (
+                  <label key={b.id} className={`flex items-center gap-1.5 ${full ? 'opacity-40' : ''}`}>
+                    <input type="checkbox" checked={on} disabled={full}
+                      onChange={(e) => setMating({
+                        ...mating,
+                        buck_ids: e.target.checked
+                          ? [...mating.buck_ids, b.id]
+                          : mating.buck_ids.filter((x) => x !== b.id),
+                      })} />
+                    {b.name ?? b.tag}
+                  </label>
+                );
+              })}
+            </div>
+            {mating.buck_ids.length >= 2 && (
+              <span className="mt-1 block text-xs font-semibold text-farm-accent">
+                {mating.buck_ids.length} bucks — she will be recorded as pregnant straight away, no palpation.
+              </span>
+            )}
+          </div>
           <label className="text-sm">
             <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Date of mating</span>
             <Input type="date" required value={mating.mated_at} max={todayLocal()}
@@ -112,8 +132,11 @@ export function BreedingPage() {
           <Btn type="submit" disabled={busy || !mating.doe_id}>{busy ? 'Saving…' : 'Record mating'}</Btn>
           {schedule && (
             <p className="w-full text-sm text-farm-accent">
-              Recorded. Palpate <b>{schedule.palpate_on}</b> · nest box in <b>{schedule.nest_box_on}</b> ·
-              kindling expected <b>{schedule.expected_kindling_on}</b> — all on Today when due.
+              {schedule.confirmed
+                ? <>Recorded and <b>confirmed pregnant</b> — served by {schedule.bucks.length} bucks, so no palpation. </>
+                : <>Recorded. Palpate <b>{schedule.schedule.palpate_on}</b> · </>}
+              nest box in <b>{schedule.schedule.nest_box_on}</b> ·
+              kindling expected <b>{schedule.schedule.expected_kindling_on}</b> — all on Today when due.
             </p>
           )}
         </form>

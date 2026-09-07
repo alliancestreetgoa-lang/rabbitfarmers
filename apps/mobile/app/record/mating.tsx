@@ -14,10 +14,14 @@ export default function RecordMating() {
   const { client, outbox, refreshOutbox, readOnly, session } = useApp();
 
   const [doeId, setDoeId] = useState<string | undefined>(doeParam);
-  const [buckId, setBuckId] = useState<string | undefined>();
+  // Up to three. One is the usual; two or three means the farm takes the
+  // pregnancy as read and no palpation task is raised.
+  const [buckIds, setBuckIds] = useState<string[]>([]);
+  const toggleBuck = (id: string) => setBuckIds((cur) =>
+    cur.includes(id) ? cur.filter((x) => x !== id) : cur.length >= 3 ? cur : [...cur, id]);
   const [matedOn, setMatedOn] = useState(() => isoDay(new Date()));
   const [bucks, setBucks] = useState<BuckSuggestion[]>([]);
-  const [saved, setSaved] = useState<{ sent: boolean } | null>(null);
+  const [saved, setSaved] = useState<{ sent: boolean; confirmed: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +43,7 @@ export default function RecordMating() {
     try {
       const r = await outbox.enqueue('mating', {
         doe_id: doeId,
-        buck_id: buckId,
+        buck_ids: buckIds,
         // Midday on the chosen day, not midnight. mated_at is a timestamptz and
         // every date the app quotes afterwards — palpate, nest box, kindling —
         // is counted off it, so a midnight value read in another zone shifts
@@ -47,7 +51,7 @@ export default function RecordMating() {
         mated_at: `${matedOn}T12:00:00`,
       });
       await refreshOutbox();
-      setSaved({ sent: r.sent });
+      setSaved({ sent: r.sent, confirmed: buckIds.length >= 2 });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -61,9 +65,11 @@ export default function RecordMating() {
         <ScrollView contentContainerStyle={{ padding: space.lg }}>
           <H1>Saved</H1>
           <Muted>
-            {saved.sent
-              ? 'Recorded. The palpation and nest box tasks are on their way.'
-              : 'Saved on this phone. It will send itself when you have signal.'}
+            {!saved.sent
+              ? 'Saved on this phone. It will send itself when you have signal.'
+              : saved.confirmed
+                ? 'Recorded and confirmed pregnant — served by more than one buck, so no palpation. The nest box task is on its way.'
+                : 'Recorded. The palpation and nest box tasks are on their way.'}
           </Muted>
           <View style={{ height: space.lg }} />
           <Button title="Done" onPress={() => router.replace('/(app)/breeding')} testID="done" />
@@ -88,7 +94,7 @@ export default function RecordMating() {
             key={d.id}
             testID={`doe-${d.id}`}
             style={[s.pick, doeId === d.id && s.pickOn]}
-            onPress={() => { setDoeId(d.id); setBuckId(undefined); }}
+            onPress={() => { setDoeId(d.id); setBuckIds([]); }}
           >
             <Text style={[s.pickText, doeId === d.id && s.pickTextOn]}>{d.name ?? d.tag}</Text>
           </Pressable>
@@ -96,20 +102,24 @@ export default function RecordMating() {
 
         {!!doeId && (
           <>
-            <Text style={s.label}>WHICH BUCK</Text>
+            <Text style={s.label}>WHICH BUCKS — TICK UP TO THREE</Text>
             {bucks.length === 0 && <Muted>No bucks available.</Muted>}
             {bucks.map((b) => {
-              const blocked = b.blocked_related || b.over_quota;
+              const on = buckIds.includes(b.buck_id);
+              const blocked = b.blocked_related || b.over_quota || (!on && buckIds.length >= 3);
               return (
                 <Pressable
                   key={b.buck_id}
                   testID={`buck-${b.buck_id}`}
                   disabled={blocked}
-                  style={[s.pick, buckId === b.buck_id && s.pickOn, blocked && s.pickOff]}
-                  onPress={() => setBuckId(b.buck_id)}
+                  style={[s.pick, on && s.pickOn, blocked && s.pickOff]}
+                  onPress={() => toggleBuck(b.buck_id)}
                 >
+                  <View style={[s.tick, on && s.tickOn]}>
+                    {on && <Text style={s.tickMark}>✓</Text>}
+                  </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[s.pickText, buckId === b.buck_id && s.pickTextOn]}>
+                    <Text style={[s.pickText, on && s.pickTextOn]}>
                       {b.name ?? b.tag}
                     </Text>
                     <Text style={s.pickMeta}>
@@ -125,6 +135,11 @@ export default function RecordMating() {
                 </Pressable>
               );
             })}
+            {buckIds.length >= 2 && (
+              <Muted>
+                {buckIds.length} bucks — she will be recorded as pregnant straight away, no palpation.
+              </Muted>
+            )}
           </>
         )}
 
@@ -169,4 +184,10 @@ const s = StyleSheet.create({
   pickText: { ...t.body, color: colors.ink, fontWeight: '600' },
   pickTextOn: { color: colors.accent },
   pickMeta: { ...t.small, color: colors.muted, marginTop: 2 },
+  tick: {
+    width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: colors.rule,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface,
+  },
+  tickOn: { borderColor: colors.accent, backgroundColor: colors.accent },
+  tickMark: { color: colors.white, fontWeight: '700', fontSize: 16, lineHeight: 18 },
 });

@@ -467,6 +467,7 @@ These are the cases that break naïve implementations. Decide each one now.
 | **Fostering** — kits moved to another doe | `litter.fostered_in/out` counts; weaning credit follows the *birth* doe for genetics, the *rearing* doe for milk performance. Report both |
 | **Doe kindles on day 29** with no box placed | Allow kindling records outside the window; flag as a welfare miss in reports |
 | **Backdated entry** — staff records Tuesday's mating on Friday | All event dates are user-editable with an audit trail. Never assume "now" |
+| **Two or three bucks in one mating** (the farm's practice) | One mating with `buck_id` + `other_buck_ids`, `paternity_certain = false`; a positive `pregnancy_check` (method `observation`) is written at once, so she is confirmed and no palpation task is raised. Kits get no sire |
 | **Two matings in one cycle** (different bucks, 2 days apart) | Allow; mark paternity `uncertain`; exclude from buck conception statistics |
 | **Doe dies while pregnant** | Close the mating as `terminated`; remove from pregnant count immediately |
 | **Litter fully lost before weaning** | `weaned_count = 0`; doe returns to queue after abortion rest period |

@@ -4,6 +4,7 @@
  */
 import { test, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { runScheduler } from '../src/scheduler.js';
 import { api, signupFarm, cleanup, closePools, adminQuery } from './helpers.js';
 
 after(async () => { await cleanup(); await closePools(); });
@@ -51,6 +52,54 @@ describe('breeding cycle', () => {
     assert.equal(s.nest_box_on, plus(28));
     assert.equal(s.expected_kindling_on, plus(31));
     assert.equal(s.watch_until, plus(34), 'kindling is a window, not a date');
+  });
+
+  test('served by two or three bucks, she is confirmed pregnant at once', async () => {
+    const f = await farmWithStock();
+    const buck2 = (await api('POST', '/animals', {
+      token: f.token, body: { name: 'Bhim', sex: 'buck', role: 'breeder', date_of_birth: dateAgo(400) },
+    })).body.animal.id;
+
+    const res = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: f.doe, buck_ids: [f.buck, buck2] },
+    });
+    assert.equal(res.status, 201, res.text);
+    assert.equal(res.body.mating.confirmed, true);
+    assert.equal(res.body.mating.paternity_certain, false, 'nobody knows which buck');
+    assert.deepEqual(res.body.mating.other_buck_ids, [buck2]);
+
+    const preg = await api('GET', '/pregnant', { token: f.token });
+    const her = preg.body.does.find((d) => d.rabbit_id === f.doe);
+    assert.ok(her, 'she is in the pregnant list');
+    assert.equal(her.confidence, 'confirmed', 'no waiting for day 12');
+
+    // And nobody is asked to palpate her.
+    await runScheduler({ triggeredBy: 'test' });
+    const { rows } = await adminQuery(
+      `SELECT kind FROM task WHERE farm_id = $1 AND rabbit_id = $2 AND kind = 'palpate'`,
+      [f.farm.id, f.doe]);
+    assert.equal(rows.length, 0, 'a confirmed pregnancy needs no palpation task');
+  });
+
+  test('one buck is a mating like any other; four is too many; a doe cannot serve', async () => {
+    const f = await farmWithStock();
+    const one = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: f.doe, buck_ids: [f.buck] },
+    });
+    assert.equal(one.status, 201, one.text);
+    assert.equal(one.body.mating.confirmed, false);
+    assert.equal(one.body.mating.paternity_certain, true);
+
+    const four = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: f.doe2, buck_ids: [f.buck, f.buck, f.doe, f.doe2, 'x'] },
+    });
+    assert.equal(four.status, 400, four.text);
+
+    const notABuck = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: f.doe2, buck_ids: [f.buck, f.doe] },
+    });
+    assert.equal(notABuck.status, 400, notABuck.text);
+    assert.match(notABuck.body.error, /Only bucks/);
   });
 
   test('counts presumed and confirmed pregnancies separately', async () => {

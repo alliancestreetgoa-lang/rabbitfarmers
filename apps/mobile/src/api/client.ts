@@ -466,11 +466,15 @@ export class ApiClient {
   }
 
   recordMating(input: {
-    id?: string; doe_id: string; buck_id?: string; mated_at?: string;
+    id?: string; doe_id: string; buck_id?: string;
+    /** Two or three bucks in turn: she is recorded as pregnant straight away. */
+    buck_ids?: string[]; mated_at?: string;
     service_count?: number; receptivity?: string; notes?: string;
   }) {
-    return this.request<{ mating: { id: string; mated_at: string; schedule: MatingSchedule } }>(
-      'POST', '/matings', input);
+    return this.request<{ mating: {
+      id: string; mated_at: string; schedule: MatingSchedule;
+      bucks: string[]; confirmed: boolean;
+    } }>('POST', '/matings', input);
   }
 
   recordPregnancyCheck(input: {
