@@ -105,11 +105,6 @@ export function BreedingPage() {
               onChange={(buck_ids) => setMating({ ...mating, buck_ids })}
               placeholder="Not recorded"
               max={3} />
-            {mating.buck_ids.length >= 2 && (
-              <span className="mt-1 block text-xs font-semibold text-farm-accent">
-                {mating.buck_ids.length} bucks — she will be recorded as pregnant straight away, no palpation.
-              </span>
-            )}
           </div>
           <label className="text-sm">
             <span className="mb-1 block text-xs font-bold text-farm-muted uppercase">Date of mating</span>
@@ -117,6 +112,11 @@ export function BreedingPage() {
               onChange={(e) => setMating({ ...mating, mated_at: e.target.value })} />
           </label>
           <Btn type="submit" disabled={busy || !mating.doe_id}>{busy ? 'Saving…' : 'Record mating'}</Btn>
+          {mating.buck_ids.length >= 2 && (
+            <p className="w-full text-xs font-semibold text-farm-accent">
+              {mating.buck_ids.length} bucks — she will be recorded as pregnant straight away, no palpation.
+            </p>
+          )}
           {schedule && (
             <p className="w-full text-sm text-farm-accent">
               {schedule.confirmed
