@@ -10,6 +10,7 @@ import { HealthPage } from '@/pages/health';
 import { TeamPage, TeamPersonPage } from '@/pages/team';
 import { AttendancePage } from '@/pages/attendance';
 import { SettingsPage } from '@/pages/settings';
+import { PrivacyPage } from '@/pages/privacy';
 import { SickPage, RabbitHealthPage } from '@/pages/sick';
 
 export default function App() {
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/dashboard/attendance" element={<AttendancePage />} />
         <Route path="/dashboard/settings" element={<SettingsPage />} />
         <Route path="/signup" element={<SignUpPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
