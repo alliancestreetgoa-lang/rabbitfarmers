@@ -879,3 +879,81 @@ describe('rebreeding after delivery', () => {
     assert.equal(notes[0].kind, 'task_due');
   });
 });
+
+/**
+ * One dose a day, in order. The round's dates are the calendar's, but a
+ * rabbit's second dose is not asked for until the day after its first was
+ * given, and its third the day after that — "the second dose should be on
+ * the next day, and the third on the third day". A late start slides the
+ * course rather than stacking it.
+ */
+describe('the round, one dose a day', () => {
+  async function farmWithBuck() {
+    const f = await farmWithDoe();
+    await adminQuery(
+      `UPDATE farm_settings SET quiet_hours_enabled = false WHERE farm_id = $1`, [f.farm.id]);
+    return f;
+  }
+  /** A three-dose month-anchored course whose first dose fell due yesterday. */
+  async function courseStartedYesterday(f) {
+    const { rows } = await adminQuery(
+      `INSERT INTO medication_protocol
+         (farm_id, name, anchor, start_offset_days, doses, interval_days, dose_note,
+          applies_to, notify, route, dose)
+       VALUES ($1, 'Test course', 'month',
+               farm_today($1) - date_trunc('month', farm_today($1))::date - 1,
+               3, 1, 'one a day', 'any', true, 'oral', '1 ml')
+       RETURNING id`, [f.farm.id]);
+    return rows[0].id;
+  }
+  const listed = async (f, protocolId, rabbitId) =>
+    (await api('GET', '/medication', { token: f.token })).body.due
+      .filter((d) => d.protocol_id === protocolId && d.rabbit_id === rabbitId)
+      .map((d) => [d.dose_number, Number(d.days_until_due)]);
+
+  test('only the next dose is asked for, never two of the same course at once', async () => {
+    const f = await farmWithBuck();
+    const p = await courseStartedYesterday(f);
+    // Dose 1 fell due yesterday and dose 2 today, but nobody has given dose 1.
+    assert.deepEqual(await listed(f, p, f.buck), [[1, -1]],
+      'dose 1, overdue; dose 2 waits for it even though its date has come');
+  });
+
+  test('given today, the next dose is for tomorrow — and tomorrow it is "today", not overdue', async () => {
+    const f = await farmWithBuck();
+    const p = await courseStartedYesterday(f);
+    const given = await api('POST', '/medication', {
+      token: f.token, body: { rabbit_id: f.buck, protocol_id: p, dose_number: 1 },
+    });
+    assert.equal(given.status, 201, given.text);
+    assert.deepEqual(await listed(f, p, f.buck), [],
+      'dose 2 is not asked for on the day dose 1 was given');
+
+    // Turn the clock: dose 1 was given yesterday.
+    await adminQuery(
+      `UPDATE health_event SET occurred_on = occurred_on - 1
+        WHERE protocol_id = $1 AND rabbit_id = $2 AND dose_number = 1`, [p, f.buck]);
+    assert.deepEqual(await listed(f, p, f.buck), [[2, 0]],
+      'dose 2 is due today — its date slid with the late start, so it is not red');
+
+    // And the daily list says the same.
+    const daily = await api('GET', '/daily', { token: f.token });
+    const mine = daily.body.items.filter((i) => i.source === 'medication' && i.rabbit_id === f.buck
+      && /Test course/.test(i.title));
+    assert.deepEqual(mine.map((i) => [i.title.replace(/ for .*$/, ''), i.urgency]),
+      [['Test course — dose 2 of 3', 'high']]);
+  });
+
+  test('a first dose nobody ever gave lapses, and the course moves on', async () => {
+    const f = await farmWithBuck();
+    const p = await courseStartedYesterday(f);
+    // Push the whole course back four days: dose 1 is past its grace, dose 2 and 3 too.
+    await adminQuery(
+      `UPDATE medication_protocol SET start_offset_days = start_offset_days - 4 WHERE id = $1`, [p]);
+    const { rows } = await adminQuery(
+      `SELECT dose_number, lapsed FROM v_medication_due
+        WHERE protocol_id = $1 AND rabbit_id = $2 ORDER BY dose_number`, [p, f.buck]);
+    assert.ok(rows.length >= 1 && rows[0].dose_number === 1 && rows[0].lapsed,
+      'dose 1 is a miss, and a miss is worth knowing about');
+  });
+});
