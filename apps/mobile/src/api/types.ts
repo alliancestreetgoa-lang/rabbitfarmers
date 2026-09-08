@@ -309,7 +309,9 @@ export interface RoutinePlan {
   standing: string[];
   steps: {
     step: number; day: number; medicine: string; dose: string; title: string; detail: string;
-    due_on: string; task_id: string | null; task_status: string | null; completed_at: string | null;
+    due_on: string; per_rabbit: boolean;
+    task_id: string | null; task_status: string | null; completed_at: string | null;
+    to_give: number; held: number; given: number;
   }[];
 }
 

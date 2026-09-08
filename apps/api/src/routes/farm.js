@@ -1542,18 +1542,39 @@ farmRoutes.post('/tasks/:id/done', write, canWriteHealth, async (c) => {
  */
 farmRoutes.get('/routine', canRead, async (c) => {
   const data = await c.get('db')(async (client) => {
+    // The chart's steps. A whole-farm step carries its task; a per-rabbit
+    // step carries the herd's count for that morning — to give, held by the
+    // chart's rules, given — from the same schedule Today and the pushes read.
     const { rows: steps } = await client.query(`
-      SELECT rc.step, rc.day, rc.medicine, rc.dose, rc.title, rc.detail,
+      SELECT rc.step, rc.day, rc.medicine, rc.dose, rc.title, rc.detail, rc.per_rabbit,
              m.month_start + (rc.day - 1)                       AS due_on,
              t.id                                                AS task_id,
              t.status                                            AS task_status,
-             t.completed_at
+             t.completed_at,
+             COALESCE(d.to_give, 0)::int                         AS to_give,
+             COALESCE(d.held, 0)::int                            AS held,
+             COALESCE(d.given, 0)::int                           AS given
       FROM routine_catalog rc
       CROSS JOIN (SELECT date_trunc('month', farm_today(current_farm_id()))::date
                     AS month_start) m
       LEFT JOIN task t
              ON t.generated_key = 'routine:' || current_farm_id() || ':'
                                 || to_char(m.month_start, 'YYYY-MM') || ':' || rc.step
+      LEFT JOIN LATERAL (
+        SELECT count(*) FILTER (WHERE h.id IS NULL AND s.hold_reason IS NULL)     AS to_give,
+               count(*) FILTER (WHERE h.id IS NULL AND s.hold_reason IS NOT NULL) AS held,
+               count(*) FILTER (WHERE h.id IS NOT NULL)                           AS given
+        FROM v_medication_schedule s
+        LEFT JOIN health_event h
+               ON h.protocol_id = s.protocol_id AND h.rabbit_id = s.rabbit_id
+              AND h.dose_number = s.dose_number
+        WHERE rc.per_rabbit
+          AND s.farm_id = current_farm_id()
+          AND s.anchor = 'month'
+          AND s.protocol_name = 'Monthly round — '
+                                || regexp_replace(rc.medicine, '\\s*\\(.*\\)\\s*$', '')
+          AND s.due_on = m.month_start + (rc.day - 1)
+      ) d ON true
       WHERE rc.is_active
       ORDER BY rc.day, rc.step`);
     const { rows: today } = await client.query(
@@ -1561,11 +1582,17 @@ farmRoutes.get('/routine', canRead, async (c) => {
     return { steps, today: today[0].today };
   });
   const month = String(data.today).slice(0, 7);
+  // Done and total count what can be done: every rabbit's dose that is not
+  // held, plus each whole-farm job.
+  const done = data.steps.reduce((n, s) =>
+    n + (s.per_rabbit ? s.given : (s.task_status === 'done' ? 1 : 0)), 0);
+  const total = data.steps.reduce((n, s) =>
+    n + (s.per_rabbit ? s.given + s.to_give : 1), 0);
   return c.json({
     month,
     today: data.today,
-    done: data.steps.filter((s) => s.task_status === 'done').length,
-    total: data.steps.length,
+    done,
+    total,
     steps: data.steps,
     standing: [
       'Every day: Agrimin Forte, 1 g per adult breeder, in the morning feed.',
@@ -1630,6 +1657,59 @@ farmRoutes.get('/settings', canRead, async (c) => {
   const db = c.get('db');
   const row = await db(async (client) => {
     const { rows } = await client.query('SELECT * FROM farm_settings');
+    return rows[0];
+  });
+  return c.json({ settings: row });
+});
+
+/** PATCH /settings — every breeding constant is the farmer's to change. */
+farmRoutes.patch('/settings', write, canWriteSettings, async (c) => {
+  const b = await c.req.json();
+  const allowed = new Set([
+    'gestation_expected_days', 'gestation_window_start_day', 'gestation_window_end_day',
+    'gestation_overdue_day', 'first_check_day', 'recheck_day', 'rhythm',
+    'rebreed_anchor', 'rebreed_after_weaning_days', 'rebreed_after_kindling_days',
+    'wean_at_days', 'after_failed_service_days', 'after_pseudopregnancy_days',
+    'buck_max_services_per_day', 'buck_max_services_per_week',
+    'quiet_hours_enabled', 'quiet_hours_start', 'quiet_hours_end',
+  ]);
+  const keys = Object.keys(b).filter((k) => allowed.has(k));
+
+  /*
+   * Timezone lives on `farm`, not `farm_settings`, and until now nothing
+   * exposed it at all. That mattered more than it looks: every day count in the
+   * breeding engine is computed in it, and a farm that got it wrong at signup
+   * had no way to correct it from anywhere in the product.
+   */
+  const timezone = typeof b.timezone === 'string' ? b.timezone.trim() : null;
+  if (timezone !== null) {
+    if (!isKnownTimezone(timezone)) {
+      throw new HttpError(400, 'Use a timezone name like Asia/Kolkata',
+        { field: 'timezone' });
+    }
+  } else if (!keys.length) {
+    throw new HttpError(400, 'Nothing to update');
+  }
+
+  const db = c.get('db');
+  const row = await db(async (client) => {
+    if (timezone !== null) {
+      await client.query(
+        'UPDATE farm SET timezone = $1 WHERE id = current_farm_id()', [timezone]);
+    }
+    if (!keys.length) {
+      const { rows } = await client.query(`
+        SELECT fs.*, f.timezone FROM farm_settings fs
+        JOIN farm f ON f.id = fs.farm_id WHERE fs.farm_id = current_farm_id()`);
+      return rows[0];
+    }
+    const sets = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+    await client.query(
+      `UPDATE farm_settings SET ${sets} WHERE farm_id = current_farm_id()`,
+      keys.map((k) => b[k]));
+    const { rows } = await client.query(`
+      SELECT fs.*, f.timezone FROM farm_settings fs
+      JOIN farm f ON f.id = fs.farm_id WHERE fs.farm_id = current_farm_id()`);
     return rows[0];
   });
   return c.json({ settings: row });

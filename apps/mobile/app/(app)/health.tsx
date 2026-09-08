@@ -106,9 +106,11 @@ export default function Health() {
         <View style={{ height: space.lg }} />
         <Label>{`THIS MONTH'S ROUTINE${routine.data ? ` · ${routine.data.done} OF ${routine.data.total} DONE` : ''}`}</Label>
         <Muted>
-          Whole farm: Hitech on the 7th, 8th and 9th; Liv 52 and Gutwell on the
-          13th, 14th and 15th; Tetracycline in the water on the 16th. Each day lands
-          on Today and on every phone, and stays red until it is ticked.
+          Hitech on the 7th, 8th and 9th; Liv 52 and Gutwell on the 13th, 14th and
+          15th — one row per rabbit on Today, ticked rabbit by rabbit; a pregnant
+          doe or a kit under 3 months is held back where the chart says so.
+          Tetracycline in the water on the 16th, for the whole farm. A dose not
+          given stays red until it is.
         </Muted>
         {(routine.data?.steps ?? []).map((st) => {
           const done = st.task_status === 'done';
@@ -117,8 +119,14 @@ export default function Health() {
             <Card key={st.step} style={done ? { opacity: 0.55 } : undefined}>
               <Text style={s.title}>Day {st.day} — {st.medicine}</Text>
               <Muted>{st.dose} · {st.detail}</Muted>
+              {st.per_rabbit && (
+                <Text style={s.count}>
+                  {st.to_give} to give · {st.held} held · {st.given} given
+                  <Text style={{ color: colors.muted, fontWeight: '400' }}> — each rabbit is ticked on Today</Text>
+                </Text>
+              )}
               {done && <Muted>✓ done</Muted>}
-              {open && st.task_id && (
+              {!st.per_rabbit && open && st.task_id && (
                 <View style={s.row}>
                   <Button title="Done for the whole farm" loading={busy === st.task_id}
                           onPress={() => routineDone(st.task_id!)} />
@@ -138,6 +146,7 @@ export default function Health() {
 }
 
 const s = StyleSheet.create({
+  count: { ...t.small, color: colors.ink, fontWeight: '700', marginTop: 4 },
   title: { ...t.title, color: colors.ink },
   row: { flexDirection: 'row', gap: space.sm, marginTop: space.md },
   hold: { ...t.body, color: colors.crit, fontWeight: '700', marginTop: space.md },

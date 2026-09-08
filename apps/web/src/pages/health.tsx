@@ -34,7 +34,8 @@ interface CondType {
 interface Routine {
   month: string; done: number; total: number; standing: string[];
   steps: { step: number; day: number; medicine: string; dose: string; detail: string;
-           due_on: string; task_id: string | null; task_status: string | null }[];
+           due_on: string; per_rabbit: boolean; task_id: string | null; task_status: string | null;
+           to_give: number; held: number; given: number }[];
 }
 
 const stepLine = (st: Step) =>
@@ -244,7 +245,7 @@ export function HealthPage() {
 
       <Section title={`This month's routine${routine ? ` · ${routine.done} of ${routine.total} done` : ''}`}>
         <p className="mb-3 text-sm text-farm-muted">
-          Whole farm: Hitech on the 7th, 8th and 9th; Liv 52 and Gutwell on the 13th, 14th and 15th; Tetracycline in the water on the 16th. Each day lands on Today and on every phone, and stays red until it is ticked.
+          Hitech on the 7th, 8th and 9th; Liv 52 and Gutwell on the 13th, 14th and 15th — one row per rabbit on Today, ticked rabbit by rabbit, with a pregnant doe or a kit under 3 months held back where the chart says so. Tetracycline in the water on the 16th, for the whole farm. A dose not given stays red until it is.
         </p>
         <div className="space-y-2">
           {(routine?.steps ?? []).map((st) => (
@@ -253,8 +254,14 @@ export function HealthPage() {
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold">Day {st.day} — {st.medicine}{st.task_status === 'done' ? ' ✓' : ''}</p>
                 <p className="text-xs text-farm-muted">{st.dose} · {st.detail}</p>
+                {st.per_rabbit && (
+                  <p className="mt-1 text-xs font-semibold">
+                    {st.to_give} to give · {st.held} held · {st.given} given
+                    <span className="font-normal text-farm-muted"> — each rabbit is ticked on Today</span>
+                  </p>
+                )}
               </div>
-              {st.task_status === 'open' && st.task_id && (
+              {!st.per_rabbit && st.task_status === 'open' && st.task_id && (
                 <Btn disabled={busy === st.task_id}
                   onClick={() => act(st.task_id!, () => apiPost(`/tasks/${st.task_id}/done`, {}))}>
                   {busy === st.task_id ? 'Saving…' : 'Done — whole farm'}

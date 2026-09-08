@@ -14,9 +14,10 @@ three months, non-adults). Reporting a sickness on a rabbit starts every step of
 its treatment; resolving it cancels what is left. Doses the rules forbid for
 that particular rabbit are shown as a hold, never as "give it". Separately, the
 farm gets a **monthly preventive routine**: from the 7th to the 16th of every
-month the scheduler raises one whole-farm task per routine day, each of which is
-pushed to the phone every morning until it is ticked, and the app shows the
-month's plan with what has been done.
+month, Hitech, Liv 52 and Gutwell are per-rabbit doses on a month anchor (every
+rabbit in the herd, the chart's holds applied to each one, its own row and tick
+on Today, its own push), Tetracycline is one whole-farm task, and the app shows
+the month's plan with the herd's counts.
 
 ## Part 1 — the sickness catalogue
 
@@ -133,15 +134,17 @@ sickness's steps wholesale and presses the catalogue onto every farm, as today.
 ## Part 2 — the monthly routine
 
 From the *Monthly Routine* sheet, re-dated on 2026-09-08 to the rotation as the
-farm actually runs it (migration 0045; 0043 had laid it over days 1–7). Whole
-farm, the 7th to the 16th of every month:
+farm actually runs it (migration 0045; 0043 had laid it over days 1–7) and made
+per-rabbit the same day (0046–0047: "we cannot give Hitech to a pregnant
+female", so one whole-farm task cannot say who to skip). The 7th to the 16th of
+every month:
 
-| Day | Task | Who is left out |
-|---|---|---|
-| 7, 8, 9 | Hitech (oral) 1 ml — morning, empty stomach. De-worming + fungus. | pregnant does, kits under 3 months |
-| 13, 14, 15 | Liv 52 1 ml oral — liver tonic after the Hitech course. | kits under 3 months (in feed is fine) |
-| 13, 14, 15 | Gutwell — a pinch into the mouth, morning, empty stomach. | — |
-| 16 | Tetracycline — 1 g per litre of drinking water. Critical in the rainy season. | — |
+| Day | Task | Shape | Who is held |
+|---|---|---|---|
+| 7, 8, 9 | Hitech (oral) 1 ml — morning, empty stomach. De-worming + fungus. | per rabbit | pregnant does, kits under 3 months |
+| 13, 14, 15 | Liv 52 1 ml oral — liver tonic after the Hitech course. | per rabbit | kits under 3 months (in feed is fine) |
+| 13, 14, 15 | Gutwell — a pinch into the mouth, morning, empty stomach. | per rabbit | — |
+| 16 | Tetracycline — 1 g per litre of drinking water. Critical in the rainy season. | whole farm | — |
 
 Standing, printed on every routine task and on the routine screen, never raised
 as a daily task: *Agrimin Forte 1 g per adult breeder in the morning feed, daily*;
@@ -150,11 +153,21 @@ as a daily task: *Agrimin Forte 1 g per adult breeder in the morning feed, daily
 ### Mechanism
 
 - `task_kind_t` gains `routine` (own migration, enum rule).
-- `generate_routine_tasks()`: for every farm, insert this month's routine tasks
-  whose `due_on ≥ farm_today`, `generated_key = 'routine:' || farm_id || ':' ||
-  yyyy-mm || ':' || step`. A farm that joins on the 10th gets the 13th onward; a
-  farm that joins on the 20th waits for next month. (Until 0045 this was
-  confined to days 1–7.)
+- **Per-rabbit steps** (`routine_catalog.per_rabbit`): `apply_routine_catalog(farm)`
+  presses each such medicine onto the farm as a `medication_protocol` named
+  `Monthly round — <medicine>` on the `month` anchor (0046), `start_offset_days =
+  first day − 1`, one dose per listed day, with the chart's `not_when_pregnant` /
+  `min_age_days` rules. `v_medication_schedule` anchors every rabbit in the herd
+  to the first of the current month, so the existing dose machinery does the
+  rest: one row per rabbit on Today with its own tick, `hold_reason` per rabbit,
+  one `medication_due` push per rabbit per morning (held rabbits are not pushed),
+  red when overdue, lapsed after the grace days. Pressed onto new farms by
+  `seed_new_farm()` and onto every farm by the admin "apply" action.
+- **Whole-farm steps**: `generate_routine_tasks()` inserts this month's tasks
+  for steps with `per_rabbit = false` whose `due_on ≥ farm_today`, `generated_key =
+  'routine:' || farm_id || ':' || yyyy-mm || ':' || step`. A farm that joins on the
+  20th waits for next month. (Until 0045 this was confined to days 1–7; until
+  0047 every step was whole-farm.)
   Priority `high`; `rabbit_id` NULL (the daily list already renders rabbit-less
   tasks).
 - `generate_notifications()` task arm: `routine` tasks notify regardless of
@@ -164,8 +177,10 @@ as a daily task: *Agrimin Forte 1 g per adult breeder in the morning feed, daily
   line plus the standing advice.
 - Each farm's routine tasks are exempt from `assign_tasks_by_section` (no
   section to assign by; they stay with the owner/manager).
-- `GET /routine` returns this month's plan with each step's task status, so the
-  Health screen can show "This month's routine — 3 of 7 done".
+- `GET /routine` returns this month's plan: each whole-farm step with its task
+  status, each per-rabbit step with the herd's counts for that morning
+  (`to_give`, `held`, `given`), so the Health screen can show "This month's
+  routine — 41 of 130 done". The ticks themselves live on Today, per rabbit.
 
 ## Migrations
 

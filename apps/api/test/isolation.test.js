@@ -201,6 +201,7 @@ describe('the roles the API actually connects as', () => {
   // first time somebody adds a parameter.
   const calledDirectly = [
     ['rabbitry_admin', 'apply_condition_catalog'],
+    ['rabbitry_admin', 'apply_routine_catalog'],
     ['rabbitry_app', 'auth_signup'],
     ['rabbitry_app', 'auth_resolve_session'],
     ['rabbitry_app', 'auth_create_session'],

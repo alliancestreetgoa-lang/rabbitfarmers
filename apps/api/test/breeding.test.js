@@ -923,8 +923,10 @@ describe('Ostovet', () => {
     const { rows } = await adminQuery(
       `SELECT name, anchor::text, start_offset_days, doses, withdrawal_days
        FROM medication_protocol
-       -- The breeding courses only; the chart's treatments hang off a sickness.
-       WHERE farm_id = $1 AND condition_type_id IS NULL ORDER BY name`, [f.farm.id]);
+       -- The breeding courses only; the chart's treatments hang off a sickness
+       -- and the monthly round (0047) hangs off the month.
+       WHERE farm_id = $1 AND condition_type_id IS NULL AND anchor <> 'month'
+       ORDER BY name`, [f.farm.id]);
     assert.equal(rows.length, 2,
       'the whole feature was dead on arrival for every farm without this');
     // Calcium Ostovet + Vimeral, mixed together, since the medicine chart (0043).
@@ -958,7 +960,9 @@ describe('Ostovet', () => {
     const doe = await mk({ name: 'Lakshmi', sex: 'doe', date_of_birth: dateAgo(400) });
     await api('POST', '/matings', { token: f.token, body: { doe_id: doe, mated_at: daysAgo(28) } });
 
-    const before = (await api('GET', '/medication', { token: f.token })).body.due;
+    // Her own course, not the monthly round every rabbit is on (0047).
+    const hers = (due) => due.filter((d) => !/^Monthly round/.test(d.protocol_name));
+    const before = hers((await api('GET', '/medication', { token: f.token })).body.due);
     const dose = before.find((d) => d.days_until_due === 0);
     assert.ok(dose, 'one dose should be due today');
 
@@ -969,7 +973,7 @@ describe('Ostovet', () => {
     });
     assert.equal(given.status, 201, given.text);
 
-    const after = (await api('GET', '/medication', { token: f.token })).body.due;
+    const after = hers((await api('GET', '/medication', { token: f.token })).body.due);
     assert.equal(after.length, before.length - 1, 'recording it is what clears it');
     assert.ok(!after.some((d) => d.dose_number === dose.dose_number
       && d.protocol_id === dose.protocol_id));
@@ -1012,7 +1016,8 @@ describe('Ostovet', () => {
       token: f.token, body: { doe_id: doe, kindled_on: dateAgo(60), born_alive: 7 } });
 
     const daily = await api('GET', '/daily', { token: f.token });
-    assert.equal(daily.body.items.filter((i) => i.source === 'medication').length, 0,
+    assert.equal(daily.body.items.filter((i) =>
+      i.source === 'medication' && !/^Monthly round/.test(i.title)).length, 0,
       'a dose that can no longer be recorded must not sit on the list for ever');
 
     // Still visible as outstanding for reporting, marked lapsed.

@@ -128,7 +128,8 @@ describe('the sickness catalogue', () => {
 
     // Dose 1 due today, dose 2 tomorrow.
     const due = await api('GET', '/medication', { token: f.token });
-    const doses = due.body.due.filter((d) => d.rabbit_id === id);
+    const doses = due.body.due.filter((d) =>
+      d.rabbit_id === id && !/^Monthly round/.test(d.protocol_name));
     assert.equal(doses.length, 2, JSON.stringify(due.body.due));
     assert.equal(Number(doses[0].days_until_due), 0, 'first dose is due the day it is reported');
 
@@ -140,7 +141,8 @@ describe('the sickness catalogue', () => {
     assert.equal(stop.status, 200, stop.text);
 
     const after_ = await api('GET', '/medication', { token: f.token });
-    assert.equal(after_.body.due.filter((d) => d.rabbit_id === id).length, 0,
+    assert.equal(after_.body.due.filter((d) =>
+      d.rabbit_id === id && !/^Monthly round/.test(d.protocol_name)).length, 0,
       'a stopped sickness stops its medicine reminders');
   });
 
@@ -164,7 +166,8 @@ describe('the sickness catalogue', () => {
     assert.deepEqual(reported.body.steps.map((s) => s.medicine), ['Genta + Dexa', 'Belamyl']);
 
     const due = await api('GET', '/medication', { token: f.token });
-    const mine = due.body.due.filter((d) => d.rabbit_id === id);
+    const mine = due.body.due.filter((d) =>
+      d.rabbit_id === id && !/^Monthly round/.test(d.protocol_name));
     assert.equal(mine.length, 2, 'one dose of each, both due today');
     assert.deepEqual(mine.map((d) => d.step), [1, 2], 'in the order they are given');
     assert.match(mine[1].dose_note, /one hour after/);
@@ -455,7 +458,8 @@ describe('the medicine chart', () => {
     const f = await signupFarm();
     const { rows } = await adminQuery(
       `SELECT name, anchor, start_offset_days, doses, dose FROM medication_protocol
-        WHERE farm_id = $1 AND condition_type_id IS NULL ORDER BY anchor`, [f.farm.id]);
+        WHERE farm_id = $1 AND condition_type_id IS NULL AND anchor <> 'month'
+        ORDER BY anchor`, [f.farm.id]);
     assert.deepEqual(rows.map((r) => [r.name, r.anchor, r.start_offset_days, r.doses]), [
       ['Calcium Ostovet + Vimeral (pre-delivery)', 'expected_kindling', -5, 5],
       ['Calcium Ostovet + Vimeral (post-delivery)', 'kindling', 1, 5],

@@ -531,37 +531,30 @@ describe('the monthly routine', () => {
       WHERE farm_id = $1 AND generated_key LIKE 'routine:%' ORDER BY due_on, generated_key`,
     [farmId])).rows;
 
-  test('on the 1st, the month is laid out — ten steps from the 7th to the 16th', async () => {
+  test('on the 1st, the whole-farm part of the month is laid out: Tetracycline on the 16th', async () => {
     const f = await farmWithRabbits();
     await inPass(`SELECT generate_routine_tasks('2031-03-01')`);
     const tasks = await routineTasks(f.farm.id);
-    assert.equal(tasks.length, 10, JSON.stringify(tasks.map((t) => t.title)));
-    assert.deepEqual(tasks.map((t) => t.due_on), [
-      '2031-03-07', '2031-03-08', '2031-03-09',
-      '2031-03-13', '2031-03-13', '2031-03-14', '2031-03-14', '2031-03-15', '2031-03-15',
-      '2031-03-16',
-    ]);
-    assert.match(tasks[0].title, /Hitech \(oral\) 1 ml, day 1 of 3/);
-    assert.match(tasks[0].notes, /SKIP pregnant does and kits under 3 months/);
+    assert.equal(tasks.length, 1, JSON.stringify(tasks.map((t) => t.title)));
+    assert.equal(tasks[0].due_on, '2031-03-16');
+    assert.match(tasks[0].title, /Tetracycline/);
     assert.match(tasks[0].notes, /Agrimin Forte/, 'the standing daily advice rides along');
-    assert.match(tasks[3].title + tasks[4].title, /Liv 52/);
-    assert.match(tasks[3].title + tasks[4].title, /Gutwell/);
-    assert.match(tasks[9].title, /Tetracycline/);
+    assert.ok(!tasks.some((t) => /Hitech|Liv 52|Gutwell/.test(t.title)),
+      'the per-rabbit medicines are doses now, not whole-farm tasks');
 
     // A second pass, or the 15-minute scheduler, adds nothing.
     await inPass(`SELECT generate_routine_tasks('2031-03-01')`);
     await inPass(`SELECT generate_routine_tasks('2031-03-08')`);
-    assert.equal((await routineTasks(f.farm.id)).length, 10, 'idempotent');
+    assert.equal((await routineTasks(f.farm.id)).length, 1, 'idempotent');
   });
 
-  test('a farm that joins on the 10th gets the 13th onward, not the Hitech days it missed', async () => {
+  test('a farm that joins on the 10th still gets the 16th; one that joins on the 17th does not', async () => {
     const f = await farmWithRabbits();
     await inPass(`SELECT generate_routine_tasks('2031-03-10')`);
-    const tasks = await routineTasks(f.farm.id);
-    assert.deepEqual(tasks.map((t) => t.due_on), [
-      '2031-03-13', '2031-03-13', '2031-03-14', '2031-03-14', '2031-03-15', '2031-03-15',
-      '2031-03-16',
-    ]);
+    assert.deepEqual((await routineTasks(f.farm.id)).map((t) => t.due_on), ['2031-03-16']);
+    const g = await farmWithRabbits();
+    await inPass(`SELECT generate_routine_tasks('2031-03-17')`);
+    assert.equal((await routineTasks(g.farm.id)).length, 0);
   });
 
   test('after the 16th nothing is raised; next month it starts again', async () => {
@@ -570,8 +563,8 @@ describe('the monthly routine', () => {
     assert.equal((await routineTasks(f.farm.id)).length, 0);
     await inPass(`SELECT generate_routine_tasks('2031-04-01')`);
     const tasks = await routineTasks(f.farm.id);
-    assert.equal(tasks.length, 10);
-    assert.equal(tasks[0].due_on, '2031-04-07');
+    assert.equal(tasks.length, 1);
+    assert.equal(tasks[0].due_on, '2031-04-16');
   });
 
   test('a farm with no rabbits is left alone', async () => {
@@ -589,29 +582,25 @@ describe('the monthly routine', () => {
     await inPass(`SELECT generate_routine_notifications('2031-03-01')`);
     assert.equal((await taskDue()).length, 0, 'nothing is due before the 7th');
 
-    await inPass(`SELECT generate_routine_notifications('2031-03-07')`);
+    await inPass(`SELECT generate_routine_notifications('2031-03-15')`);
+    assert.equal((await taskDue()).length, 0, 'nothing whole-farm is due before the 16th');
+
+    await inPass(`SELECT generate_routine_notifications('2031-03-16')`);
     let notes = await taskDue();
-    assert.equal(notes.length, 1, 'the 7th: the first Hitech round');
-    assert.match(notes[0].title, /Hitech/);
+    assert.equal(notes.length, 1, 'the 16th: Tetracycline in the water');
+    assert.match(notes[0].title, /Tetracycline/);
     assert.match(notes[0].body, /Whole farm, today/);
 
-    await inPass(`SELECT generate_routine_notifications('2031-03-07')`);
+    await inPass(`SELECT generate_routine_notifications('2031-03-16')`);
     assert.equal((await taskDue()).length, 1,
       'the scheduler runs every 15 minutes; once a day is enough');
 
-    // Nobody ticked the 7th. On the 8th it is said again, as overdue, beside
-    // the 8th's own round.
-    await inPass(`SELECT generate_routine_notifications('2031-03-08')`);
+    // Nobody ticked the 16th. On the 17th it is said again, as overdue.
+    await inPass(`SELECT generate_routine_notifications('2031-03-17')`);
     notes = await taskDue();
-    assert.equal(notes.length, 3);
-    assert.ok(notes.some((n) => /Overdue since 2031-03-07/.test(n.body)),
+    assert.equal(notes.length, 2);
+    assert.ok(notes.some((n) => /Overdue since 2031-03-16/.test(n.body)),
       'the missed day is pushed again, and says it was missed');
-
-    // The 13th: Hitech 7, 8, 9 still open, plus the day's Liv 52 and Gutwell.
-    await inPass(`SELECT generate_routine_notifications('2031-03-13')`);
-    notes = await taskDue();
-    assert.equal(notes.length, 8);
-    assert.ok(notes.some((n) => /Liv 52/.test(n.title)) && notes.some((n) => /Gutwell/.test(n.title)));
 
     const { rows } = await adminQuery(
       `SELECT employee_id FROM notification WHERE farm_id = $1 AND kind = 'task_due'`, [f.farm.id]);
@@ -622,8 +611,9 @@ describe('the monthly routine', () => {
   test('a routine day nobody ticked is red on Today the next morning', async () => {
     const f = await farmWithRabbits();
     await inPass(`SELECT generate_routine_tasks('2031-03-01')`);
-    const [hitech] = await routineTasks(f.farm.id);
-    // Move the 7th into the real calendar: due today, then due yesterday.
+    const [tetra] = await routineTasks(f.farm.id);
+    const hitech = tetra; // the whole-farm task; the per-rabbit rows are doses
+    // Move the 16th into the real calendar: due today, then due yesterday.
     await adminQuery(
       `UPDATE task SET due_on = farm_today(farm_id) WHERE id = $1`, [hitech.id]);
     let daily = await api('GET', '/daily', { token: f.token });
@@ -658,10 +648,11 @@ describe('the monthly routine', () => {
     // the plan itself is always there to read.
     const plan = await api('GET', '/routine', { token: f.token });
     assert.equal(plan.status, 200, plan.text);
-    assert.equal(plan.body.total, 10);
+    assert.equal(plan.body.steps.length, 10, 'the chart\'s ten steps, per rabbit or whole farm');
     assert.equal(plan.body.steps[0].day, 7);
     assert.match(plan.body.steps[0].medicine, /Hitech/);
     assert.equal(plan.body.steps[9].day, 16);
+    assert.equal(plan.body.steps[9].per_rabbit, false);
     assert.ok(plan.body.standing.some((s) => /Agrimin/.test(s)));
   });
 
@@ -673,5 +664,134 @@ describe('the monthly routine', () => {
     // whole-farm task with no rabbit on it.
     const tasks = await routineTasks(f.farm.id);
     for (const t of tasks) assert.match(t.title, /Monthly round/);
+  });
+});
+
+/**
+ * The routine, rabbit by rabbit. Hitech, Liv 52 and Gutwell are doses on a
+ * month anchor — every rabbit in the herd gets its own row on Today, its own
+ * tick, its own push, and the chart's holds apply to it alone: a pregnant doe
+ * is not handed Hitech, a kit under 3 months is not handed Hitech or Liv 52.
+ * Tetracycline goes into the water, so it stays one whole-farm task.
+ */
+describe('the monthly routine, rabbit by rabbit', () => {
+  /** A pregnant doe, an open doe, a buck and a month-old kit. */
+  async function farmWithHerd() {
+    const f = await farmWithDoe();
+    await adminQuery(
+      `UPDATE farm_settings SET quiet_hours_enabled = false WHERE farm_id = $1`, [f.farm.id]);
+    const mk = async (body) => (await api('POST', '/animals', { token: f.token, body })).body.animal.id;
+    const open = await mk({ name: 'Meera', sex: 'doe', role: 'breeder', date_of_birth: dateAgo(400) });
+    const kit = await mk({ name: 'Chotu', sex: 'unknown', role: 'grower', date_of_birth: dateAgo(30) });
+    const m = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: f.doe, buck_id: f.buck, mated_at: daysAgo(15) },
+    });
+    await api('POST', '/pregnancy-checks', {
+      token: f.token, body: { mating_id: m.body.mating.id, result: 'positive' },
+    });
+    const { rows } = await adminQuery(
+      `SELECT date_trunc('month', farm_today($1))::date::text AS month_start`, [f.farm.id]);
+    return { ...f, pregnant: f.doe, open, kit, monthStart: rows[0].month_start };
+  }
+  const plusDays = (iso, n) => {
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const schedule = async (farmId, medicine) => (await adminQuery(
+    `SELECT rabbit_id, due_on::text AS due_on, hold_reason
+       FROM v_medication_schedule
+      WHERE farm_id = $1 AND anchor = 'month' AND protocol_name = $2
+      ORDER BY due_on, rabbit_id`, [farmId, medicine])).rows;
+
+  test('every rabbit is on this month\'s Hitech, Liv 52 and Gutwell, with the chart\'s holds', async () => {
+    const f = await farmWithHerd();
+    const hitech = await schedule(f.farm.id, 'Monthly round — Hitech');
+    assert.equal(hitech.length, 12, 'four rabbits, three mornings each');
+    assert.deepEqual([...new Set(hitech.map((r) => r.due_on))],
+      [plusDays(f.monthStart, 6), plusDays(f.monthStart, 7), plusDays(f.monthStart, 8)],
+      'the 7th, 8th and 9th');
+    const holdOn = (rows, id) => rows.find((r) => r.rabbit_id === id)?.hold_reason ?? null;
+    assert.equal(holdOn(hitech, f.pregnant), 'she is pregnant');
+    assert.equal(holdOn(hitech, f.kit), 'under 3 months old');
+    assert.equal(holdOn(hitech, f.open), null);
+    assert.equal(holdOn(hitech, f.buck), null);
+
+    const liv = await schedule(f.farm.id, 'Monthly round — Liv 52');
+    assert.equal(liv.length, 12);
+    assert.deepEqual([...new Set(liv.map((r) => r.due_on))],
+      [plusDays(f.monthStart, 12), plusDays(f.monthStart, 13), plusDays(f.monthStart, 14)],
+      'the 13th, 14th and 15th');
+    assert.equal(holdOn(liv, f.kit), 'under 3 months old', 'not by mouth for a kit');
+    assert.equal(holdOn(liv, f.pregnant), null, 'a liver tonic is fine in pregnancy');
+
+    const gut = await schedule(f.farm.id, 'Monthly round — Gutwell');
+    assert.equal(gut.length, 12);
+    assert.ok(gut.every((r) => r.hold_reason === null), 'Gutwell is safe for every rabbit');
+  });
+
+  test('GET /routine counts the herd for each day of the round', async () => {
+    const f = await farmWithHerd();
+    const plan = await api('GET', '/routine', { token: f.token });
+    assert.equal(plan.status, 200, plan.text);
+    const day7 = plan.body.steps.find((s) => s.day === 7 && /Hitech/.test(s.medicine));
+    assert.ok(day7, JSON.stringify(plan.body.steps));
+    assert.equal(day7.per_rabbit, true);
+    assert.equal(day7.to_give, 2, 'the open doe and the buck');
+    assert.equal(day7.held, 2, 'the pregnant doe and the kit');
+    assert.equal(day7.given, 0);
+    const gut13 = plan.body.steps.find((s) => s.day === 13 && /Gutwell/.test(s.medicine));
+    assert.equal(gut13.to_give, 4);
+    assert.equal(gut13.held, 0);
+    const tetra = plan.body.steps.find((s) => /Tetracycline/.test(s.medicine));
+    assert.equal(tetra.per_rabbit, false, 'in the water: still one job for the whole farm');
+    assert.equal(tetra.day, 16);
+    assert.ok(plan.body.standing.some((s) => /Agrimin/.test(s)));
+  });
+
+  /**
+   * The calendar cannot be injected into a view, so a one-off month-anchored
+   * course due TODAY stands in for the round: same anchor, same holds, same
+   * push, whatever the date the test runs on.
+   */
+  async function roundDueToday(f) {
+    const { rows } = await adminQuery(
+      `INSERT INTO medication_protocol
+         (farm_id, name, anchor, start_offset_days, doses, interval_days, dose_note,
+          applies_to, notify, route, dose, not_when_pregnant, min_age_days)
+       VALUES ($1, 'Test round', 'month', farm_today($1) - date_trunc('month', farm_today($1))::date,
+               1, 1, 'morning, empty stomach', 'any', true, 'oral', '1 ml', true, 90)
+       RETURNING id`, [f.farm.id]);
+    return rows[0].id;
+  }
+
+  test('a routine dose due today is pushed to the phone, one per rabbit, never for a held one', async () => {
+    const f = await farmWithHerd();
+    await roundDueToday(f);
+    await inPass(`SELECT generate_notifications()`);
+    const { rows } = await adminQuery(
+      `SELECT rabbit_id, title FROM notification
+        WHERE farm_id = $1 AND kind = 'medication_due' AND title LIKE 'Test round%'
+        ORDER BY title`, [f.farm.id]);
+    assert.deepEqual(rows.map((r) => r.rabbit_id).sort(), [f.buck, f.open].sort(),
+      'the open doe and the buck are told; the pregnant doe and the kit are held');
+    assert.match(rows[0].title, /dose 1 of 1 for /);
+  });
+
+  test('given is given: the tick takes that rabbit off the list and the count moves', async () => {
+    const f = await farmWithHerd();
+    const protocolId = await roundDueToday(f);
+    const before = await api('GET', '/medication', { token: f.token });
+    const mine = (b) => b.body.due.filter((d) => d.protocol_id === protocolId);
+    assert.equal(mine(before).length, 4, 'all four listed — two of them as holds');
+    assert.equal(mine(before).filter((d) => d.hold_reason).length, 2);
+
+    const given = await api('POST', '/medication', {
+      token: f.token, body: { rabbit_id: f.open, protocol_id: protocolId, dose_number: 1 },
+    });
+    assert.equal(given.status, 201, given.text);
+    const after = await api('GET', '/medication', { token: f.token });
+    assert.equal(mine(after).length, 3);
+    assert.ok(!mine(after).some((d) => d.rabbit_id === f.open));
   });
 });

@@ -116,6 +116,7 @@ const slugify = (name) =>
 async function applyCatalogEverywhere(client) {
   if (client) {
     await client.query('SELECT apply_condition_catalog(id) FROM farm');
+    await client.query('SELECT apply_routine_catalog(id) FROM farm');
     return;
   }
   const own = await adminPool.connect();
@@ -123,6 +124,7 @@ async function applyCatalogEverywhere(client) {
     await own.query('BEGIN');
     await own.query('SELECT id FROM farm ORDER BY id FOR KEY SHARE');
     await own.query('SELECT apply_condition_catalog(id) FROM farm');
+    await own.query('SELECT apply_routine_catalog(id) FROM farm');
     await own.query('COMMIT');
   } catch (err) {
     await own.query('ROLLBACK').catch(() => {});
