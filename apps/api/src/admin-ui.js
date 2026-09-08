@@ -900,7 +900,7 @@ export function renderSicknesses({ rows, routine = [], farmCount, admin }) {
       <button>Add & apply to every farm</button>
     </form>
 
-    <h2>Monthly routine — whole farm, first week of the month</h2>
+    <h2>Monthly routine — whole farm, the 7th to the 16th of the month</h2>
     <p class="muted">Raised on every farm's Today as one task per day, and pushed to every
     phone. From the chart's Monthly Routine sheet; changing it is a migration, not a form.
     Standing every day: Agrimin Forte 1 g per adult breeder in the morning feed; Calcium

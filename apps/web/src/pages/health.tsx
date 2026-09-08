@@ -244,7 +244,7 @@ export function HealthPage() {
 
       <Section title={`This month's routine${routine ? ` · ${routine.done} of ${routine.total} done` : ''}`}>
         <p className="mb-3 text-sm text-farm-muted">
-          Whole farm, first week of every month. Each day lands on Today and on every phone.
+          Whole farm: Hitech on the 7th, 8th and 9th; Liv 52 and Gutwell on the 13th, 14th and 15th; Tetracycline in the water on the 16th. Each day lands on Today and on every phone, and stays red until it is ticked.
         </p>
         <div className="space-y-2">
           {(routine?.steps ?? []).map((st) => (

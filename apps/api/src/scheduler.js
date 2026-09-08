@@ -51,7 +51,7 @@ export async function runScheduler({ triggeredBy = 'manual' } = {}) {
 
     const tasks = await client.query('SELECT generate_due_tasks() AS n');
     // The monthly round: one whole-farm task per routine day, raised in the
-    // first week of the month. Its own function so the ten-job generator
+    // 7th to the 16th of the month. Its own function so the ten-job generator
     // above is never restated just to add an eleventh (see 0043).
     const routine = await client.query('SELECT generate_routine_tasks() AS n');
     // The engine knows which doe needs a nest box; it does not know who walks

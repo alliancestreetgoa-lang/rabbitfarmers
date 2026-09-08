@@ -1533,7 +1533,7 @@ farmRoutes.post('/tasks/:id/done', write, canWriteHealth, async (c) => {
 /**
  * GET /routine — this month's preventive round for the whole farm, step by
  * step, with what has been done. The chart's Monthly Routine sheet, as a
- * screen: the tasks themselves land on Today in the first week, this is the
+ * screen: the tasks themselves land on Today from the 7th to the 16th, this is the
  * plan they come from.
  */
 farmRoutes.get('/routine', canRead, async (c) => {

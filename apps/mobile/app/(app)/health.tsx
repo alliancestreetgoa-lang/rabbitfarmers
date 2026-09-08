@@ -106,8 +106,9 @@ export default function Health() {
         <View style={{ height: space.lg }} />
         <Label>{`THIS MONTH'S ROUTINE${routine.data ? ` · ${routine.data.done} OF ${routine.data.total} DONE` : ''}`}</Label>
         <Muted>
-          Whole farm, first week of every month. Each day lands on Today and on
-          every phone.
+          Whole farm: Hitech on the 7th, 8th and 9th; Liv 52 and Gutwell on the
+          13th, 14th and 15th; Tetracycline in the water on the 16th. Each day lands
+          on Today and on every phone, and stays red until it is ticked.
         </Muted>
         {(routine.data?.steps ?? []).map((st) => {
           const done = st.task_status === 'done';

@@ -13,9 +13,10 @@ dose, a route, a rhythm, and **who must not get it** (pregnant does, kits under
 three months, non-adults). Reporting a sickness on a rabbit starts every step of
 its treatment; resolving it cancels what is left. Doses the rules forbid for
 that particular rabbit are shown as a hold, never as "give it". Separately, the
-farm gets a **monthly preventive routine**: in the first week of every month the
-scheduler raises one whole-farm task per routine day, each of which is pushed to
-the phone, and the app shows the month's plan with what has been done.
+farm gets a **monthly preventive routine**: from the 7th to the 16th of every
+month the scheduler raises one whole-farm task per routine day, each of which is
+pushed to the phone every morning until it is ticked, and the app shows the
+month's plan with what has been done.
 
 ## Part 1 — the sickness catalogue
 
@@ -131,14 +132,16 @@ sickness's steps wholesale and presses the catalogue onto every farm, as today.
 
 ## Part 2 — the monthly routine
 
-From the *Monthly Routine* sheet. Whole farm, first week of every month:
+From the *Monthly Routine* sheet, re-dated on 2026-09-08 to the rotation as the
+farm actually runs it (migration 0045; 0043 had laid it over days 1–7). Whole
+farm, the 7th to the 16th of every month:
 
 | Day | Task | Who is left out |
 |---|---|---|
-| 1, 2, 3 | Hitech (oral) 1 ml — morning, empty stomach. De-worming + fungus. | pregnant does, kits under 3 months |
-| 4, 5, 6 | Liv 52 1 ml oral — liver tonic after the Hitech course. | kits under 3 months (in feed is fine) |
-| 4, 5, 6 | Gutwell — a pinch into the mouth, morning, empty stomach. | — |
-| 7 | Tetracycline — 1 g per litre of drinking water. Critical in the rainy season. | — |
+| 7, 8, 9 | Hitech (oral) 1 ml — morning, empty stomach. De-worming + fungus. | pregnant does, kits under 3 months |
+| 13, 14, 15 | Liv 52 1 ml oral — liver tonic after the Hitech course. | kits under 3 months (in feed is fine) |
+| 13, 14, 15 | Gutwell — a pinch into the mouth, morning, empty stomach. | — |
+| 16 | Tetracycline — 1 g per litre of drinking water. Critical in the rainy season. | — |
 
 Standing, printed on every routine task and on the routine screen, never raised
 as a daily task: *Agrimin Forte 1 g per adult breeder in the morning feed, daily*;
@@ -147,10 +150,11 @@ as a daily task: *Agrimin Forte 1 g per adult breeder in the morning feed, daily
 ### Mechanism
 
 - `task_kind_t` gains `routine` (own migration, enum rule).
-- `generate_due_tasks()` job 11: for every farm whose local date is day 1–7,
-  insert the routine tasks whose `due_on ≥ farm_today`, `generated_key =
-  'routine:' || farm_id || ':' || yyyy-mm || ':' || step`. A farm that joins on
-  day 5 gets days 5–7; a farm that joins on day 20 waits for next month.
+- `generate_routine_tasks()`: for every farm, insert this month's routine tasks
+  whose `due_on ≥ farm_today`, `generated_key = 'routine:' || farm_id || ':' ||
+  yyyy-mm || ':' || step`. A farm that joins on the 10th gets the 13th onward; a
+  farm that joins on the 20th waits for next month. (Until 0045 this was
+  confined to days 1–7.)
   Priority `high`; `rabbit_id` NULL (the daily list already renders rabbit-less
   tasks).
 - `generate_notifications()` task arm: `routine` tasks notify regardless of
