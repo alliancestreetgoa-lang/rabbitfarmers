@@ -317,6 +317,14 @@ export interface RoutinePlan {
 
 export type StaffRole = 'owner' | 'manager' | 'caretaker' | 'vet' | 'accountant';
 
+/** The farm's own rules (GET/PATCH /settings). Only what the app edits is typed. */
+export interface FarmSettings {
+  rebreed_anchor: 'kindling' | 'weaning';
+  rebreed_after_kindling_days: number;
+  rebreed_after_weaning_days: number;
+  timezone?: string;
+}
+
 /** One month of pay, computed from attendance by the server. */
 export interface PayMonth {
   month: string;             // '2026-08'

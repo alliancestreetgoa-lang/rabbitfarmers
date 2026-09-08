@@ -17,6 +17,8 @@ export default function More() {
   const failed = pending.filter((p) => p.failed);
   const role = data?.user?.role ?? session?.user?.role ?? '';
   const canSeeTeam = ['owner', 'manager', 'accountant'].includes(role);
+  // Settings are the farm's rules: the owner's and the manager's (settings:write).
+  const canSeeSettings = ['owner', 'manager'].includes(role);
 
   return (
     <Screen>
@@ -68,6 +70,13 @@ export default function More() {
           <Pressable style={s.action} onPress={() => router.push('/(app)/team')}
                      testID="open-team">
             <Text style={s.actionText}>Team and attendance</Text>
+          </Pressable>
+        )}
+
+        {canSeeSettings && (
+          <Pressable style={s.action} onPress={() => router.push('/(app)/settings' as never)}
+                     testID="open-settings">
+            <Text style={s.actionText}>Settings</Text>
           </Pressable>
         )}
 

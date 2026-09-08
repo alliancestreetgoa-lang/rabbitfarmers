@@ -23,6 +23,7 @@ const NAV = [
   { to: '/dashboard/health', label: 'Health' },
   { to: '/dashboard/team', label: 'Team', staffOnly: true },
   { to: '/dashboard/attendance', label: 'Attendance', staffOnly: true },
+  { to: '/dashboard/settings', label: 'Settings', settingsOnly: true },
 ];
 
 /**
@@ -31,6 +32,8 @@ const NAV = [
  * server enforces this, the nav simply stops offering doors that will not open.
  */
 export const seesTeam = (role: string) => ['owner', 'manager', 'accountant'].includes(role);
+/** Settings are the farm's rules: the owner's and the manager's to change (settings:write). */
+export const seesSettings = (role: string) => ['owner', 'manager'].includes(role);
 
 export function Shell({ farmName, userName, userRole, children }: {
   farmName: string; userName: string; userRole: string; children: React.ReactNode;
@@ -95,7 +98,8 @@ export function Shell({ farmName, userName, userRole, children }: {
           </div>
         </div>
         <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-6 pt-2">
-          {NAV.filter((n) => !n.staffOnly || seesTeam(userRole)).map((n) => (
+          {NAV.filter((n) => (!n.staffOnly || seesTeam(userRole))
+                          && (!n.settingsOnly || seesSettings(userRole))).map((n) => (
             <NavLink key={n.to} to={n.to} end={n.end}
               className={({ isActive }) =>
                 `whitespace-nowrap border-b-2 px-3 pb-2 text-sm font-semibold transition-colors ${

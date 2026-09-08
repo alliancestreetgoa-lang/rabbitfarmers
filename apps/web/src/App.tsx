@@ -9,6 +9,7 @@ import { LittersPage } from '@/pages/litters';
 import { HealthPage } from '@/pages/health';
 import { TeamPage, TeamPersonPage } from '@/pages/team';
 import { AttendancePage } from '@/pages/attendance';
+import { SettingsPage } from '@/pages/settings';
 import { SickPage, RabbitHealthPage } from '@/pages/sick';
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/dashboard/team" element={<TeamPage />} />
         <Route path="/dashboard/team/:personId" element={<TeamPersonPage />} />
         <Route path="/dashboard/attendance" element={<AttendancePage />} />
+        <Route path="/dashboard/settings" element={<SettingsPage />} />
         <Route path="/signup" element={<SignUpPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

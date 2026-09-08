@@ -1,6 +1,7 @@
 import type { Storage } from './storage.ts';
 import { MemoryStorage } from './storage.ts';
 import type {
+  FarmSettings,
   Animal, Breed, BuckSuggestion, Cage, ConditionType, DailyItem, HistoryEvent, Litter, MatingSchedule,
   MedicationDose, OpenCondition, PregnancySummary, PregnantDoe, RabbitLifetime,
   ReadyDoe, RoutinePlan, TreatmentStep,
@@ -620,6 +621,16 @@ export class ApiClient {
   /** This month's whole-farm round, with what has been done. */
   routine() {
     return this.request<RoutinePlan>('GET', '/routine');
+  }
+
+  /** The farm's rules. */
+  settings() {
+    return this.request<{ settings: FarmSettings }>('GET', '/settings');
+  }
+
+  /** Change a rule: the owner's and the manager's to do. */
+  updateSettings(patch: Partial<FarmSettings>) {
+    return this.request<{ settings: FarmSettings }>('PATCH', '/settings', patch);
   }
 
   /** A whole-farm task (a routine day) is finished. */

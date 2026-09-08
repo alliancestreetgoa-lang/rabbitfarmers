@@ -63,7 +63,7 @@ async function notificationsFor(farmId) {
 }
 
 describe('task generation', () => {
-  test('creates the palpation task in the day 10-14 window', async () => {
+  test('the farm does not palpate: no task is raised in the day 10-14 window, ever', async () => {
     const f = await farmWithDoe();
     await api('POST', '/matings', {
       token: f.token, body: { doe_id: f.doe, buck_id: f.buck, mated_at: daysAgo(11) },
@@ -71,11 +71,8 @@ describe('task generation', () => {
 
     await runScheduler({ triggeredBy: 'test' });
     const tasks = await tasksFor(f.farm.id);
-    const palpate = tasks.find((t) => t.kind === 'palpate');
-    assert.ok(palpate, 'expected a palpation task');
-    assert.equal(palpate.due_on, dateAgo(11 - 12 < 0 ? -1 : 0) && palpate.due_on,
-      'due date is computed from the mating, not from today');
-    assert.match(palpate.title, /Palpate Lakshmi/);
+    assert.ok(!tasks.some((t) => t.kind === 'palpate'),
+      '"I don\'t want to see a notification for Palpate" (0049)');
   });
 
   test('creates the nest box task on day 28 and marks it critical', async () => {
@@ -793,5 +790,92 @@ describe('the monthly routine, rabbit by rabbit', () => {
     const after = await api('GET', '/medication', { token: f.token });
     assert.equal(mine(after).length, 3);
     assert.ok(!mine(after).some((d) => d.rabbit_id === f.open));
+  });
+});
+
+/**
+ * Rebreeding after delivery, on the farm's own rule. Settings offers two
+ * gaps — 16 days or 32 days after kindling — and on that day the doe is on
+ * the list to be served again, and every phone is told.
+ */
+describe('rebreeding after delivery', () => {
+  async function farmWithLitter(kindledDaysAgo, { gap = 32, anchor = 'kindling' } = {}) {
+    const f = await farmWithDoe();
+    await adminQuery(
+      `UPDATE farm_settings SET quiet_hours_enabled = false WHERE farm_id = $1`, [f.farm.id]);
+    const set = await api('PATCH', '/settings', {
+      token: f.token, body: { rebreed_anchor: anchor, rebreed_after_kindling_days: gap },
+    });
+    assert.equal(set.status, 200, set.text);
+    const m = await api('POST', '/matings', {
+      token: f.token, body: { doe_id: f.doe, buck_id: f.buck, mated_at: daysAgo(kindledDaysAgo + 31) },
+    });
+    const litter = await api('POST', '/litters', {
+      token: f.token,
+      body: { mating_id: m.body.mating.id, doe_id: f.doe, kindled_on: dateAgo(kindledDaysAgo), born_alive: 8 },
+    });
+    assert.equal(litter.status, 201, litter.text);
+    return { ...f, kindledOn: dateAgo(kindledDaysAgo) };
+  }
+  const breedTasks = async (farmId) => (await adminQuery(
+    `SELECT title, due_on::text AS due_on, status, generated_key FROM task
+      WHERE farm_id = $1 AND kind = 'breed' ORDER BY due_on`, [farmId])).rows;
+
+  test('the setting is the farm\'s to choose: 16 or 32 days after kindling', async () => {
+    const f = await farmWithDoe();
+    const set = await api('PATCH', '/settings', {
+      token: f.token, body: { rebreed_anchor: 'kindling', rebreed_after_kindling_days: 16 },
+    });
+    assert.equal(set.status, 200, set.text);
+    assert.equal(set.body.settings.rebreed_anchor, 'kindling');
+    assert.equal(set.body.settings.rebreed_after_kindling_days, 16);
+    const got = await api('GET', '/settings', { token: f.token });
+    assert.equal(got.body.settings.rebreed_after_kindling_days, 16);
+  });
+
+  test('on the 32nd day after kindling, she is on the list to be served', async () => {
+    const f = await farmWithLitter(32);
+    await inPass(`SELECT generate_rebreed_tasks()`);
+    const tasks = await breedTasks(f.farm.id);
+    assert.equal(tasks.length, 1, JSON.stringify(tasks));
+    assert.match(tasks[0].title, /Rebreed Lakshmi — 32 days after kindling/);
+    assert.equal(tasks[0].due_on, dateAgo(0), '32 days after the kindling is today');
+  });
+
+  test('16 days when the farm says 16', async () => {
+    const f = await farmWithLitter(16, { gap: 16 });
+    await inPass(`SELECT generate_rebreed_tasks()`);
+    const tasks = await breedTasks(f.farm.id);
+    assert.equal(tasks.length, 1);
+    assert.match(tasks[0].title, /16 days after kindling/);
+  });
+
+  test('not before the day, and not for a doe already served again', async () => {
+    const early = await farmWithLitter(20);
+    await inPass(`SELECT generate_rebreed_tasks()`);
+    assert.equal((await breedTasks(early.farm.id)).length, 0, 'day 20 of 32: nothing yet');
+
+    const served = await farmWithLitter(40);
+    await api('POST', '/matings', {
+      token: served.token, body: { doe_id: served.doe, buck_id: served.buck, mated_at: daysAgo(5) },
+    });
+    await inPass(`SELECT generate_rebreed_tasks()`);
+    assert.equal((await breedTasks(served.farm.id)).length, 0, 'she is back in a cycle');
+  });
+
+  test('a farm on the separate-then-rebreed rule is left to that rule', async () => {
+    const f = await farmWithLitter(32, { anchor: 'weaning' });
+    await inPass(`SELECT generate_rebreed_tasks()`);
+    assert.equal((await breedTasks(f.farm.id)).length, 0);
+  });
+
+  test('the day it is due, every phone is told, once', async () => {
+    const f = await farmWithLitter(32);
+    await inPass(`SELECT generate_rebreed_tasks()`);
+    await inPass(`SELECT generate_breed_notifications()`);
+    await inPass(`SELECT generate_breed_notifications()`);
+    const notes = (await notificationsFor(f.farm.id)).filter((n) => /Rebreed/.test(n.title));
+    assert.equal(notes.length, 1, JSON.stringify(notes));
+    assert.equal(notes[0].kind, 'task_due');
   });
 });
