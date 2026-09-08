@@ -29,6 +29,7 @@ export default function RootLayout() {
         <Stack.Screen name="(app)/herd" options={{ title: 'Herd' }} />
         <Stack.Screen name="(app)/breeding" options={{ title: 'Breeding' }} />
         <Stack.Screen name="(app)/more" options={{ title: 'More' }} />
+        <Stack.Screen name="(app)/settings" options={{ title: 'Settings' }} />
         <Stack.Screen name="(app)/team" options={{ title: 'Team' }} />
         <Stack.Screen name="(app)/animal" options={{ title: 'Rabbit' }} />
         <Stack.Screen name="record/mating" options={{ title: 'Record a mating' }} />
