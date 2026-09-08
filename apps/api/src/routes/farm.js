@@ -91,7 +91,11 @@ farmRoutes.get('/animals', canRead, async (c) => {
         AND ($1::text IS NULL OR r.sex::text = $1)
         AND ($2::text IS NULL OR r.role::text = $2)
         AND ($3::text IS NULL OR r.tag ILIKE '%'||$3||'%' OR r.name ILIKE '%'||$3||'%')
-      ORDER BY r.tag`, [sex ?? null, role ?? null, q ?? null, include]);
+      -- Number order, the way the farm names them: F1, F2 … F10, then M1.
+      -- Plain text order would put F10 between F1 and F2.
+      ORDER BY lower(regexp_replace(r.tag, '[^A-Za-z]', '', 'g')),
+               NULLIF(left(regexp_replace(r.tag, '[^0-9]', '', 'g'), 18), '')::bigint NULLS FIRST,
+               r.tag`, [sex ?? null, role ?? null, q ?? null, include]);
     return rows;
   });
   return c.json({ animals: rows });

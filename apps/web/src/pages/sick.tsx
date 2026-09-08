@@ -42,6 +42,14 @@ export function SickPage() {
   const [doses, setDoses] = useState<Dose[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // The sick ones on top, then those with a dose owing, then the rest in the
+  // herd's own order. That is what the screen is for.
+  const isSick = (id: string) => conditions.some((c) => c.rabbit_id === id);
+  const owesDose = (id: string) => doses.some((d) => d.rabbit_id === id);
+  const sickFirst = [...(animals ?? [])].sort((x, y) =>
+    (Number(isSick(y.id)) - Number(isSick(x.id)))
+    || (Number(owesDose(y.id)) - Number(owesDose(x.id))));
+
   useEffect(() => {
     Promise.all([
       apiGet<{ animals: Animal[] }>('/animals').then((d) => setAnimals(d.animals)),
@@ -58,7 +66,7 @@ export function SickPage() {
       {animals?.length === 0 && <Empty>No rabbits yet.</Empty>}
       {animals && animals.length > 0 && (
         <Table head={['Rabbit', 'State', 'Sickness now', 'Medicine pending']}>
-          {animals.map((a) => {
+          {sickFirst.map((a) => {
             const sick = conditions.filter((c) => c.rabbit_id === a.id);
             const pending = doses.filter((d) => d.rabbit_id === a.id);
             return (

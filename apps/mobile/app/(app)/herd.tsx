@@ -3,11 +3,16 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, Vie
 import { router } from 'expo-router';
 import { useApp, useQuery } from '../../src/state';
 import { TabBar } from '../../src/ui/nav';
-import { ConditionMark, Empty, H1, Loading, Screen } from '../../src/ui/components';
+import { ConditionMark, Empty, H1, Label, Loading, Screen } from '../../src/ui/components';
 import { sexLabel } from '../../src/ui/labels';
 import { STATE_LABEL, colors, radius, space, type as t } from '../../src/ui/theme';
 
 const GONE = ['sold', 'culled', 'dead'];
+
+/** One group per sex — females first, they are most of the herd. */
+const GROUPS: [string, string | null][] = [
+  ['FEMALES', 'doe'], ['MALES', 'buck'], ['NOT SEXED YET', null],
+];
 
 export default function Herd() {
   const { client, readOnly } = useApp();
@@ -60,7 +65,14 @@ export default function Herd() {
             : 'No rabbits yet.\nAdd your first one below.'} />
         )}
 
-        {animals.map((a) => (
+        {GROUPS.map(([label, sex]) => {
+          const list = animals.filter((a) =>
+            sex ? a.sex === sex : a.sex !== 'doe' && a.sex !== 'buck');
+          if (!list.length) return null;
+          return (
+        <View key={label}>
+        <Label>{`${label} · ${list.length}`}</Label>
+        {list.map((a) => (
           <Pressable
             key={a.id}
             testID={`animal-${a.id}`}
@@ -85,6 +97,9 @@ export default function Herd() {
             </View>
           </Pressable>
         ))}
+        </View>
+          );
+        })}
 
         {!past && !readOnly && (
           <>

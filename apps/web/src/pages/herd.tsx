@@ -22,6 +22,11 @@ const STATE_LABEL: Record<string, string> = {
   PSEUDOPREGNANT: 'False pregnancy', OPEN: 'Resting', RESTING: 'Resting', OVERDUE: 'Overdue',
 };
 
+/** One card per sex — females first, they are most of the herd. */
+const GROUPS: [string, string | null][] = [
+  ["Females", "doe"], ["Males", "buck"], ["Not sexed yet", null],
+];
+
 export function HerdPage() {
   const id = useIdentity();
   const [animals, setAnimals] = useState<Animal[] | null>(null);
@@ -96,9 +101,14 @@ export function HerdPage() {
         <Empty>No rabbits yet — add your first with the button above.</Empty>
       )}
 
-      {shown.length > 0 && (
+      {GROUPS.map(([label, sex]) => {
+        const list = shown.filter((a) =>
+          sex ? a.sex === sex : a.sex !== 'doe' && a.sex !== 'buck');
+        if (!list.length) return null;
+        return (
+        <Section key={label} title={`${label} · ${list.length}`}>
         <Table head={['Name', 'Sex', 'State', 'Born', 'Breed', 'Cage', 'Health', '']}>
-          {shown.map((a) => (
+          {list.map((a) => (
             <tr key={a.id} className="border-b border-farm-rule last:border-0 hover:bg-farm-ground">
               <td className="px-4 py-2.5">
                 <Link to={`/dashboard/herd/${a.id}`} className="font-semibold text-farm-accent">
@@ -125,7 +135,9 @@ export function HerdPage() {
             </tr>
           ))}
         </Table>
-      )}
+        </Section>
+        );
+      })}
     </Shell>
   );
 }

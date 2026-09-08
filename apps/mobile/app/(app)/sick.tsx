@@ -15,6 +15,16 @@ export default function Sick() {
   const loading = animals.loading || conditions.loading;
   const reload = () => { animals.reload(); conditions.reload(); doses.reload(); };
 
+  // The sick ones on top, then those with a dose owing, then the rest in the
+  // herd's own order. That is what the screen is for.
+  const open = conditions.data?.open ?? [];
+  const due = doses.data?.due ?? [];
+  const isSick = (id: string) => open.some((c) => c.rabbit_id === id);
+  const owesDose = (id: string) => due.some((d) => d.rabbit_id === id);
+  const sickFirst = [...(animals.data?.animals ?? [])].sort((x, y) =>
+    (Number(isSick(y.id)) - Number(isSick(x.id)))
+    || (Number(owesDose(y.id)) - Number(owesDose(x.id))));
+
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ padding: space.lg, paddingBottom: space.xxl }}
@@ -22,7 +32,7 @@ export default function Sick() {
         <H1>Sick rabbit</H1>
         <Muted>Every rabbit's health record. Tap one to see everything.</Muted>
         <View style={{ height: space.md }} />
-        {(animals.data?.animals ?? []).map((a) => {
+        {sickFirst.map((a) => {
           const sick = (conditions.data?.open ?? []).filter((c) => c.rabbit_id === a.id);
           const pending = (doses.data?.due ?? []).filter((d) => d.rabbit_id === a.id);
           return (
